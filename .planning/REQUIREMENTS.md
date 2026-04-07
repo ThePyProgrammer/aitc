@@ -120,53 +120,53 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| FMON-01 | — | Pending |
-| FMON-02 | — | Pending |
-| FMON-03 | — | Pending |
-| FMON-04 | — | Pending |
-| FMON-05 | — | Pending |
-| AGNT-01 | — | Pending |
-| AGNT-02 | — | Pending |
-| AGNT-03 | — | Pending |
-| AGNT-04 | — | Pending |
-| AGNT-05 | — | Pending |
-| AGNT-06 | — | Pending |
-| AGNT-07 | — | Pending |
-| CNFL-01 | — | Pending |
-| CNFL-02 | — | Pending |
-| CNFL-03 | — | Pending |
-| CNFL-04 | — | Pending |
-| CNFL-05 | — | Pending |
-| CNFL-06 | — | Pending |
-| COMM-01 | — | Pending |
-| COMM-02 | — | Pending |
-| COMM-03 | — | Pending |
-| COMM-04 | — | Pending |
-| COMM-05 | — | Pending |
-| COMM-06 | — | Pending |
-| VIZN-01 | — | Pending |
-| VIZN-02 | — | Pending |
-| VIZN-03 | — | Pending |
-| VIZN-04 | — | Pending |
-| VIZN-05 | — | Pending |
-| DSGN-01 | — | Pending |
-| DSGN-02 | — | Pending |
-| DSGN-03 | — | Pending |
-| DSGN-04 | — | Pending |
-| HIST-01 | — | Pending |
-| HIST-02 | — | Pending |
-| HIST-03 | — | Pending |
-| HIST-04 | — | Pending |
-| SHELL-01 | — | Pending |
-| SHELL-02 | — | Pending |
-| SHELL-03 | — | Pending |
-| SHELL-04 | — | Pending |
+| FMON-01 | Phase 2 | Pending |
+| FMON-02 | Phase 2 | Pending |
+| FMON-03 | Phase 2 | Pending |
+| FMON-04 | Phase 2 | Pending |
+| FMON-05 | Phase 5 | Pending |
+| AGNT-01 | Phase 3 | Pending |
+| AGNT-02 | Phase 3 | Pending |
+| AGNT-03 | Phase 3 | Pending |
+| AGNT-04 | Phase 3 | Pending |
+| AGNT-05 | Phase 3 | Pending |
+| AGNT-06 | Phase 3 | Pending |
+| AGNT-07 | Phase 3 | Pending |
+| CNFL-01 | Phase 3 | Pending |
+| CNFL-02 | Phase 3 | Pending |
+| CNFL-03 | Phase 5 | Pending |
+| CNFL-04 | Phase 5 | Pending |
+| CNFL-05 | Phase 5 | Pending |
+| CNFL-06 | Phase 3 | Pending |
+| COMM-01 | Phase 4 | Pending |
+| COMM-02 | Phase 4 | Pending |
+| COMM-03 | Phase 4 | Pending |
+| COMM-04 | Phase 4 | Pending |
+| COMM-05 | Phase 4 | Pending |
+| COMM-06 | Phase 4 | Pending |
+| VIZN-01 | Phase 4 | Pending |
+| VIZN-02 | Phase 4 | Pending |
+| VIZN-03 | Phase 5 | Pending |
+| VIZN-04 | Phase 4 | Pending |
+| VIZN-05 | Phase 4 | Pending |
+| DSGN-01 | Phase 1 | Pending |
+| DSGN-02 | Phase 1 | Pending |
+| DSGN-03 | Phase 1 | Pending |
+| DSGN-04 | Phase 1 | Pending |
+| HIST-01 | Phase 5 | Pending |
+| HIST-02 | Phase 5 | Pending |
+| HIST-03 | Phase 5 | Pending |
+| HIST-04 | Phase 5 | Pending |
+| SHELL-01 | Phase 1 | Pending |
+| SHELL-02 | Phase 1 | Pending |
+| SHELL-03 | Phase 1 | Pending |
+| SHELL-04 | Phase 1 | Pending |
 
 **Coverage:**
-- v1 requirements: 40 total
-- Mapped to phases: 0
-- Unmapped: 40
+- v1 requirements: 41 total
+- Mapped to phases: 41
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-07*
-*Last updated: 2026-04-07 after initial definition*
+*Last updated: 2026-04-07 after roadmap creation*

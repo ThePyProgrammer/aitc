@@ -1,0 +1,95 @@
+# Roadmap: AI Traffic Controller
+
+## Overview
+
+AITC is built bottom-up following its dependency chain: a Tauri + React shell with design system tokens (Phase 1), then the Rust-powered real-time data pipeline for file watching and process monitoring (Phase 2), then agent management and conflict detection services (Phase 3), then the four core UI views that consume those services (Phase 4), and finally the complex conflict resolution UI, session history, and heat map polish (Phase 5). Each phase delivers a coherent, independently verifiable capability. The critical path runs through file watcher -> conflict engine -> conflict resolution UI.
+
+## Phases
+
+**Phase Numbering:**
+- Integer phases (1, 2, 3): Planned milestone work
+- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+
+Decimal phases appear between their surrounding integers in numeric order.
+
+- [ ] **Phase 1: Foundation + App Shell** - Tauri v2 scaffold, React routing across 4 views, SQLite persistence layer, Command Horizon design system
+- [ ] **Phase 2: Real-Time Data Pipeline** - Rust file watcher with debouncing/reconciliation, process monitoring, event batching over IPC
+- [ ] **Phase 3: Agent Management + Conflict Detection** - Agent registry with adapter architecture, launch/observe agents, conflict detection engine
+- [ ] **Phase 4: Core UI Views** - Tower Control manifest, Communications Hub, Airspace Radar visualization, system tray notifications
+- [ ] **Phase 5: Conflict Resolution + History** - 3-way merge UI, session/conflict/approval history, file heat map, final polish
+
+## Phase Details
+
+### Phase 1: Foundation + App Shell
+**Goal**: Developer can launch AITC and navigate between four styled views in a native desktop window with system tray presence
+**Depends on**: Nothing (first phase)
+**Requirements**: SHELL-01, SHELL-02, SHELL-03, SHELL-04, DSGN-01, DSGN-02, DSGN-03, DSGN-04
+**Success Criteria** (what must be TRUE):
+  1. App launches as a native Tauri v2 desktop window with system tray icon
+  2. User can navigate between four views (Radar, Tower, Comms, Conflicts) via sidebar
+  3. All views render with Command Horizon design system -- dark room aesthetic, phosphor greens, zero-radius corners, Space Grotesk + monospace typography, radar pulse animations for status indicators
+  4. User can open a command palette for quick navigation
+  5. SQLite database exists with schema and migrations applied on first launch
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 2: Real-Time Data Pipeline
+**Goal**: System can watch a repository directory tree in real time, attribute file events to processes, and stream batched events to the frontend without data loss
+**Depends on**: Phase 1
+**Requirements**: FMON-01, FMON-02, FMON-03, FMON-04
+**Success Criteria** (what must be TRUE):
+  1. File read/write events across a repository are captured in real time by the Rust backend using filesystem watchers
+  2. File events are attributed to specific agent processes via PID correlation
+  3. System handles 10k+ file codebases without excessive CPU/memory (debouncing and event batching active)
+  4. System detects whether agents share a working tree or use isolated git worktrees
+**Plans**: TBD
+
+### Phase 3: Agent Management + Conflict Detection
+**Goal**: User can see, launch, and control agents from a live manifest, and the system detects file conflicts between concurrent agents in real time
+**Depends on**: Phase 2
+**Requirements**: AGNT-01, AGNT-02, AGNT-03, AGNT-04, AGNT-05, AGNT-06, AGNT-07, CNFL-01, CNFL-02, CNFL-06
+**Success Criteria** (what must be TRUE):
+  1. User can view a live manifest of all active agents showing ID, protocol type, status (Running/Idle/Waiting/Conflict/Error), and current file path
+  2. User can launch new Claude Code, Codex, or OpenCode sessions from within the app and stop/terminate running agents
+  3. System detects externally-launched agent processes already running on the codebase
+  4. When two agents write to the same file within the conflict window, the system immediately alerts the user with a visual indicator and notification
+  5. Agent adapter architecture is extensible -- new agent types can be added without modifying core logic
+**Plans**: TBD
+
+### Phase 4: Core UI Views
+**Goal**: User can approve/deny agent requests from a communications hub, view agents spatially on a codebase radar, and receive native OS notifications for urgent events
+**Depends on**: Phase 3
+**Requirements**: COMM-01, COMM-02, COMM-03, COMM-04, COMM-05, COMM-06, VIZN-01, VIZN-02, VIZN-04, VIZN-05
+**Success Criteria** (what must be TRUE):
+  1. User sees a queue of pending approval requests with file paths and code diff previews, and can approve, deny, ask for more info, or approve-with-edit
+  2. User can send freeform text messages to an agent via the Communications Hub chat interface
+  3. User can view a 2D spatial radar plotting agents as dots on a file-tree-based codebase map with trajectory lead lines
+  4. Radar renders performantly via Canvas 2D for codebases with 10k+ files
+  5. Native OS notifications and system tray alerts fire when an agent requires user action
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 5: Conflict Resolution + History
+**Goal**: User can resolve file conflicts via a 3-way merge UI with agent intent context, browse past sessions and conflicts, and see cross-agent file contention at a glance
+**Depends on**: Phase 4
+**Requirements**: CNFL-03, CNFL-04, CNFL-05, FMON-05, VIZN-03, HIST-01, HIST-02, HIST-03, HIST-04
+**Success Criteria** (what must be TRUE):
+  1. User can view a 3-way merge UI showing Agent A changes, base file, and Agent B changes side by side, with agent intent displayed alongside code diffs
+  2. User can accept changes per-hunk from either agent or manually edit the resolution
+  3. File heat map overlay on the radar shows contention intensity across the codebase
+  4. User can browse past agent sessions, resolved conflicts, and approval decision history from the app
+**Plans**: TBD
+**UI hint**: yes
+
+## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 1. Foundation + App Shell | 0/0 | Not started | - |
+| 2. Real-Time Data Pipeline | 0/0 | Not started | - |
+| 3. Agent Management + Conflict Detection | 0/0 | Not started | - |
+| 4. Core UI Views | 0/0 | Not started | - |
+| 5. Conflict Resolution + History | 0/0 | Not started | - |
