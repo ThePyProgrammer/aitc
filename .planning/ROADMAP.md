@@ -30,7 +30,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. All views render with Command Horizon design system -- dark room aesthetic, phosphor greens, zero-radius corners, Space Grotesk + monospace typography, radar pulse animations for status indicators
   4. User can open a command palette for quick navigation
   5. SQLite database exists with schema and migrations applied on first launch
-**Plans**: TBD
+**Plans:** 4 plans
+Plans:
+- [ ] 01-01-PLAN.md -- Scaffold Tauri v2 project, Command Horizon design tokens, test infrastructure
+- [ ] 01-02-PLAN.md -- Rust backend (tray, SQLite, splash screen) and app shell layout (titlebar, sidebar, routing)
+- [ ] 01-03-PLAN.md -- Animated view empty states, reusable UI components, command palette
+- [ ] 01-04-PLAN.md -- Component tests and visual verification checkpoint
 **UI hint**: yes
 
 ### Phase 2: Real-Time Data Pipeline
@@ -88,7 +93,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation + App Shell | 0/0 | Not started | - |
+| 1. Foundation + App Shell | 0/4 | Planning complete | - |
 | 2. Real-Time Data Pipeline | 0/0 | Not started | - |
 | 3. Agent Management + Conflict Detection | 0/0 | Not started | - |
 | 4. Core UI Views | 0/0 | Not started | - |
