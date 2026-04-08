@@ -7,15 +7,19 @@ pub async fn init_db(
     let app_dir = app
         .path()
         .app_data_dir()
-        .expect("failed to get app data dir");
-    std::fs::create_dir_all(&app_dir).expect("failed to create app data dir");
+        .map_err(|e| format!("failed to get app data dir: {e}"))?;
+    std::fs::create_dir_all(&app_dir)
+        .map_err(|e| format!("failed to create app data dir: {e}"))?;
 
     let db_path = app_dir.join("aitc.db");
-    let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
+
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(&db_path)
+        .create_if_missing(true);
 
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
-        .connect(&db_url)
+        .connect_with(options)
         .await?;
 
     // Run embedded migrations
