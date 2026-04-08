@@ -15,22 +15,22 @@ pub fn run() {
             // SQLite database
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                // Initialize DB; capture success/failure before any .await
-                let db_ok = match db::init_db(&app_handle).await {
-                    Ok(pool) => {
-                        app_handle.manage(pool);
-                        true
-                    }
+                // Initialize DB — exit on failure since app cannot function without it
+                let pool = match db::init_db(&app_handle).await {
+                    Ok(pool) => pool,
                     Err(e) => {
                         eprintln!("Failed to initialize database: {}", e);
-                        false
+                        if let Some(splash) = app_handle.get_webview_window("splashscreen") {
+                            let _ = splash.close();
+                        }
+                        app_handle.exit(1);
+                        return;
                     }
                 };
+                app_handle.manage(pool);
 
-                if db_ok {
-                    // Wait 2 seconds for branded splash display (D-14)
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                }
+                // Wait 2 seconds for branded splash display (D-14)
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
                 // Close splash, show main
                 if let Some(splash) = app_handle.get_webview_window("splashscreen") {
