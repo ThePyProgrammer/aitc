@@ -29,10 +29,11 @@ export function RadarPulse({ size = 'md', color = 'primary' }: RadarPulseProps) 
   return (
     <div className={`relative inline-flex items-center justify-center ${sizes.container}`}>
       {/* Central dot */}
-      <div className={`${sizes.dot} ${dotColor} z-10`} />
+      <div data-testid="pulse-dot" className={`${sizes.dot} ${dotColor} z-10`} />
 
       {/* First ping ring - 30% opacity */}
       <div
+        data-testid="pulse-ring"
         className={`absolute ${sizes.ring1} border ${ringColor} opacity-30`}
         style={{
           animation: 'ping-scale 2s cubic-bezier(0, 0, 0.2, 1) infinite',
@@ -42,6 +43,7 @@ export function RadarPulse({ size = 'md', color = 'primary' }: RadarPulseProps) 
 
       {/* Second ping ring - 20% opacity, delayed */}
       <div
+        data-testid="pulse-ring"
         className={`absolute ${sizes.ring2} border ${ringColor} opacity-20`}
         style={{
           animation: 'ping-scale 2s cubic-bezier(0, 0, 0.2, 1) infinite',
