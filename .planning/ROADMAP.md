@@ -32,10 +32,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. SQLite database exists with schema and migrations applied on first launch
 **Plans:** 4 plans
 Plans:
-- [ ] 01-01-PLAN.md -- Scaffold Tauri v2 project, Command Horizon design tokens, test infrastructure
-- [ ] 01-02-PLAN.md -- Rust backend (tray, SQLite, splash screen) and app shell layout (titlebar, sidebar, routing)
-- [ ] 01-03-PLAN.md -- Animated view empty states, reusable UI components, command palette
-- [ ] 01-04-PLAN.md -- Component tests and visual verification checkpoint
+- [x] 01-01-PLAN.md -- Scaffold Tauri v2 project, Command Horizon design tokens, test infrastructure
+- [x] 01-02-PLAN.md -- Rust backend (tray, SQLite, splash screen) and app shell layout (titlebar, sidebar, routing)
+- [x] 01-03-PLAN.md -- Animated view empty states, reusable UI components, command palette
+- [x] 01-04-PLAN.md -- Component tests and visual verification checkpoint
 **UI hint**: yes
 
 ### Phase 2: Real-Time Data Pipeline
