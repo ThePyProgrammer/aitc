@@ -1,0 +1,69 @@
+@import "tailwindcss";
+@import "./fonts.css";
+@import "./animations.css";
+
+@theme {
+  /* Surface hierarchy (60% - dominant) */
+  --color-surface: #0e0e0e;
+  --color-surface-dim: #0e0e0e;
+  --color-surface-bright: #2c2c2c;
+  --color-surface-container-lowest: #000000;
+  --color-surface-container-low: #131313;
+  --color-surface-container: #1a1919;
+  --color-surface-container-high: #201f1f;
+  --color-surface-container-highest: #262626;
+  --color-surface-variant: #262626;
+
+  /* Accent colors (10% - signal) */
+  --color-primary: #8eff71;
+  --color-primary-dim: #2be800;
+  --color-primary-container: #2ff801;
+  --color-on-primary: #0d6100;
+  --color-secondary: #00cffc;
+  --color-secondary-container: #00677f;
+  --color-on-secondary: #004050;
+  --color-tertiary: #ffd16f;
+  --color-tertiary-container: #ffbf00;
+  --color-on-tertiary: #614700;
+  --color-error: #ff7351;
+  --color-error-dim: #d53d18;
+  --color-error-container: #b92902;
+  --color-on-error: #450900;
+
+  /* Text colors (30% - secondary) */
+  --color-on-surface: #ffffff;
+  --color-on-surface-variant: #adaaaa;
+  --color-outline: #777575;
+  --color-outline-variant: #494847;
+  --color-on-background: #ffffff;
+  --color-background: #0e0e0e;
+
+  /* Typography */
+  --font-headline: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Spacing scale */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+  --spacing-3xl: 64px;
+}
+
+/* Global resets for Command Horizon */
+* {
+  border-radius: 0 !important; /* Zero-radius corners everywhere */
+}
+
+body {
+  @apply bg-surface text-on-surface-variant font-mono text-sm;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* No-Line Rule: remove default borders */
+*, ::before, ::after {
+  border-color: transparent;
+}

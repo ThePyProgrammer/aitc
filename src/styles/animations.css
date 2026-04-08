@@ -1,0 +1,25 @@
+/* Radar ping pulse (DSGN-03) -- 2s infinite */
+@keyframes ping-scale {
+  75%, 100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+
+/* Scanline sweep ambient effect -- 4s linear infinite */
+@keyframes scan {
+  0% { top: 0; }
+  100% { top: 100%; }
+}
+
+/* Phosphor transition -- 150ms fade in */
+@keyframes phosphor-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
