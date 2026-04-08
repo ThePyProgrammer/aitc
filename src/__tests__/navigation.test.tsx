@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { useSidebarStore } from '../stores/sidebarStore';
 
 describe('Navigation', () => {
+  beforeEach(() => {
+    useSidebarStore.setState({ expanded: false });
+  });
+
   it('sidebar starts in collapsed state', () => {
     const state = useSidebarStore.getState();
     expect(state.expanded).toBe(false);
