@@ -43,7 +43,10 @@ pub fn run() {
             });
 
             // Close-to-tray behavior (D-12): intercept window close
-            let window = app.get_webview_window("main").unwrap();
+            let Some(window) = app.get_webview_window("main") else {
+                eprintln!("main window not found — check tauri.conf.json window labels");
+                return Err("main window not found".into());
+            };
             window.on_window_event({
                 let window = window.clone();
                 move |event| {
