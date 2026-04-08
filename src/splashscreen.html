@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      margin: 0;
+      background: #0e0e0e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      overflow: hidden;
+      font-family: system-ui, sans-serif;
+    }
+    .splash {
+      text-align: center;
+      animation: fadeIn 0.5s ease-out;
+    }
+    .logo {
+      width: 80px;
+      height: 80px;
+      border: 2px solid #8eff71;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+    }
+    .logo-text {
+      color: #8eff71;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+    }
+    .title {
+      color: #8eff71;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .tagline {
+      color: #adaaaa;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .pulse {
+      width: 6px;
+      height: 6px;
+      background: #8eff71;
+      margin: 32px auto 0;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+  </style>
+</head>
+<body>
+  <div class="splash">
+    <div class="logo"><span class="logo-text">AT</span></div>
+    <div class="title">AI TRAFFIC CONTROLLER</div>
+    <div class="tagline">COMMAND HORIZON</div>
+    <div class="pulse"></div>
+  </div>
+</body>
+</html>

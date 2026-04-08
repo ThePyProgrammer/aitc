@@ -13,13 +13,23 @@
     "windows": [
       {
         "label": "main",
-        "visible": true,
+        "visible": false,
+        "decorations": false,
         "width": 1280,
         "height": 800,
         "minWidth": 1280,
         "minHeight": 800,
-        "decorations": true,
-        "title": "AI Traffic Controller"
+        "url": "index.html"
+      },
+      {
+        "label": "splashscreen",
+        "url": "splashscreen.html",
+        "width": 400,
+        "height": 300,
+        "decorations": false,
+        "resizable": false,
+        "center": true,
+        "transparent": false
       }
     ],
     "security": {
