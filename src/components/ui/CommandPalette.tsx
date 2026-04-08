@@ -56,12 +56,12 @@ export function CommandPalette() {
     const handler = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.key === 'P') {
         e.preventDefault();
-        setOpen(!open);
+        setOpen(true); // palette shortcut should always open, never toggle
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [open, setOpen]);
+  }, [setOpen]);
 
   // Focus input when palette opens
   useEffect(() => {
