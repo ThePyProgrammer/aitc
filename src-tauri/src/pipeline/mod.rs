@@ -16,6 +16,13 @@
 #![allow(unused_imports)]
 
 pub mod events;
+pub mod ignore_filter;
+pub mod tree_index;
+pub mod watcher;
+
+#[cfg(test)]
+pub(crate) mod test_util;
+
 #[cfg(test)]
 mod smoke_tests;
 
