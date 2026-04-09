@@ -19,6 +19,20 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "sync", "rt-multi-thread", "macros"] }
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 specta = { version = "=2.0.0-rc.22", features = ["derive"] }
+
+# Phase 2: Real-Time Data Pipeline dependencies
+notify = "8"
+# Version correction: CLAUDE.md stack listed notify-debouncer-full ^0.4 but research
+# verified 0.7 is the version that pairs with notify 8.2+ (see 02-RESEARCH.md).
+notify-debouncer-full = "0.7"
+sysinfo = "0.38"
+ignore = "0.4"
+tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+serial_test = "3"
