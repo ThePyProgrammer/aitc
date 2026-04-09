@@ -14,8 +14,8 @@ Deliver a Rust-powered real-time file watching system that monitors a repository
 ## Implementation Decisions
 
 ### Event Delivery to Frontend
-- **D-01:** Use Tauri event emission (`app.emit()` / `listen()`) for streaming batched file events to the frontend — built-in, fire-and-forget, natural fit for real-time data
-- **D-02:** Frontend subscribes via a Zustand store that updates on incoming events (follows pattern established with `sidebarStore`, `paletteStore`)
+- **D-01:** Use `tauri::ipc::Channel<T>` for streaming batched file events to the frontend — Tauri-native IPC, `Clone + Send + Sync`, designed for low-latency high-throughput streaming. **REVISED from app.emit()** after research: Tauri docs explicitly label events as "not designed for low latency or high throughput" and issue #8177 documents emit() crashes under high-frequency bursts. Channel is the documented streaming primitive and avoids data loss (Phase 2 success criterion)
+- **D-02:** Frontend subscribes via a Zustand store that updates on incoming events through the Channel's `onmessage` callback (follows store pattern established with `sidebarStore`, `paletteStore`)
 
 ### Claude's Discretion: Throttling
 - **D-03:** Claude decides the throttling strategy for incoming events (Rust-side batching vs dual Rust+frontend throttling) based on performance testing and typical event volumes
