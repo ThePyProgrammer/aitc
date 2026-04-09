@@ -1,4 +1,5 @@
 mod db;
+mod pipeline;
 mod tray;
 
 use tauri::Manager;
