@@ -52,8 +52,13 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   },
 
   terminateAgent: async (agentId) => {
-    await invoke('terminate_agent', { agentId });
-    set((s) => ({ agents: s.agents.filter((a) => a.id !== agentId) }));
+    try {
+      await invoke('terminate_agent', { agentId });
+      set((s) => ({ agents: s.agents.filter((a) => a.id !== agentId) }));
+    } catch (e) {
+      set({ error: String(e) });
+      throw e; // re-throw so caller (AgentRow) can show feedback
+    }
   },
 
   updateIntent: async (agentId, intent) => {
