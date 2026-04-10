@@ -81,7 +81,13 @@ Plans:
   3. User can view a 2D spatial radar plotting agents as dots on a file-tree-based codebase map with trajectory lead lines
   4. Radar renders performantly via Canvas 2D for codebases with 10k+ files
   5. Native OS notifications and system tray alerts fire when an agent requires user action
-**Plans**: TBD
+**Plans:** 5 plans
+Plans:
+- [ ] 04-01-PLAN.md -- Backend foundation: DB migration 002, comms Tauri commands (approval workflow + chat + protected paths), get_tree_index pipeline command
+- [ ] 04-02-PLAN.md -- Communications Hub approval core: commsStore, 3-panel layout, RequestQueue, InlineDiff with editable lines, ApprovalActions, PendingCountBadge
+- [ ] 04-03-PLAN.md -- Airspace Radar core: radarStore, squarified treemap layout, Canvas 2D rendering with zoom/pan, agent dots with pulse animation
+- [ ] 04-04-PLAN.md -- Comms Hub chat + telemetry: ChatThread with delivery status, TelemetryPanel, SystemLoad, MiniChatCard, OS notification wiring
+- [ ] 04-05-PLAN.md -- Radar interaction: lead lines with fade, RadarManifest, AgentTooltip, RadarMinimap, visual verification checkpoint
 **UI hint**: yes
 
 ### Phase 5: Conflict Resolution + History
@@ -106,5 +112,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Foundation + App Shell | 0/4 | Planning complete | - |
 | 2. Real-Time Data Pipeline | 4/4 | Complete    | 2026-04-10 |
 | 3. Agent Management + Conflict Detection | 0/4 | Planning complete | - |
-| 4. Core UI Views | 0/0 | Not started | - |
+| 4. Core UI Views | 0/5 | Planning complete | - |
 | 5. Conflict Resolution + History | 0/0 | Not started | - |
