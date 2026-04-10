@@ -40,7 +40,7 @@ export function AgentRow({ agent, isEven }: AgentRowProps) {
   return (
     <div>
       <div
-        className={`flex h-12 items-center px-4 transition-colors duration-150 hover:bg-surface-container-high cursor-pointer ${bgClass} ${
+        className={`group flex h-12 items-center px-4 transition-colors duration-150 hover:bg-surface-container-high cursor-pointer ${bgClass} ${
           isConflict ? 'border-l-2 border-error' : 'border-l-2 border-transparent'
         }`}
         onClick={() => setExpanded(!expanded)}
