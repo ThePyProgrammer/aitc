@@ -1,4 +1,5 @@
 mod agents;
+mod conflict;
 mod db;
 mod pipeline;
 mod tray;
@@ -28,6 +29,10 @@ pub fn run() {
             agents::commands::get_agent_logs,
             agents::notifications::get_notification_prefs,
             agents::notifications::update_notification_prefs,
+            conflict::commands::list_conflicts,
+            conflict::commands::dismiss_conflict,
+            conflict::commands::get_conflict_settings,
+            conflict::commands::update_conflict_window,
         ])
         .typ::<pipeline::events::FileEvent>()
         .typ::<pipeline::events::FileEventBatch>()
@@ -37,7 +42,8 @@ pub fn run() {
         .typ::<pipeline::worktree::Worktree>()
         .typ::<agents::AgentInfo>()
         .typ::<agents::AgentState>()
-        .typ::<agents::notifications::NotificationPrefs>();
+        .typ::<agents::notifications::NotificationPrefs>()
+        .typ::<conflict::ConflictAlert>();
 
     #[cfg(debug_assertions)]
     specta_builder
@@ -54,6 +60,7 @@ pub fn run() {
         .manage(pipeline::PipelineState::new())
         .manage(agent_registry.clone())
         .manage(agents::notifications::NotificationState::new())
+        .manage(conflict::ConflictState::new(5000))
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             // System tray (D-13)
