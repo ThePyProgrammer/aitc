@@ -35,13 +35,13 @@ pub async fn launch_agent(
     intent: Option<String>,
     registry: tauri::State<'_, Arc<AgentRegistry>>,
 ) -> Result<AgentInfo, String> {
-    // T-03-05: Validate cwd
-    let cwd_path = PathBuf::from(&cwd);
-    if !cwd_path.exists() {
-        return Err(format!("cwd does not exist: {cwd}"));
-    }
+    // T-03-05: Validate cwd -- canonicalize to resolve symlinks and `..` components,
+    // preventing path traversal attacks.
+    let cwd_path = PathBuf::from(&cwd)
+        .canonicalize()
+        .map_err(|e| format!("cwd is invalid or inaccessible: {e}"))?;
     if !cwd_path.is_dir() {
-        return Err(format!("cwd is not a directory: {cwd}"));
+        return Err(format!("cwd is not a directory: {}", cwd_path.display()));
     }
 
     // T-03-05: Find adapter by agent_type -- reject unknown types
