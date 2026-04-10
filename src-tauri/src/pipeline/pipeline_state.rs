@@ -18,6 +18,8 @@ pub struct ActiveWatch {
     pub attributing_task: tokio::task::JoinHandle<()>,
     /// Forwards attributed batches onto the Channel<FileEventBatch>.
     pub forwarder_task: tokio::task::JoinHandle<()>,
+    /// Conflict engine task: processes batches via broadcast, emits Tauri events.
+    pub conflict_task: tokio::task::JoinHandle<()>,
     /// Shared snapshot used by attributing_task + refresher.
     pub snapshot: Arc<RwLock<ProcessSnapshot>>,
     /// Channel to the frontend -- cloned into the forwarder. Held here so the
@@ -49,5 +51,6 @@ impl Drop for ActiveWatch {
         self.snapshot_refresher.abort();
         self.attributing_task.abort();
         self.forwarder_task.abort();
+        self.conflict_task.abort();
     }
 }
