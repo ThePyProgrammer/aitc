@@ -13,21 +13,20 @@ A developer can see exactly what every AI agent is doing across their codebase i
 ### Validated
 
 - [x] "Command Horizon" dark ATC aesthetic (phosphor greens, zero-radius, radar indicators) — Validated in Phase 1: Foundation + App Shell
+- [x] File system watchers to track agent reads/writes across the repository — Validated in Phase 2: Real-Time Data Pipeline
+- [x] Tower control manifest listing all active agents with status, protocol, and process path — Validated in Phase 3: Agent Management + Conflict Detection
+- [x] Agent launcher — spawn Claude Code, Codex, OpenCode sessions from within the app — Validated in Phase 3
+- [x] Agent observation — detect and monitor externally-launched agents — Validated in Phase 3 (partial: self-registration works, passive scan bridge pending)
+- [x] Extensible agent adapter architecture (plugin system for any coding agent) — Validated in Phase 3
+- [x] Conflict detection when multiple agents touch the same file, with side-by-side merge UI — Validated in Phase 3 (detection + alert; merge UI in Phase 5)
 
 ### Active
 
 - [ ] Spatial radar view plotting agents as dots on a file-tree-based codebase map
-- [ ] Tower control manifest listing all active agents with status, protocol, and process path
 - [ ] Communications hub for agent approval requests with approve/deny/chat workflow
-- [ ] Conflict detection when multiple agents touch the same file, with side-by-side merge UI
-- [ ] File system watchers to track agent reads/writes across the repository
 - [ ] Codebase structure mapping (file tree as spatial layout for the radar)
-- [ ] Agent launcher — spawn Claude Code, Codex, OpenCode sessions from within the app
-- [ ] Agent observation — detect and monitor externally-launched agents
-- [ ] Extensible agent adapter architecture (plugin system for any coding agent)
 - [ ] Native OS notifications and system tray alerts for urgent agent requests
 - [ ] Session history — past agent sessions, resolved conflicts, approval logs
-- [x] "Command Horizon" dark ATC aesthetic (phosphor greens, zero-radius, radar indicators) — Validated in Phase 1
 
 ### Out of Scope
 
@@ -83,4 +82,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-08 after Phase 1 completion*
+*Last updated: 2026-04-10 after Phase 3 completion*
