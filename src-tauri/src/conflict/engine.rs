@@ -49,6 +49,14 @@ impl ConflictEngine {
     /// 2. Check for writes by a *different* agent within the window
     /// 3. Record this write for future comparison
     pub fn process_batch(&mut self, batch: &FileEventBatch) -> Vec<ConflictAlert> {
+        // Evict stale records using wall-clock time so entries from files not
+        // recently touched are cleaned up even when no new events arrive for them.
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        self.evict_expired(now_ms);
+
         let mut alerts = Vec::new();
         let window_ms = self.window.as_millis() as i64;
 
