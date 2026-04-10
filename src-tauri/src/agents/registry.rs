@@ -129,6 +129,20 @@ impl AgentRegistry {
         }
     }
 
+    /// Get read access to the agents map (for stdout buffer reads).
+    pub async fn agents_read(
+        &self,
+    ) -> tokio::sync::RwLockReadGuard<'_, HashMap<String, ManagedAgent>> {
+        self.agents.read().await
+    }
+
+    /// Get write access to the agents map (for stdout buffer writes).
+    pub async fn agents_write(
+        &self,
+    ) -> tokio::sync::RwLockWriteGuard<'_, HashMap<String, ManagedAgent>> {
+        self.agents.write().await
+    }
+
     /// Find the first adapter whose process_patterns match the given process name.
     /// Matching is lowercased substring, consistent with ProcessSnapshot logic.
     pub fn find_adapter_for_process(&self, process_name: &str) -> Option<Arc<dyn AgentAdapter>> {
