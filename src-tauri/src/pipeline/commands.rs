@@ -12,6 +12,8 @@
 
 use crate::agents::notifications::{dispatch_state_notification, NotificationState};
 use crate::agents::AgentState;
+use crate::comms::protected_path_trigger::spawn_protected_path_watcher;
+use crate::comms::types::TreeIndexEntry;
 use crate::conflict::engine::ConflictEngine;
 use crate::conflict::commands::emit_conflict_event;
 use crate::conflict::types::ConflictState;
@@ -22,6 +24,7 @@ use crate::pipeline::process_snapshot::{
 };
 use crate::pipeline::watcher::spawn_watcher;
 use crate::pipeline::worktree::{list_worktrees as do_list_worktrees, Worktree};
+use sqlx::{Pool, Sqlite};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -47,6 +50,7 @@ pub async fn start_watch(
     state: tauri::State<'_, PipelineState>,
     conflict_state: tauri::State<'_, ConflictState>,
     notification_state: tauri::State<'_, NotificationState>,
+    pool: tauri::State<'_, Pool<Sqlite>>,
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<Worktree>, String> {
     // Validate and canonicalize the input path.
@@ -148,28 +152,36 @@ pub async fn start_watch(
         }
     });
 
+    // Spawn protected path trigger (D-07): subscribe to same broadcast channel
+    let protected_rx = conflict_tx.subscribe();
+    let protected_path_handle = Some(spawn_protected_path_watcher(
+        protected_rx,
+        pool.inner().clone(),
+        app_handle.clone(),
+    ));
+
     // Run worktree detection once at start per D-09.
     let worktrees = do_list_worktrees(&canonical).unwrap_or_else(|e| {
         tracing::warn!(error = %e, "worktree list failed -- returning empty");
         Vec::new()
     });
 
-    // Store the active watch in state.
+    // Store the active watch in state, including the tree index for Phase 4 radar.
+    let tree_file_count = watcher_output.initial_tree.len();
     *guard = Some(ActiveWatch {
         watcher_handle: watcher_output.handle,
         snapshot_refresher: refresher,
         attributing_task: attributing,
         forwarder_task: forwarder,
         conflict_task,
+        protected_path_handle,
         snapshot,
         channel,
+        tree_index: watcher_output.initial_tree,
     });
 
-    // The initial_tree from watcher_output is dropped here. Phase 4's radar can
-    // request it via a separate command (`get_tree_index`) -- not in Phase 2 scope.
-    // For now we log the count for observability.
     tracing::info!(
-        initial_tree_files = watcher_output.initial_tree.len(),
+        initial_tree_files = tree_file_count,
         worktrees = worktrees.len(),
         "watch started"
     );
@@ -200,6 +212,36 @@ pub async fn list_worktrees(repo_root: String) -> Result<Vec<Worktree>, String> 
         return Err(format!("repo_root is not a directory: {repo_root}"));
     }
     do_list_worktrees(&path)
+}
+
+/// Get the file tree index from the active watch for the Phase 4 radar spatial map.
+/// Returns an empty vec if no watch is active.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_tree_index(
+    state: tauri::State<'_, PipelineState>,
+) -> Result<Vec<TreeIndexEntry>, String> {
+    let guard = state.inner.lock().await;
+    match guard.as_ref() {
+        Some(active) => {
+            let entries: Vec<TreeIndexEntry> = active
+                .tree_index
+                .iter()
+                .map(|(path, node)| {
+                    let path_str = path.to_string_lossy().to_string();
+                    let depth = path.components().count() as u32;
+                    TreeIndexEntry {
+                        path: path_str,
+                        size: node.size,
+                        is_dir: false,
+                        depth,
+                    }
+                })
+                .collect();
+            Ok(entries)
+        }
+        None => Ok(Vec::new()),
+    }
 }
 
 #[cfg(test)]

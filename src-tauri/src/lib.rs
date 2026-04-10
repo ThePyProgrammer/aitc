@@ -23,6 +23,7 @@ pub fn run() {
             pipeline::commands::start_watch,
             pipeline::commands::stop_watch,
             pipeline::commands::list_worktrees,
+            pipeline::commands::get_tree_index,
             agents::commands::list_agents,
             agents::commands::launch_agent,
             agents::commands::terminate_agent,
@@ -34,6 +35,18 @@ pub fn run() {
             conflict::commands::dismiss_conflict,
             conflict::commands::get_conflict_settings,
             conflict::commands::update_conflict_window,
+            comms::commands::list_approval_requests,
+            comms::commands::create_approval_request,
+            comms::commands::approve_request,
+            comms::commands::deny_request,
+            comms::commands::ask_more_info,
+            comms::commands::approve_with_edits,
+            comms::commands::send_chat_message,
+            comms::commands::list_chat_messages,
+            comms::commands::update_message_delivery_status,
+            comms::commands::list_protected_paths,
+            comms::commands::add_protected_path,
+            comms::commands::remove_protected_path,
         ])
         .typ::<pipeline::events::FileEvent>()
         .typ::<pipeline::events::FileEventBatch>()
@@ -44,7 +57,11 @@ pub fn run() {
         .typ::<agents::AgentInfo>()
         .typ::<agents::AgentState>()
         .typ::<agents::notifications::NotificationPrefs>()
-        .typ::<conflict::ConflictAlert>();
+        .typ::<conflict::ConflictAlert>()
+        .typ::<comms::types::ApprovalRequest>()
+        .typ::<comms::types::ChatMessage>()
+        .typ::<comms::types::ProtectedPath>()
+        .typ::<comms::types::TreeIndexEntry>();
 
     #[cfg(debug_assertions)]
     specta_builder

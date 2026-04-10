@@ -3,7 +3,10 @@
 
 use crate::pipeline::events::FileEventBatch;
 use crate::pipeline::process_snapshot::ProcessSnapshot;
+use crate::pipeline::tree_index::FileNode;
 use crate::pipeline::watcher::WatcherHandle;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
@@ -20,11 +23,15 @@ pub struct ActiveWatch {
     pub forwarder_task: tokio::task::JoinHandle<()>,
     /// Conflict engine task: processes batches via broadcast, emits Tauri events.
     pub conflict_task: tokio::task::JoinHandle<()>,
+    /// Protected path trigger task: checks writes against protected globs (D-07).
+    pub protected_path_handle: Option<tokio::task::JoinHandle<()>>,
     /// Shared snapshot used by attributing_task + refresher.
     pub snapshot: Arc<RwLock<ProcessSnapshot>>,
     /// Channel to the frontend -- cloned into the forwarder. Held here so the
     /// watcher can be stopped without losing the reference to the consumer.
     pub channel: tauri::ipc::Channel<FileEventBatch>,
+    /// In-memory file tree index for Phase 4 radar spatial map.
+    pub tree_index: HashMap<PathBuf, FileNode>,
 }
 
 pub struct PipelineState {
@@ -52,5 +59,8 @@ impl Drop for ActiveWatch {
         self.attributing_task.abort();
         self.forwarder_task.abort();
         self.conflict_task.abort();
+        if let Some(handle) = self.protected_path_handle.take() {
+            handle.abort();
+        }
     }
 }

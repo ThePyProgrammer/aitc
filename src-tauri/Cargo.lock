@@ -41,6 +41,7 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
+ "glob",
  "ignore",
  "notify",
  "notify-debouncer-full",
