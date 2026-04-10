@@ -20,6 +20,7 @@ pub mod ignore_filter;
 pub mod process_snapshot;
 pub mod tree_index;
 pub mod watcher;
+pub mod worktree;
 
 #[cfg(test)]
 pub(crate) mod test_util;
@@ -32,3 +33,4 @@ pub use process_snapshot::{
     spawn_snapshot_refresher, start_attributing_stream, ProcessInfo, ProcessSnapshot,
     AGENT_NAME_ALLOWLIST,
 };
+pub use worktree::{list_worktrees, Worktree};
