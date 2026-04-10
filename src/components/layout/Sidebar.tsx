@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { useSidebarStore } from '../../stores/sidebarStore';
+import { ConflictNavBadge } from '../ui/ConflictNavBadge';
 
 const navItems = [
   { to: '/radar', label: 'RADAR', icon: Radar },
@@ -69,8 +70,9 @@ export function Sidebar() {
               className={expanded ? 'ml-6' : ''}
             />
             {expanded && (
-              <span className="ml-3 font-headline text-[14px] font-bold uppercase tracking-widest">
+              <span className="ml-3 font-headline text-[14px] font-bold uppercase tracking-widest flex items-center gap-2">
                 {label}
+                {label === 'CONFLICTS' && <ConflictNavBadge />}
               </span>
             )}
           </NavLink>
