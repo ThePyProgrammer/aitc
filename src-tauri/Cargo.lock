@@ -46,6 +46,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "specta",
+ "specta-typescript",
  "sqlx",
  "sysinfo",
  "tauri",
