@@ -137,10 +137,10 @@ pub async fn stop_watch(state: tauri::State<'_, PipelineState>) -> Result<(), St
     let mut guard = state.inner.lock().await;
     if let Some(active) = guard.take() {
         drop(active);
-        Ok(())
-    } else {
-        Err("no active watch".to_string())
     }
+    // Idempotent: no-op if already stopped. Returning Ok(()) avoids
+    // rejected promises on the JS side when unregister is called defensively.
+    Ok(())
 }
 
 #[tauri::command]
