@@ -234,13 +234,13 @@ fn map_event_kind(kind: &EventKind, paths: &[PathBuf]) -> Option<FileEventKind> 
     }
 }
 
-/// Lexical prefix check — works for non-existent paths (deleted files) where
-/// `canonicalize()` would fail. Both `path` and `root` are compared as strings.
-/// Caller is responsible for passing a canonicalized `root`.
+/// Component-aware prefix check using `Path::starts_with`, which compares
+/// complete path components (not raw bytes). This correctly rejects sibling
+/// directories like `/repo-extra` when root is `/repo`.
+/// Works for non-existent paths (deleted files) where `canonicalize()` would
+/// fail. Caller is responsible for passing a canonicalized `root`.
 fn path_is_under_root(path: &Path, root: &Path) -> bool {
-    let p_str = path.to_string_lossy();
-    let r_str = root.to_string_lossy();
-    p_str.starts_with(r_str.as_ref())
+    path.starts_with(root)
 }
 
 /// True if any component of `path` matches a hardcoded exclude directory name.
