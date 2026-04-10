@@ -117,20 +117,21 @@ async fn register_agent(
     let agent_id = format!("KAGENT-{:04}", payload.pid % 10000);
     let protocol = payload.protocol.as_deref().unwrap_or("unknown").to_string();
 
-    // Find matching adapter or use None (will be handled by caller)
-    let adapter = registry
-        .find_adapter_for_process(&payload.agent_type)
-        .unwrap_or_else(|| {
-            // Use first adapter as fallback -- better than rejecting
-            // In practice, unknown agents can still be tracked
+    // Find matching adapter -- reject unknown agent types with 400 instead of
+    // falling back to a hard-coded adapter (which would panic if not registered).
+    let adapter = match registry.find_adapter_for_process(&payload.agent_type) {
+        Some(a) => a,
+        None => {
             tracing::warn!(
                 agent_type = %payload.agent_type,
-                "No adapter found for self-registering agent, using claude-code as fallback"
+                "Unknown agent type in self-registration"
             );
-            registry
-                .find_adapter_for_process("claude")
-                .expect("built-in adapters must be registered")
-        });
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("unknown agent_type: {}", payload.agent_type)})),
+            );
+        }
+    };
 
     let info = AgentInfo {
         id: agent_id.clone(),
