@@ -1,4 +1,5 @@
 mod agents;
+mod comms;
 mod conflict;
 mod db;
 mod pipeline;
