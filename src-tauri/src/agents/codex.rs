@@ -54,16 +54,15 @@ impl AgentAdapter for CodexAdapter {
         vec!["codex".to_string()]
     }
 
-    async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<u32, String> {
-        let (pid, _child) = launcher::launch_detached(
+    async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
+        launcher::launch_detached(
             "codex",
             &[],
             &cwd,
             None,
             9417,
         )
-        .await?;
-        Ok(pid)
+        .await
     }
 
     async fn get_state(&self, pid: u32) -> AgentState {

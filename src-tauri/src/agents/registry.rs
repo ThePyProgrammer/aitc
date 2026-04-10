@@ -194,7 +194,7 @@ mod tests {
         fn process_patterns(&self) -> Vec<String> {
             self.patterns.clone()
         }
-        async fn launch(&self, _cwd: PathBuf, _intent: Option<String>) -> Result<u32, String> {
+        async fn launch(&self, _cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
             Err("test adapter".to_string())
         }
         async fn get_state(&self, _pid: u32) -> AgentState {

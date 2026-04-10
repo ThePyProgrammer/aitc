@@ -53,16 +53,15 @@ impl AgentAdapter for ClaudeCodeAdapter {
         vec!["claude".to_string(), "claude-code".to_string()]
     }
 
-    async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<u32, String> {
-        let (pid, _child) = launcher::launch_detached(
+    async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
+        launcher::launch_detached(
             "claude",
             &["--print", "--output-format", "stream-json"],
             &cwd,
             None,
             9417, // Default port; caller should override via env
         )
-        .await?;
-        Ok(pid)
+        .await
     }
 
     async fn get_state(&self, pid: u32) -> AgentState {

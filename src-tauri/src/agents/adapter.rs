@@ -72,8 +72,13 @@ pub trait AgentAdapter: Send + Sync {
     fn process_patterns(&self) -> Vec<String>;
 
     /// Launch a new agent session in the given working directory.
-    /// Returns the PID of the spawned process on success.
-    async fn launch(&self, cwd: PathBuf, intent: Option<String>) -> Result<u32, String>;
+    /// Returns `(pid, child)` on success. The caller is responsible for spawning
+    /// a stdout reader task from the child handle.
+    async fn launch(
+        &self,
+        cwd: PathBuf,
+        intent: Option<String>,
+    ) -> Result<(u32, tokio::process::Child), String>;
 
     /// Poll the current state of an agent by PID.
     async fn get_state(&self, pid: u32) -> AgentState;

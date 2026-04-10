@@ -51,8 +51,8 @@ pub async fn launch_agent(
             format!("No registered adapter for agent type '{agent_type}'")
         })?;
 
-    // Launch via the adapter
-    let pid = adapter.launch(cwd_path.clone(), intent.clone()).await?;
+    // Launch via the adapter -- returns (pid, child) so we can read stdout
+    let (pid, child) = adapter.launch(cwd_path.clone(), intent.clone()).await?;
 
     // Generate agent ID
     let agent_id = format!("KAGENT-{:04}", pid % 10000);
@@ -68,8 +68,11 @@ pub async fn launch_agent(
     };
 
     registry
-        .upsert_agent(agent_id, info.clone(), adapter, true)
+        .upsert_agent(agent_id.clone(), info.clone(), adapter, true)
         .await?;
+
+    // Spawn stdout reader so agent logs are captured into the ring buffer
+    launcher::spawn_stdout_reader(child, agent_id, registry.inner().clone());
 
     Ok(info)
 }
