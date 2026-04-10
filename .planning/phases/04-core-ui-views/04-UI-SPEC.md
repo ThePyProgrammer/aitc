@@ -60,19 +60,20 @@ Exceptions:
 | Display | Space Grotesk | 20px | 700 (bold) | 1.2 | -0.025em | View titles: "COMMUNICATIONS_HUB", "AIRSPACE_RADAR" |
 | Heading | Space Grotesk | 14px | 700 (bold) | 1.4 | 0.1em | Section headers: "PENDING_APPROVALS", "AGENT_MANIFEST", "SYSTEM_LOAD", all UPPERCASE |
 | Label | Space Grotesk | 10px | 400 (regular) | 1.4 | 0.1em | Metadata labels: "TARGET:", "STATUS:", "URGENCY:", timestamps, all UPPERCASE |
-| Data | JetBrains Mono | 12px | 700 (bold) | 1.4 | -0.025em | Agent IDs, file paths in request cards, radar directory labels |
+| Data | JetBrains Mono | 12px | 700 (bold) | 1.4 | -0.025em | Agent IDs, file paths in request cards, radar directory labels, diff code lines (inline diff view), editable diff lines |
 | Data-sm | JetBrains Mono | 10px | 400 (regular) | 1.4 | -0.025em | Timestamps, delivery status indicators, radar file labels at zoom 3x+ |
 | Body | JetBrains Mono | 14px | 400 (regular) | 1.5 | normal | Chat message content, request descriptions, approval detail text |
-| Code | JetBrains Mono | 13px | 400 (regular) | 1.5 | normal | Diff code lines (inline diff view), editable diff lines |
+
+**Font size scale: 10, 12, 14, 20 (4 sizes).**
 
 **Rules (inherited from Phase 1 + Phase 4 additions):**
 - Space Grotesk is always UPPERCASE with wide tracking for labels and nav
 - JetBrains Mono is used for all data display, file paths, code diffs, and chat messages
 - Never use pure white (#FFFFFF) for body text; use on-surface-variant (#adaaaa)
 - Reserve on-surface (#ffffff) for critical headers, active elements, and agent names in manifest
-- Diff added lines: Code role in primary (#8eff71) on primary/5 background
-- Diff removed lines: Code role in error (#ff7351) on error/5 background with strikethrough
-- Diff unchanged lines: Code role in on-surface-variant (#adaaaa)
+- Diff added lines: Data role (12px JetBrains Mono) in primary (#8eff71) on primary/5 background
+- Diff removed lines: Data role (12px JetBrains Mono) in error (#ff7351) on error/5 background with strikethrough
+- Diff unchanged lines: Data role (12px JetBrains Mono) in on-surface-variant (#adaaaa)
 
 ---
 
@@ -132,10 +133,10 @@ Fixed palette of 8 distinct colors for agent dots. Agent ID hashed to palette in
 
 | Line Type | Text Color | Background | Additional |
 |-----------|------------|------------|------------|
-| Added | #8eff71 (primary) | rgba(142, 255, 113, 0.05) | Left gutter: 2px primary border |
-| Removed | #ff7351 (error) | rgba(255, 115, 81, 0.05) | Left gutter: 2px error border, text strikethrough |
-| Unchanged | #adaaaa (on-surface-variant) | transparent | No gutter border |
-| Editable (approve-with-edit) | #00cffc (secondary) | rgba(0, 207, 252, 0.05) | Cursor blink: secondary, left gutter: 2px secondary border |
+| Added | #8eff71 (primary) | rgba(142, 255, 113, 0.05) | Left gutter: 2px primary border. Text at Data role (12px JetBrains Mono) |
+| Removed | #ff7351 (error) | rgba(255, 115, 81, 0.05) | Left gutter: 2px error border, text strikethrough. Text at Data role (12px JetBrains Mono) |
+| Unchanged | #adaaaa (on-surface-variant) | transparent | No gutter border. Text at Data role (12px JetBrains Mono) |
+| Editable (approve-with-edit) | #00cffc (secondary) | rgba(0, 207, 252, 0.05) | Cursor blink: secondary, left gutter: 2px secondary border. Text at Data role (12px JetBrains Mono) |
 
 ### The No-Line Rule (Inherited)
 
@@ -148,6 +149,13 @@ Borders prohibited for sectioning. Phase 4 boundaries defined through:
 
 ## Component Inventory (Phase 4)
 
+### Focal Points
+
+| View | Focal Point | Rationale |
+|------|-------------|-----------|
+| Communications Hub | RequestDetail center panel (InlineDiff + ApprovalActions) | The approval workflow is the primary user action; the queue and telemetry panels serve as navigation and context for the center panel decision |
+| Airspace Radar | RadarCanvas (treemap with agent dots) | The spatial map is the primary information display; the manifest panel is secondary navigation |
+
 ### Communications Hub -- CommsView
 
 | Component | Description |
@@ -155,10 +163,10 @@ Borders prohibited for sectioning. Phase 4 boundaries defined through:
 | RequestQueue | Left panel, 280px width, surface-container-low bg. Scrollable list of ApprovalRequestCard items. Header: "PENDING_APPROVALS" + count badge. Sorted chronologically, newest at top. Virtualized via TanStack Virtual for 100+ items. |
 | ApprovalRequestCard | Queue item card, surface-container bg, 8px padding. Shows: agent ID (Data font), request type label, target file path (Data font, truncated with ellipsis), urgency badge (StatusBadge variant), timestamp (Data-sm). Selected state: surface-container-high bg + 2px primary left border. |
 | RequestDetail | Center panel, flex-1, surface-container-highest bg. Shows selected request: agent name + status header, request description (Body), InlineDiff component, ApprovalActions bar, ChatThread below. |
-| InlineDiff | Code diff renderer in surface-container-lowest bg. Monospace Code font (13px). Line numbers in outline color. Added/removed/unchanged line coloring per Diff Line Colors table. Each added line clickable to enter edit mode (contentEditable). Ghost border container. |
-| ApprovalActions | Button row, 44px height. Contains: "APPROVE" (primary button), "DENY" (error bg, on-error text), "ASK_FOR_MORE_INFO" (ghost button, secondary text), "APPROVE_WITH_EDITS" (primary button, visible only when edits made). |
+| InlineDiff | Code diff renderer in surface-container-lowest bg. Monospace Data font (12px JetBrains Mono). Line numbers in outline color. Added/removed/unchanged line coloring per Diff Line Colors table. Each added line clickable to enter edit mode (contentEditable). Ghost border container. |
+| ApprovalActions | Button row, 44px height. Contains: "APPROVE" (primary button), "DENY" (error bg, on-error text, requires confirmation -- see Interaction Contracts), "ASK_FOR_MORE_INFO" (ghost button, secondary text), "APPROVE_WITH_EDITS" (primary button, visible only when edits made). |
 | ChatThread | Scrollable message timeline below the diff. User messages right-aligned (surface-container bg), agent messages left-aligned (surface-container-low bg). Body font for content, Data-sm for timestamps. DeliveryStatus indicator per message. |
-| ChatInput | Terminal-style input at bottom of detail panel. surface-container-lowest fill, ghost border. Block cursor blink in secondary color. Send button: Lucide Send icon. Placeholder: "TYPE_COMMAND_OR_QUERY..." |
+| ChatInput | Terminal-style input at bottom of detail panel. surface-container-lowest fill, ghost border. Block cursor blink in secondary color. Send button: Lucide Send icon (aria-label="Send message"). Placeholder: "TYPE_COMMAND_OR_QUERY..." |
 | TelemetryPanel | Right panel, 260px width, surface-container bg. Contains: SystemLoad widget (CPU/memory bars), TelemetryFeed (recent events list), MiniChatCard list for each active agent. |
 | SystemLoad | CPU and memory usage bars. Bar fill: primary for healthy (<70%), tertiary for warning (70-90%), error for critical (>90%). Label font for "CPU_CLUSTER", "MEMORY_SNAP". Data font for percentage values. |
 | TelemetryFeed | Scrollable recent events list. Header: "TELEMETRY_FEED". Each entry: Data-sm font, shows event type icon (Lucide), agent ID, file path, timestamp. Max 50 visible items. |
@@ -215,14 +223,14 @@ Borders prohibited for sectioning. Phase 4 boundaries defined through:
 ### Communications Hub -- Approval Workflow
 
 - "APPROVE" click: request status changes to approved, card moves to resolved section or removes from queue, OS notification sent to agent
-- "DENY" click: request status changes to denied, card removes from queue
+- "DENY" click: two-step confirmation -- first click changes button label to "CONFIRM_DENY" with error-container (#b92902) bg for 3 seconds, second click within that window executes the deny action. If no second click within 3s, button reverts to "DENY". This prevents accidental denial of agent work
 - "ASK_FOR_MORE_INFO" click: reveals inline text input below the button row, user types question, press Enter or click Send to submit, request stays in pending state with "INFO_REQUESTED" sub-status
 - "APPROVE_WITH_EDITS": user clicks an added line in the diff to make it contentEditable, edits inline, "APPROVE_WITH_EDITS" button appears replacing "APPROVE", click to submit with modified content
 - Edit mode: diff content frozen (incoming updates suppressed for this request), stale indicator shown if updates arrived while editing
 
 ### Communications Hub -- Chat
 
-- Type message in ChatInput, press Enter or click Send icon
+- Type message in ChatInput, press Enter or click Send icon (aria-label="Send message")
 - Message appears immediately in thread with "queued" delivery status (optimistic insertion)
 - Delivery status updates to "delivered" or "unsupported" when backend confirms
 - Messages sorted by createdAt timestamp
@@ -268,7 +276,7 @@ Borders prohibited for sectioning. Phase 4 boundaries defined through:
   - Arrow Up/Down: navigate request queue
   - Enter: select highlighted request
   - A: approve selected request
-  - D: deny selected request
+  - D: deny selected request (triggers two-step confirmation)
   - Escape: deselect / exit edit mode
 
 ---
@@ -288,6 +296,7 @@ Borders prohibited for sectioning. Phase 4 boundaries defined through:
 | Memory label | MEMORY_SNAP |
 | Primary CTA (approve) | APPROVE |
 | Deny CTA | DENY |
+| Deny confirmation CTA | CONFIRM_DENY |
 | Ask more info CTA | ASK_FOR_MORE_INFO |
 | Approve with edits CTA | APPROVE_WITH_EDITS |
 | Chat input placeholder | TYPE_COMMAND_OR_QUERY... |
