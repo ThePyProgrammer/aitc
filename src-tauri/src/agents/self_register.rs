@@ -58,21 +58,29 @@ impl RateLimiter {
     }
 
     /// Returns true if the request is allowed (under 10/sec).
+    ///
+    /// Uses compare_exchange on window_start so only one thread wins
+    /// the window reset, preventing burst-injection beyond 10 RPS.
     fn check(&self) -> bool {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        let window = self.window_start.load(Ordering::Relaxed);
+        let window = self.window_start.load(Ordering::Acquire);
 
         if now != window {
-            self.window_start.store(now, Ordering::Relaxed);
-            self.count.store(1, Ordering::Relaxed);
-            true
-        } else {
-            let prev = self.count.fetch_add(1, Ordering::Relaxed);
-            prev < 10 // T-03-07: max 10 registrations per second
+            // Attempt to claim the new window; only one thread wins the reset
+            if self
+                .window_start
+                .compare_exchange(window, now, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                self.count.store(1, Ordering::Release);
+                return true;
+            }
         }
+        let prev = self.count.fetch_add(1, Ordering::AcqRel);
+        prev < 10 // T-03-07: max 10 registrations per second
     }
 }
 
