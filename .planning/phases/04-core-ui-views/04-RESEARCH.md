@@ -527,7 +527,7 @@ CREATE TABLE IF NOT EXISTS protected_paths (
 | A4 | Progressive detail rendering (zoom-level based filtering) is sufficient for VIZN-04 performance | Patterns | May need spatial indexing (quadtree) if culling by rectangle visibility is too slow |
 | A5 | Chat message delivery status can be tracked end-to-end for Claude Code hooks | Architecture | Hook system integration details may vary; delivery confirmation depends on Claude Code hook response timing |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **get_tree_index command exposure**
    - What we know: Phase 2's `tree_index.rs` builds the file tree index on watch start, but the initial_tree is dropped in `pipeline/commands.rs:169` with a comment "Phase 4's radar can request it via a separate command (get_tree_index) -- not in Phase 2 scope"
