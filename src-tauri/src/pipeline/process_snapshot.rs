@@ -194,10 +194,18 @@ pub fn spawn_snapshot_refresher(
         let mut tick = tokio::time::interval(interval);
         loop {
             tick.tick().await;
-            // Write-lock only during the refresh; release before the next
-            // tick so attribute() reads don't starve.
-            let mut snap = snapshot.write().await;
-            snap.refresh();
+            // sysinfo::refresh_processes_specifics is synchronous and can
+            // block for 24-100ms. Run it in spawn_blocking to avoid stalling
+            // the tokio async executor.
+            let snap_clone = snapshot.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    let mut snap = snap_clone.write().await;
+                    snap.refresh();
+                });
+            })
+            .await;
         }
     })
 }
