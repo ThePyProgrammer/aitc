@@ -143,8 +143,18 @@ impl AgentRegistry {
         self.agents.write().await
     }
 
+    /// Find adapter by exact `adapter_type()` match. Used for explicit agent launches
+    /// where the caller specifies the agent type string directly.
+    pub fn find_adapter_by_type(&self, agent_type: &str) -> Option<Arc<dyn AgentAdapter>> {
+        self.adapters
+            .iter()
+            .find(|a| a.adapter_type() == agent_type)
+            .cloned()
+    }
+
     /// Find the first adapter whose process_patterns match the given process name.
     /// Matching is lowercased substring, consistent with ProcessSnapshot logic.
+    /// Used for process-scan detection, NOT for explicit launch-by-type.
     pub fn find_adapter_for_process(&self, process_name: &str) -> Option<Arc<dyn AgentAdapter>> {
         let lower = process_name.to_lowercase();
         self.adapters

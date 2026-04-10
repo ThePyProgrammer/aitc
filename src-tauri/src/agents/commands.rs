@@ -44,9 +44,10 @@ pub async fn launch_agent(
         return Err(format!("cwd is not a directory: {}", cwd_path.display()));
     }
 
-    // T-03-05: Find adapter by agent_type -- reject unknown types
+    // T-03-05: Find adapter by exact agent_type -- reject unknown types.
+    // Uses exact match (not substring) to prevent "code" matching "claude-code".
     let adapter = registry
-        .find_adapter_for_process(&agent_type)
+        .find_adapter_by_type(&agent_type)
         .ok_or_else(|| {
             format!("No registered adapter for agent type '{agent_type}'")
         })?;
