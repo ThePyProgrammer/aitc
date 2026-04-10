@@ -147,6 +147,12 @@ pub async fn stop_watch(state: tauri::State<'_, PipelineState>) -> Result<(), St
 #[specta::specta]
 pub async fn list_worktrees(repo_root: String) -> Result<Vec<Worktree>, String> {
     let path = PathBuf::from(&repo_root);
+    if !path.exists() {
+        return Err(format!("repo_root does not exist: {repo_root}"));
+    }
+    if !path.is_dir() {
+        return Err(format!("repo_root is not a directory: {repo_root}"));
+    }
     do_list_worktrees(&path)
 }
 
