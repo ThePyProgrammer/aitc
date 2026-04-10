@@ -25,7 +25,7 @@ use notify_debouncer_full::{
 use notify_debouncer_full::notify::RecommendedWatcher;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -98,22 +98,35 @@ pub fn spawn_watcher(
     // Drain the sync bridge into tokio on a blocking task. spawn_blocking lets
     // us call sync_rx.recv() (which blocks) without stalling the tokio runtime.
     let batch_id_counter = Arc::new(AtomicU64::new(0));
+    let dropped_counter = Arc::new(AtomicU32::new(0));
     let counter_clone = batch_id_counter.clone();
+    let dropped_clone = dropped_counter.clone();
     let repo_root_clone = repo_root.clone();
     let task = tokio::task::spawn_blocking(move || {
         loop {
             match sync_rx.recv() {
                 Ok(res) => {
-                    let batch = process_debounce_result(res, &repo_root_clone, &counter_clone);
+                    let mut batch =
+                        process_debounce_result(res, &repo_root_clone, &counter_clone);
                     if batch.events.is_empty() {
                         continue;
                     }
-                    // `blocking_send` is the documented way to send to a tokio
-                    // mpsc from a spawn_blocking thread. It blocks the OS thread
-                    // (not a tokio task) if the channel is full.
-                    if out_tx.blocking_send(batch).is_err() {
-                        // Receiver dropped — exit the drain loop.
-                        break;
+                    // Carry any accumulated drop count into this batch so the
+                    // frontend sees how many batches were lost since the last
+                    // successful send.
+                    batch.dropped_batches = dropped_clone.swap(0, Ordering::Relaxed);
+                    // Use try_send instead of blocking_send so that when the
+                    // bounded mpsc is full, batches are dropped (back-pressure)
+                    // rather than blocking the OS thread and stalling the
+                    // debouncer drain loop.
+                    match out_tx.try_send(batch) {
+                        Ok(()) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                            dropped_clone.fetch_add(1, Ordering::Relaxed);
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                            break; // Receiver dropped — exit the drain loop.
+                        }
                     }
                 }
                 Err(_) => break, // channel closed — debouncer dropped
