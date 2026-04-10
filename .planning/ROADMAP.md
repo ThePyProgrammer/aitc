@@ -64,7 +64,12 @@ Plans:
   3. System detects externally-launched agent processes already running on the codebase
   4. When two agents write to the same file within the conflict window, the system immediately alerts the user with a visual indicator and notification
   5. Agent adapter architecture is extensible -- new agent types can be added without modifying core logic
-**Plans**: TBD
+**Plans:** 4 plans
+Plans:
+- [ ] 03-01-PLAN.md -- AgentAdapter trait, AgentState/AgentInfo types, AgentRegistry, built-in + GenericAdapter implementations, DB migration
+- [ ] 03-02-PLAN.md -- Detached subprocess launcher, self-registration HTTP server, terminate, Tauri agent commands, lib.rs wiring
+- [ ] 03-03-PLAN.md -- Conflict detection engine (sliding window per-file), ConflictState, conflict Tauri commands
+- [ ] 03-04-PLAN.md -- Frontend stores (agentStore, conflictStore), Tower Control UI view, StatusBadge extensions, ConflictNavBadge, pipeline conflict wiring
 
 ### Phase 4: Core UI Views
 **Goal**: User can approve/deny agent requests from a communications hub, view agents spatially on a codebase radar, and receive native OS notifications for urgent events
@@ -100,6 +105,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Foundation + App Shell | 0/4 | Planning complete | - |
 | 2. Real-Time Data Pipeline | 4/4 | Complete    | 2026-04-10 |
-| 3. Agent Management + Conflict Detection | 0/0 | Not started | - |
+| 3. Agent Management + Conflict Detection | 0/4 | Planning complete | - |
 | 4. Core UI Views | 0/0 | Not started | - |
 | 5. Conflict Resolution + History | 0/0 | Not started | - |
