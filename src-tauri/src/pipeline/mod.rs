@@ -15,8 +15,10 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+pub mod commands;
 pub mod events;
 pub mod ignore_filter;
+pub mod pipeline_state;
 pub mod process_snapshot;
 pub mod tree_index;
 pub mod watcher;
@@ -29,6 +31,7 @@ pub(crate) mod test_util;
 mod smoke_tests;
 
 pub use events::{Attribution, FileEvent, FileEventBatch, FileEventKind};
+pub use pipeline_state::{ActiveWatch, PipelineState};
 pub use process_snapshot::{
     spawn_snapshot_refresher, start_attributing_stream, ProcessInfo, ProcessSnapshot,
     AGENT_NAME_ALLOWLIST,

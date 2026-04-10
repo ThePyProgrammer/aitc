@@ -6,9 +6,32 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let specta_builder = tauri_specta::Builder::<tauri::Wry>::new()
+        .commands(tauri_specta::collect_commands![
+            pipeline::commands::start_watch,
+            pipeline::commands::stop_watch,
+            pipeline::commands::list_worktrees,
+        ])
+        .typ::<pipeline::events::FileEvent>()
+        .typ::<pipeline::events::FileEventBatch>()
+        .typ::<pipeline::events::FileEventKind>()
+        .typ::<pipeline::events::Attribution>()
+        .typ::<pipeline::process_snapshot::ProcessInfo>()
+        .typ::<pipeline::worktree::Worktree>();
+
+    #[cfg(debug_assertions)]
+    specta_builder
+        .export(
+            specta_typescript::Typescript::default(),
+            "../src/bindings.ts",
+        )
+        .expect("failed to export specta bindings");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
+        .manage(pipeline::PipelineState::new())
+        .invoke_handler(specta_builder.invoke_handler())
         .setup(|app| {
             // System tray (D-13)
             tray::setup_tray(app)?;
