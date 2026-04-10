@@ -3,22 +3,41 @@ mod db;
 mod pipeline;
 mod tray;
 
+use std::sync::Arc;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Build the agent registry with built-in adapters
+    let mut agent_registry = agents::AgentRegistry::new();
+    agent_registry.register_adapter(Arc::new(agents::claude_code::ClaudeCodeAdapter));
+    agent_registry.register_adapter(Arc::new(agents::codex::CodexAdapter));
+    agent_registry.register_adapter(Arc::new(agents::opencode::OpenCodeAdapter));
+    // TODO: Load GenericAdapter configs from ~/.aitc/agents/*.toml
+    let agent_registry = Arc::new(agent_registry);
+
     let specta_builder = tauri_specta::Builder::<tauri::Wry>::new()
         .commands(tauri_specta::collect_commands![
             pipeline::commands::start_watch,
             pipeline::commands::stop_watch,
             pipeline::commands::list_worktrees,
+            agents::commands::list_agents,
+            agents::commands::launch_agent,
+            agents::commands::terminate_agent,
+            agents::commands::update_agent_intent,
+            agents::commands::get_agent_logs,
+            agents::notifications::get_notification_prefs,
+            agents::notifications::update_notification_prefs,
         ])
         .typ::<pipeline::events::FileEvent>()
         .typ::<pipeline::events::FileEventBatch>()
         .typ::<pipeline::events::FileEventKind>()
         .typ::<pipeline::events::Attribution>()
         .typ::<pipeline::process_snapshot::ProcessInfo>()
-        .typ::<pipeline::worktree::Worktree>();
+        .typ::<pipeline::worktree::Worktree>()
+        .typ::<agents::AgentInfo>()
+        .typ::<agents::AgentState>()
+        .typ::<agents::notifications::NotificationPrefs>();
 
     #[cfg(debug_assertions)]
     specta_builder
@@ -31,16 +50,28 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(pipeline::PipelineState::new())
+        .manage(agent_registry.clone())
+        .manage(agents::notifications::NotificationState::new())
         .invoke_handler(specta_builder.invoke_handler())
-        .setup(|app| {
+        .setup(move |app| {
             // System tray (D-13)
             tray::setup_tray(app)?;
+
+            // Start the self-registration server
+            let registry_clone = agent_registry.clone();
+            tauri::async_runtime::spawn(async move {
+                match agents::self_register::start_registration_server(registry_clone, 9417).await {
+                    Ok(port) => tracing::info!(port, "AITC registration server started"),
+                    Err(e) => tracing::warn!(error = %e, "Failed to start registration server"),
+                }
+            });
 
             // SQLite database
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                // Initialize DB — exit on failure since app cannot function without it
+                // Initialize DB -- exit on failure since app cannot function without it
                 let pool = match db::init_db(&app_handle).await {
                     Ok(pool) => pool,
                     Err(e) => {
@@ -69,7 +100,7 @@ pub fn run() {
 
             // Close-to-tray behavior (D-12): intercept window close
             let Some(window) = app.get_webview_window("main") else {
-                eprintln!("main window not found — check tauri.conf.json window labels");
+                eprintln!("main window not found -- check tauri.conf.json window labels");
                 return Err("main window not found".into());
             };
             window.on_window_event({

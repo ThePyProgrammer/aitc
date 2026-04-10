@@ -7,6 +7,7 @@ pub mod generic;
 pub mod launcher;
 pub mod self_register;
 pub mod notifications;
+pub mod commands;
 
 pub use adapter::{AgentAdapter, AgentInfo, AgentState};
 pub use registry::{AgentRegistry, ManagedAgent};

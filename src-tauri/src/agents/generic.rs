@@ -5,6 +5,7 @@
 //! and implements `AgentAdapter` using the configured patterns.
 
 use crate::agents::adapter::{AgentAdapter, AgentState};
+use crate::agents::launcher;
 use async_trait::async_trait;
 use regex::Regex;
 use serde::Deserialize;
@@ -29,10 +30,10 @@ pub struct GenericAgentConfig {
 /// A config-driven adapter that implements `AgentAdapter` using TOML-defined rules.
 #[derive(Debug)]
 pub struct GenericAdapter {
-    config: GenericAgentConfig,
-    _state_running_re: Option<Regex>,
-    _state_error_re: Option<Regex>,
-    _intent_re: Option<Regex>,
+    pub config: GenericAgentConfig,
+    state_running_re: Option<Regex>,
+    state_error_re: Option<Regex>,
+    intent_re: Option<Regex>,
 }
 
 impl GenericAdapter {
@@ -75,10 +76,42 @@ impl GenericAdapter {
 
         Ok(Self {
             config,
-            _state_running_re: state_running_re,
-            _state_error_re: state_error_re,
-            _intent_re: intent_re,
+            state_running_re,
+            state_error_re,
+            intent_re,
         })
+    }
+
+    /// Check stdout lines against state regex patterns.
+    pub fn check_state_from_stdout(&self, lines: &[String]) -> Option<AgentState> {
+        for line in lines.iter().rev() {
+            if let Some(re) = &self.state_error_re {
+                if re.is_match(line) {
+                    return Some(AgentState::Error);
+                }
+            }
+            if let Some(re) = &self.state_running_re {
+                if re.is_match(line) {
+                    return Some(AgentState::Running);
+                }
+            }
+        }
+        None
+    }
+
+    /// Extract intent from stdout lines using configured regex.
+    pub fn extract_intent_from_stdout(&self, lines: &[String]) -> Option<String> {
+        let re = self.intent_re.as_ref()?;
+        for line in lines.iter().rev() {
+            if let Some(caps) = re.captures(line) {
+                // Return first capture group if available, otherwise full match
+                if let Some(group) = caps.get(1) {
+                    return Some(group.as_str().to_string());
+                }
+                return Some(caps.get(0).unwrap().as_str().to_string());
+            }
+        }
+        None
     }
 }
 
@@ -92,23 +125,41 @@ impl AgentAdapter for GenericAdapter {
         self.config.process_names.clone()
     }
 
-    async fn launch(&self, _cwd: PathBuf, _intent: Option<String>) -> Result<u32, String> {
-        // Placeholder -- same as built-in adapters for now
-        Err("launcher not wired".to_string())
+    async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<u32, String> {
+        let args: Vec<&str> = self.config.launch_args.iter().map(|s| s.as_str()).collect();
+        let (pid, _child) = launcher::launch_detached(
+            &self.config.launch_command,
+            &args,
+            &cwd,
+            None,
+            9417,
+        )
+        .await?;
+        Ok(pid)
     }
 
-    async fn get_state(&self, _pid: u32) -> AgentState {
-        // Placeholder -- will use _state_running_re / _state_error_re on stdout
-        AgentState::Running
+    async fn get_state(&self, pid: u32) -> AgentState {
+        // Fallback: check if process is alive
+        let s = sysinfo::System::new_with_specifics(
+            sysinfo::RefreshKind::nothing()
+                .with_processes(sysinfo::ProcessRefreshKind::nothing()),
+        );
+        let sysinfo_pid = sysinfo::Pid::from_u32(pid);
+        if s.process(sysinfo_pid).is_some() {
+            AgentState::Running
+        } else {
+            AgentState::Error
+        }
     }
 
     async fn get_intent(&self, _pid: u32) -> Option<String> {
-        // Placeholder -- will use _intent_re on stdout
+        // Intent extracted from stdout buffer by the command layer
+        // using extract_intent_from_stdout. Stateless adapter returns None.
         None
     }
 
-    async fn terminate(&self, _pid: u32) -> Result<(), String> {
-        Err("launcher not wired".to_string())
+    async fn terminate(&self, pid: u32) -> Result<(), String> {
+        launcher::terminate_process(pid).await
     }
 }
 
@@ -181,5 +232,42 @@ launch_args = []
         let result = GenericAdapter::from_toml(&toml);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("max 20"));
+    }
+
+    #[test]
+    fn check_state_from_stdout_detects_error() {
+        let adapter = GenericAdapter::from_toml(SAMPLE_TOML).unwrap();
+        let lines = vec!["output line".to_string(), "fatal crash".to_string()];
+        assert_eq!(
+            adapter.check_state_from_stdout(&lines),
+            Some(AgentState::Error)
+        );
+    }
+
+    #[test]
+    fn check_state_from_stdout_detects_running() {
+        let adapter = GenericAdapter::from_toml(SAMPLE_TOML).unwrap();
+        let lines = vec!["status: running".to_string()];
+        assert_eq!(
+            adapter.check_state_from_stdout(&lines),
+            Some(AgentState::Running)
+        );
+    }
+
+    #[test]
+    fn extract_intent_from_stdout_captures_group() {
+        let adapter = GenericAdapter::from_toml(SAMPLE_TOML).unwrap();
+        let lines = vec!["task: fix the login page".to_string()];
+        assert_eq!(
+            adapter.extract_intent_from_stdout(&lines).as_deref(),
+            Some("fix the login page")
+        );
+    }
+
+    #[test]
+    fn extract_intent_from_stdout_returns_none_for_no_match() {
+        let adapter = GenericAdapter::from_toml(SAMPLE_TOML).unwrap();
+        let lines = vec!["no intent here".to_string()];
+        assert!(adapter.extract_intent_from_stdout(&lines).is_none());
     }
 }
