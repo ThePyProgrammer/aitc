@@ -13,7 +13,7 @@ AITC is built bottom-up following its dependency chain: a Tauri + React shell wi
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Foundation + App Shell** - Tauri v2 scaffold, React routing across 4 views, SQLite persistence layer, Command Horizon design system
-- [ ] **Phase 2: Real-Time Data Pipeline** - Rust file watcher with debouncing/reconciliation, process monitoring, event batching over IPC
+- [x] **Phase 2: Real-Time Data Pipeline** - Rust file watcher with debouncing/reconciliation, process monitoring, event batching over IPC (completed 2026-04-10)
 - [ ] **Phase 3: Agent Management + Conflict Detection** - Agent registry with adapter architecture, launch/observe agents, conflict detection engine
 - [ ] **Phase 4: Core UI Views** - Tower Control manifest, Communications Hub, Airspace Radar visualization, system tray notifications
 - [ ] **Phase 5: Conflict Resolution + History** - 3-way merge UI, session/conflict/approval history, file heat map, final polish
@@ -47,7 +47,12 @@ Plans:
   2. File events are attributed to specific agent processes via PID correlation
   3. System handles 10k+ file codebases without excessive CPU/memory (debouncing and event batching active)
   4. System detects whether agents share a working tree or use isolated git worktrees
-**Plans**: TBD
+**Plans:** 4/4 plans complete
+Plans:
+- [x] 02-01-PLAN.md -- Wave 0: Rust deps (notify 8, notify-debouncer-full 0.7, sysinfo 0.38, ignore 0.4), pipeline module scaffold, FileEvent types, Channel lifetime + sysinfo cost smoke tests
+- [x] 02-02-PLAN.md -- File watcher actor (150ms debouncer, writes-only filter, hardcoded excludes), tree index walker (gitignore-aware, 10k files <500ms), notify→tokio sync bridge
+- [x] 02-03-PLAN.md -- Process snapshot (sysinfo allowlist filter, best-effort PID attribution via cwd prefix match), attributing stream that rewrites FileEventBatch in-flight
+- [x] 02-04-PLAN.md -- Worktree porcelain parser, Tauri commands (start_watch/stop_watch/list_worktrees) wiring watcher+snapshot+Channel<FileEventBatch>, Zustand pipelineStore + usePipelineChannel hook
 
 ### Phase 3: Agent Management + Conflict Detection
 **Goal**: User can see, launch, and control agents from a live manifest, and the system detects file conflicts between concurrent agents in real time
@@ -94,7 +99,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation + App Shell | 0/4 | Planning complete | - |
-| 2. Real-Time Data Pipeline | 0/0 | Not started | - |
+| 2. Real-Time Data Pipeline | 4/4 | Complete    | 2026-04-10 |
 | 3. Agent Management + Conflict Detection | 0/0 | Not started | - |
 | 4. Core UI Views | 0/0 | Not started | - |
 | 5. Conflict Resolution + History | 0/0 | Not started | - |
