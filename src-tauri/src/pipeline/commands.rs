@@ -63,8 +63,18 @@ pub async fn start_watch(
         mpsc::channel::<FileEventBatch>(PIPELINE_MPSC_CAPACITY);
 
     // Spawn the watcher (Plan 02).
-    let watcher_output =
-        spawn_watcher(&canonical, raw_tx).map_err(|e| format!("spawn_watcher failed: {e}"))?;
+    // spawn_watcher calls build_tree_index which blocks for 50-500ms on large
+    // repos. Wrap in spawn_blocking to avoid starving the tokio async executor.
+    let watcher_output = {
+        let canonical_clone = canonical.clone();
+        let raw_tx_clone = raw_tx;
+        tauri::async_runtime::spawn_blocking(move || {
+            spawn_watcher(&canonical_clone, raw_tx_clone)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking join error: {e}"))?
+        .map_err(|e| format!("spawn_watcher failed: {e}"))?
+    };
 
     // Spawn snapshot refresher (Plan 03).
     let snapshot = Arc::new(RwLock::new(ProcessSnapshot::new()));
