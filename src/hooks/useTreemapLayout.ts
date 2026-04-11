@@ -48,7 +48,9 @@ export function buildFileTree(entries: TreeIndexEntry[]): FileTreeNode {
   for (const entry of entries) {
     if (entry.isDir) continue; // We'll build dirs from file paths
 
-    const segments = entry.path.split('/');
+    // WR-06: Normalize backslash separators from Windows paths before splitting
+    const normalized = entry.path.replace(/\\/g, '/');
+    const segments = normalized.split('/');
     let current = root;
 
     // Traverse/create directory nodes
@@ -71,7 +73,7 @@ export function buildFileTree(entries: TreeIndexEntry[]): FileTreeNode {
     // Add file node
     const fileName = segments[segments.length - 1];
     current.children.push({
-      path: entry.path,
+      path: normalized,
       name: fileName,
       size: entry.size || 1,
       isDir: false,
