@@ -2,6 +2,8 @@ import { useState, useCallback } from 'react';
 import { useCommsStore } from '../../stores/commsStore';
 import { InlineDiff } from './InlineDiff';
 import { ApprovalActions } from './ApprovalActions';
+import { ChatThread } from './ChatThread';
+import { ChatInput } from './ChatInput';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { UrgencyBadge } from '../../components/ui/UrgencyBadge';
 
@@ -100,6 +102,16 @@ export function RequestDetail() {
           hasEdits={edits.size > 0}
           editedContent={buildEditedContent()}
         />
+      </div>
+
+      {/* Chat thread */}
+      <div className="px-6 pb-2">
+        <ChatThread agentId={selectedRequest.agentId} />
+      </div>
+
+      {/* Chat input */}
+      <div className="px-6 pb-4">
+        <ChatInput agentId={selectedRequest.agentId} />
       </div>
     </div>
   );
