@@ -125,8 +125,9 @@ pub async fn read_conflict_files(
     let current_content = std::fs::read_to_string(&alert.file_path)
         .map_err(|e| format!("Failed to read file: {e}"))?;
 
-    // Get base version from git
-    let base_content = get_git_base_content(&file_path).await.unwrap_or_default();
+    // Get base version from git, anchored to file's parent directory
+    let repo_dir = alert.file_path.parent().unwrap_or(std::path::Path::new("."));
+    let base_content = get_git_base_content(&file_path, repo_dir).await.unwrap_or_default();
 
     Ok(ConflictFileVersions {
         base_content,
@@ -139,12 +140,16 @@ pub async fn read_conflict_files(
 }
 
 /// Get the base file content from git HEAD.
-async fn get_git_base_content(relative_path: &str) -> Result<String, String> {
+///
+/// `repo_root` anchors the git command to the correct working directory,
+/// preventing the command from running in an arbitrary CWD (T-05-CR-02).
+async fn get_git_base_content(relative_path: &str, repo_root: &std::path::Path) -> Result<String, String> {
     // Normalize path separators for git (always forward slashes)
     let git_path = relative_path.replace('\\', "/");
 
     let output = tokio::process::Command::new("git")
-        .args(["show", &format!("HEAD:{git_path}")])
+        .current_dir(repo_root)
+        .args(["show", "--", &format!("HEAD:{git_path}")])
         .output()
         .await
         .map_err(|e| format!("Failed to run git: {e}"))?;
@@ -202,7 +207,8 @@ pub async fn apply_resolution(
     // 2. Read current file + git base
     let current_content = std::fs::read_to_string(&alert.file_path)
         .map_err(|e| format!("Failed to read file: {e}"))?;
-    let base_content = get_git_base_content(&file_path).await.unwrap_or_default();
+    let repo_dir = alert.file_path.parent().unwrap_or(std::path::Path::new("."));
+    let base_content = get_git_base_content(&file_path, repo_dir).await.unwrap_or_default();
 
     // 3. Save backups via BackupManager
     let backup_manager = app
