@@ -17,7 +17,7 @@ export function MergeView() {
   const resolveHunk = useConflictStore((s) => s.resolveHunk);
   const applyResolution = useConflictStore((s) => s.applyResolution);
   const discardAll = useConflictStore((s) => s.discardAll);
-  const resolvedCount = useConflictStore((s) => s.resolvedCount);
+  const resolvedCount = useConflictStore((s) => s.resolvedCount());
   // unresolvedCount available for future use (e.g., keyboard nav to next unresolved)
   const _unresolvedCount = useConflictStore((s) => s.unresolvedCount);
   void _unresolvedCount;
@@ -111,7 +111,7 @@ export function MergeView() {
       <ResolutionToolbar
         filePath={activeMerge.filePath}
         conflictId={activeMerge.conflictId}
-        resolvedCount={resolvedCount()}
+        resolvedCount={resolvedCount}
         totalConflicts={totalConflicts}
         onApply={applyResolution}
         onDiscard={discardAll}
