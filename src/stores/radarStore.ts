@@ -2,9 +2,12 @@
 //
 // VIZN-01: Manages viewport state, tree index data, selected agent, and manifest toggle.
 // Uses periodic tree index refresh via Tauri invoke('get_tree_index').
+// FMON-05: Heat map overlay state with contention score computation.
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import { computeContentionScore } from '../lib/contention';
+import type { ConflictAlert } from './conflictStore';
 
 export interface TreeIndexEntry {
   path: string;
@@ -39,10 +42,14 @@ interface RadarStore {
   viewport: Viewport;
   selectedAgentId: string | null;
   isManifestOpen: boolean;
+  heatMapEnabled: boolean;
+  contentionScores: Map<string, number>;
   fetchTreeIndex: () => Promise<void>;
   setViewport: (v: Partial<Viewport>) => void;
   selectAgent: (id: string | null) => void;
   toggleManifest: () => void;
+  toggleHeatMap: () => void;
+  updateContentionScores: (conflicts: ConflictAlert[], agentFileEvents: Map<string, string[]>) => void;
   reset: () => void;
 }
 
@@ -51,6 +58,8 @@ export const useRadarStore = create<RadarStore>((set) => ({
   viewport: { zoom: 1, panX: 0, panY: 0 },
   selectedAgentId: null,
   isManifestOpen: true,
+  heatMapEnabled: false,
+  contentionScores: new Map(),
 
   fetchTreeIndex: async () => {
     try {
@@ -69,11 +78,57 @@ export const useRadarStore = create<RadarStore>((set) => ({
   toggleManifest: () =>
     set((s) => ({ isManifestOpen: !s.isManifestOpen })),
 
+  toggleHeatMap: () =>
+    set((s) => ({ heatMapEnabled: !s.heatMapEnabled })),
+
+  updateContentionScores: (conflicts, agentFileEvents) => {
+    const fileStats = new Map<string, { conflictCount: number; agentIds: Set<string> }>();
+
+    // Accumulate conflict data
+    for (const conflict of conflicts) {
+      const existing = fileStats.get(conflict.filePath) ?? { conflictCount: 0, agentIds: new Set() };
+      existing.conflictCount += 1;
+      existing.agentIds.add(conflict.agentAId);
+      existing.agentIds.add(conflict.agentBId);
+      fileStats.set(conflict.filePath, existing);
+    }
+
+    // Merge in agent file events
+    for (const [agentId, filePaths] of agentFileEvents) {
+      for (const filePath of filePaths) {
+        const existing = fileStats.get(filePath) ?? { conflictCount: 0, agentIds: new Set() };
+        existing.agentIds.add(agentId);
+        fileStats.set(filePath, existing);
+      }
+    }
+
+    // Compute normalization ceilings
+    let maxConflicts = 0;
+    let maxAgents = 0;
+    for (const stats of fileStats.values()) {
+      if (stats.conflictCount > maxConflicts) maxConflicts = stats.conflictCount;
+      if (stats.agentIds.size > maxAgents) maxAgents = stats.agentIds.size;
+    }
+
+    // Compute scores
+    const scores = new Map<string, number>();
+    for (const [filePath, stats] of fileStats) {
+      const score = computeContentionScore(stats.conflictCount, stats.agentIds.size, maxConflicts, maxAgents);
+      if (score > 0) {
+        scores.set(filePath, score);
+      }
+    }
+
+    set({ contentionScores: scores });
+  },
+
   reset: () =>
     set({
       treeData: [],
       viewport: { zoom: 1, panX: 0, panY: 0 },
       selectedAgentId: null,
       isManifestOpen: true,
+      heatMapEnabled: false,
+      contentionScores: new Map(),
     }),
 }));

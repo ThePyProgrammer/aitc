@@ -14,12 +14,14 @@
 // than 30s fade to 30% opacity. Sub-pixel culling applies.
 
 import { useEffect, useRef, useCallback, useState } from 'react';
+import { Flame } from 'lucide-react';
 import { useRadarStore } from '../../stores/radarStore';
 import { getAgentColor } from '../../stores/radarStore';
 import { useAgentStore } from '../../stores/agentStore';
 import { usePipelineStore } from '../../stores/pipelineStore';
 import { useTreemapLayout, type TreemapRect } from '../../hooks/useTreemapLayout';
 import { useCanvasZoomPan } from '../../hooks/useCanvasZoomPan';
+import { drawHeatMap } from './HeatMapOverlay';
 import type { FileEvent } from '../../bindings';
 
 // Lead line fade: 30s max age
@@ -66,6 +68,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
 
   const treeData = useRadarStore((s) => s.treeData);
   const selectedAgentId = useRadarStore((s) => s.selectedAgentId);
+  const heatMapEnabled = useRadarStore((s) => s.heatMapEnabled);
+  const contentionScores = useRadarStore((s) => s.contentionScores);
   const agents = useAgentStore((s) => s.agents);
   const events = usePipelineStore((s) => s.events);
 
@@ -179,6 +183,15 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const viewportRef = useRef(viewport);
   useEffect(() => { viewportRef.current = viewport; }, [viewport]);
 
+  // Heat map refs for render loop access
+  const heatMapEnabledRef = useRef(heatMapEnabled);
+  useEffect(() => { heatMapEnabledRef.current = heatMapEnabled; }, [heatMapEnabled]);
+  const contentionScoresRef = useRef(contentionScores);
+  useEffect(() => { contentionScoresRef.current = contentionScores; }, [contentionScores]);
+
+  // Mark dirty when heatMap state changes
+  useEffect(() => { dirtyRef.current = true; }, [heatMapEnabled, contentionScores]);
+
   // Main render loop -- single rAF loop for the lifetime of the component
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -210,6 +223,9 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         );
 
         drawTreemap(ctx, layoutRef.current, vp.zoom);
+        if (heatMapEnabledRef.current && contentionScoresRef.current.size > 0) {
+          drawHeatMap(ctx, layoutRef.current, contentionScoresRef.current, vp.zoom);
+        }
         drawLeadLines(ctx, layoutRef.current, vp.zoom);
         drawAgentHighlight(ctx, layoutRef.current, vp.zoom);
         hasAnimatingDots = drawAgentDots(ctx, layoutRef.current, vp.zoom);
@@ -519,6 +535,20 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       <div className="absolute bottom-3 left-3 font-mono text-[10px] text-on-surface-variant/50 select-none">
         {viewport.zoom.toFixed(1)}x
       </div>
+      {/* Heat map toggle */}
+      <button
+        onClick={() => useRadarStore.getState().toggleHeatMap()}
+        className={`absolute bottom-3 left-16 flex items-center gap-1 px-2 py-1 font-headline text-[10px] uppercase tracking-widest transition-colors duration-150 ${
+          heatMapEnabled
+            ? 'text-primary bg-primary/10'
+            : 'text-on-surface-variant bg-transparent hover:bg-surface-container-high'
+        }`}
+        aria-label="Toggle heat map overlay"
+        aria-pressed={heatMapEnabled}
+      >
+        <Flame size={16} strokeWidth={1.5} />
+        HEAT_MAP
+      </button>
     </div>
   );
 }
