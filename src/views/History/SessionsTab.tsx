@@ -98,19 +98,39 @@ export function SessionsTab() {
   });
 
   const handleRowClick = useCallback(async (session: SessionRecord) => {
-    if (expandedRowId === session.id) {
-      setExpandedRowId(null);
-      setExpandedFiles([]);
-      return;
-    }
-    setExpandedRowId(session.id);
+    let shouldFetch = false;
+    setExpandedRowId((prev) => {
+      if (prev === session.id) {
+        setExpandedFiles([]);
+        return null;
+      }
+      shouldFetch = true;
+      return session.id;
+    });
+
+    if (!shouldFetch) return;
+
+    // Re-measure virtualizer after expansion state change
+    setTimeout(() => rowVirtualizer.measure(), 0);
+
     try {
       const files = await invoke<SessionFile[]>('list_session_files', { sessionId: session.id });
-      setExpandedFiles(files.slice(0, 10));
+      // Only update if this session is still expanded (guard against rapid clicks)
+      setExpandedRowId((current) => {
+        if (current === session.id) {
+          setExpandedFiles(files.slice(0, 10));
+        }
+        return current;
+      });
     } catch {
-      setExpandedFiles([]);
+      setExpandedRowId((current) => {
+        if (current === session.id) {
+          setExpandedFiles([]);
+        }
+        return current;
+      });
     }
-  }, [expandedRowId]);
+  }, [rowVirtualizer]);
 
   const sortArrow = (field: SortField) =>
     sortField === field ? (sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : '';
