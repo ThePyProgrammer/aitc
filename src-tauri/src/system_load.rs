@@ -2,8 +2,15 @@
 //!
 //! Provides a Tauri command returning live CPU and memory usage percentages.
 //! The frontend polls this every 2 seconds for the Comms Hub telemetry panel.
+//!
+//! WR-01: The System struct is held in managed state (SystemLoadState) and
+//! reused across calls. The 2-second polling cadence from the frontend
+//! provides sufficient delta for meaningful CPU usage readings, eliminating
+//! the need for a blocking 200ms sleep on every call.
 
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// Live system load snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -13,21 +20,34 @@ pub struct SystemLoadInfo {
     pub memory_percent: f64,
 }
 
+/// Managed state wrapping a reusable sysinfo::System instance.
+/// The System struct retains kernel state between refreshes, producing
+/// accurate delta-based CPU usage values without a sleep delay.
+pub struct SystemLoadState {
+    pub system: Arc<Mutex<sysinfo::System>>,
+}
+
+impl SystemLoadState {
+    pub fn new() -> Self {
+        Self {
+            system: Arc::new(Mutex::new(sysinfo::System::new())),
+        }
+    }
+}
+
 /// Tauri command: get current CPU and memory usage.
 ///
-/// Uses sysinfo to query OS kernel metrics. A short 200ms delay after
-/// `refresh_cpu_all()` ensures `global_cpu_usage()` returns a meaningful
-/// value on first invocation.
+/// Reuses the System instance from managed state. The frontend's 2-second
+/// polling interval provides the time delta needed for meaningful CPU
+/// usage values between refresh calls.
 #[tauri::command]
 #[specta::specta]
-pub async fn get_system_load() -> Result<SystemLoadInfo, String> {
-    let mut system = sysinfo::System::new();
+pub async fn get_system_load(
+    state: tauri::State<'_, SystemLoadState>,
+) -> Result<SystemLoadInfo, String> {
+    let mut system = state.system.lock().await;
 
     system.refresh_cpu_all();
-    // CPU usage requires a short delay after refresh to produce meaningful values
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    system.refresh_cpu_all();
-
     system.refresh_memory();
 
     let cpu_percent = system.global_cpu_usage() as f64;

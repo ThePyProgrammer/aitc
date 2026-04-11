@@ -82,6 +82,7 @@ pub fn run() {
         .manage(agent_registry.clone())
         .manage(agents::notifications::NotificationState::new())
         .manage(conflict::ConflictState::new(5000))
+        .manage(system_load::SystemLoadState::new())
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             // System tray (D-13)
