@@ -106,7 +106,13 @@ pub async fn start_watch(
     // Create broadcast channel for conflict engine fan-out.
     // The forwarder sends each batch to both the frontend Channel and the
     // conflict engine via broadcast.
+    //
+    // WR-02: Subscribe both receivers BEFORE spawning the forwarder task
+    // to prevent the first events from being dropped when there are zero
+    // active receivers at the moment of send.
     let (conflict_tx, _) = broadcast::channel::<FileEventBatch>(256);
+    let mut conflict_rx = conflict_tx.subscribe();
+    let protected_rx = conflict_tx.subscribe();
 
     // Spawn the Channel forwarder: reads attributed batches, fans out to
     // conflict engine via broadcast, then sends over the Tauri Channel.
@@ -128,7 +134,6 @@ pub async fn start_watch(
     // and dispatches OS notifications for conflict state (D-09).
     let conflict_window_ms = conflict_state.get_window_ms();
     let app_handle_clone = app_handle.clone();
-    let mut conflict_rx = conflict_tx.subscribe();
     let conflict_task = tokio::spawn(async move {
         let mut engine = ConflictEngine::new(Duration::from_millis(conflict_window_ms));
         while let Ok(batch) = conflict_rx.recv().await {
@@ -152,8 +157,7 @@ pub async fn start_watch(
         }
     });
 
-    // Spawn protected path trigger (D-07): subscribe to same broadcast channel
-    let protected_rx = conflict_tx.subscribe();
+    // Spawn protected path trigger (D-07): uses pre-subscribed broadcast receiver
     let protected_path_handle = Some(spawn_protected_path_watcher(
         protected_rx,
         pool.inner().clone(),
