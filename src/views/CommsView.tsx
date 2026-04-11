@@ -2,6 +2,7 @@ import { useEffect, useCallback } from 'react';
 import { useCommsStore } from '../stores/commsStore';
 import { RequestQueue } from './CommsHub/RequestQueue';
 import { RequestDetail } from './CommsHub/RequestDetail';
+import { TelemetryPanel } from './CommsHub/TelemetryPanel';
 
 export function CommsView() {
   const fetchRequests = useCommsStore((s) => s.fetchRequests);
@@ -122,15 +123,8 @@ export function CommsView() {
       {/* Center panel: Request Detail (flex-1) */}
       <RequestDetail />
 
-      {/* Right panel: Telemetry placeholder (260px fixed) */}
-      <div className="w-[260px] shrink-0 bg-surface-container flex flex-col items-center justify-center">
-        <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/40">
-          TELEMETRY_PANEL
-        </span>
-        <p className="mt-2 font-mono text-[10px] text-on-surface-variant/30">
-          Available in Plan 04
-        </p>
-      </div>
+      {/* Right panel: Telemetry (260px fixed) */}
+      <TelemetryPanel />
     </div>
   );
 }
