@@ -161,27 +161,38 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
   },
 
   subscribeToApprovals: async () => {
-    const unlisten = await listen<ApprovalRequest>('approval-request-created', (event) => {
-      const { editingRequestId, requests } = get();
-      // If the incoming request matches the one being edited, skip the update (freeze)
-      if (editingRequestId !== null && event.payload.id === editingRequestId) {
-        return;
-      }
-      // Check if request already exists (update) or is new (add)
-      const existing = requests.find((r) => r.id === event.payload.id);
-      if (existing) {
-        set((s) => ({
-          requests: s.requests.map((r) =>
-            r.id === event.payload.id ? event.payload : r
-          ),
-        }));
-      } else {
-        set((s) => ({
-          requests: [...s.requests, event.payload],
-        }));
-      }
-    });
-    return unlisten;
+    // WR-04: Listen to all three approval events for real-time state sync.
+    // Previously only listened to 'approval-request-created', missing
+    // approve/deny/info updates from the backend.
+    const [unCreated, unResolved, unUpdated] = await Promise.all([
+      listen<ApprovalRequest>('approval-request-created', (event) => {
+        const { editingRequestId, requests } = get();
+        // If the incoming request matches the one being edited, skip the update (freeze)
+        if (editingRequestId !== null && event.payload.id === editingRequestId) {
+          return;
+        }
+        // Check if request already exists (update) or is new (add)
+        const existing = requests.find((r) => r.id === event.payload.id);
+        if (existing) {
+          set((s) => ({
+            requests: s.requests.map((r) =>
+              r.id === event.payload.id ? event.payload : r
+            ),
+          }));
+        } else {
+          set((s) => ({
+            requests: [...s.requests, event.payload],
+          }));
+        }
+      }),
+      listen<number>('approval-resolved', () => {
+        get().fetchRequests();
+      }),
+      listen<number>('approval-updated', () => {
+        get().fetchRequests();
+      }),
+    ]);
+    return () => { unCreated(); unResolved(); unUpdated(); };
   },
 
   pendingCount: () => get().requests.filter((r) => r.status === 'pending').length,
