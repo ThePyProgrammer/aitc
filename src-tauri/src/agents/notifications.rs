@@ -98,6 +98,25 @@ pub fn dispatch_state_notification(
         .unwrap_or_else(|e| tracing::warn!("notification send failed: {e}"));
 }
 
+/// Dispatch a native OS notification for an approval request (COMM-05).
+///
+/// Called when a new approval request is created, alerting the user that
+/// an agent requires attention.
+pub fn dispatch_approval_notification(
+    app_handle: &tauri::AppHandle,
+    agent_id: &str,
+    file_path: &str,
+) {
+    use tauri_plugin_notification::NotificationExt;
+    app_handle
+        .notification()
+        .builder()
+        .title("APPROVAL_REQUIRED")
+        .body(&format!("{} requests access to {}", agent_id, file_path))
+        .show()
+        .unwrap_or_else(|e| tracing::warn!("approval notification send failed: {e}"));
+}
+
 /// Tauri command: get current notification preferences.
 #[tauri::command]
 #[specta::specta]

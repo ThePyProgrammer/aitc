@@ -83,10 +83,10 @@ Plans:
   5. Native OS notifications and system tray alerts fire when an agent requires user action
 **Plans:** 5 plans
 Plans:
-- [ ] 04-01-PLAN.md -- Backend foundation: DB migration 002, comms Tauri commands (approval workflow + chat + protected paths), get_tree_index pipeline command
-- [ ] 04-02-PLAN.md -- Communications Hub approval core: commsStore, 3-panel layout, RequestQueue, InlineDiff with editable lines, ApprovalActions, PendingCountBadge
-- [ ] 04-03-PLAN.md -- Airspace Radar core: radarStore, squarified treemap layout, Canvas 2D rendering with zoom/pan, agent dots with pulse animation
-- [ ] 04-04-PLAN.md -- Comms Hub chat + telemetry: ChatThread with delivery status, TelemetryPanel, SystemLoad, MiniChatCard, OS notification wiring
+- [x] 04-01-PLAN.md -- Backend foundation: DB migration 002, comms Tauri commands (approval workflow + chat + protected paths), get_tree_index pipeline command
+- [x] 04-02-PLAN.md -- Communications Hub approval core: commsStore, 3-panel layout, RequestQueue, InlineDiff with editable lines, ApprovalActions, PendingCountBadge
+- [x] 04-03-PLAN.md -- Airspace Radar core: radarStore, squarified treemap layout, Canvas 2D rendering with zoom/pan, agent dots with pulse animation
+- [x] 04-04-PLAN.md -- Comms Hub chat + telemetry: ChatThread with delivery status, TelemetryPanel, SystemLoad, MiniChatCard, OS notification wiring
 - [ ] 04-05-PLAN.md -- Radar interaction: lead lines with fade, RadarManifest, AgentTooltip, RadarMinimap, visual verification checkpoint
 **UI hint**: yes
 

@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebSearch",
+      "Bash(python:*)",
+      "Bash(node __TRACKED_VAR__/.claude/get-shit-done/bin/gsd-tools.cjs commit 'docs: create roadmap \\(5 phases\\)' --files .planning/ROADMAP.md .planning/STATE.md .planning/REQUIREMENTS.md CLAUDE.md)",
+      "Skill(gsd-execute-phase)",
+      "Skill(gsd-code-review)",
+      "Bash(node:*)",
+      "Skill(gsd-plan-phase)",
+      "Skill(gsd-ui-phase)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git merge:*)",
+      "Bash(git commit:*)",
+      "Bash(git worktree:*)",
+      "Bash(git branch:*)",
+      "Bash(git cherry-pick:*)",
+      "Bash(npx vitest:*)",
+      "Bash(cargo check:*)"
+    ]
+  }
+}

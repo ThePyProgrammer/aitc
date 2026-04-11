@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AERO_CODE_CMD // CONFLICT_RESOLUTION</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;family=Roboto+Mono&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary-fixed-variant": "#00586d",
+                        "inverse-on-surface": "#565554",
+                        "on-surface": "#ffffff",
+                        "surface-variant": "#262626",
+                        "on-primary-fixed-variant": "#0d6200",
+                        "tertiary-container": "#ffbf00",
+                        "surface": "#0e0e0e",
+                        "primary-fixed-dim": "#2be800",
+                        "on-tertiary-fixed-variant": "#614700",
+                        "secondary": "#00cffc",
+                        "on-primary": "#0d6100",
+                        "surface-dim": "#0e0e0e",
+                        "on-primary-container": "#0b5800",
+                        "inverse-primary": "#106f00",
+                        "on-primary-fixed": "#064200",
+                        "secondary-container": "#00677f",
+                        "secondary-fixed-dim": "#37d4ff",
+                        "secondary-dim": "#00c0ea",
+                        "tertiary-dim": "#eeb200",
+                        "on-tertiary": "#614700",
+                        "tertiary-fixed": "#ffbf00",
+                        "surface-bright": "#2c2c2c",
+                        "on-surface-variant": "#adaaaa",
+                        "on-tertiary-fixed": "#3d2b00",
+                        "tertiary": "#ffd16f",
+                        "secondary-fixed": "#80deff",
+                        "surface-container-low": "#131313",
+                        "on-error-container": "#ffd2c8",
+                        "outline": "#777575",
+                        "error-container": "#b92902",
+                        "primary-dim": "#2be800",
+                        "on-secondary-container": "#eef9ff",
+                        "on-error": "#450900",
+                        "primary-container": "#2ff801",
+                        "on-tertiary-container": "#563e00",
+                        "primary-fixed": "#2ff801",
+                        "tertiary-fixed-dim": "#eeb200",
+                        "surface-container-high": "#201f1f",
+                        "error": "#ff7351",
+                        "outline-variant": "#494847",
+                        "surface-container-lowest": "#000000",
+                        "on-secondary-fixed": "#003a48",
+                        "background": "#0e0e0e",
+                        "error-dim": "#d53d18",
+                        "surface-container-highest": "#262626",
+                        "primary": "#8eff71",
+                        "on-secondary": "#004050",
+                        "surface-tint": "#8eff71",
+                        "surface-container": "#1a1919",
+                        "inverse-surface": "#fcf8f8",
+                        "on-background": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0px",
+                        "lg": "0px",
+                        "xl": "0px",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Space Grotesk"],
+                        "mono": ["Roboto Mono"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .scanline-wipe {
+            position: relative;
+            overflow: hidden;
+        }
+        .scanline-wipe::after {
+            content: "";
+            position: absolute;
+            top: -100%;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom, transparent, rgba(57, 255, 20, 0.05), transparent);
+            pointer-events: none;
+        }
+        .pulse-on-hover:hover {
+            box-shadow: 0 0 15px rgba(142, 255, 113, 0.2);
+        }
+        .tonal-shift {
+            transition: background-color 0.2s ease;
+        }
+    </style>
+</head>
+<body class="bg-surface text-on-surface font-body selection:bg-primary selection:text-on-primary">
+<!-- TopAppBar Shell -->
+<header class="fixed top-0 w-full z-50 bg-[#131313] py-2 flex justify-between items-center px-6 h-14 border-none">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold tracking-tighter text-[#39FF14] font-headline">AERO_CODE_CMD</span>
+<nav class="hidden md:flex gap-6 items-center">
+<a class="font-headline tracking-[0.05em] uppercase text-xs text-neutral-500 hover:text-[#39FF14] hover:bg-neutral-900 transition-colors px-2 py-1" href="#">SYSTEM_HEALTH</a>
+<a class="font-headline tracking-[0.05em] uppercase text-xs text-neutral-500 hover:text-[#39FF14] hover:bg-neutral-900 transition-colors px-2 py-1" href="#">ACTIVE_THREADS</a>
+<a class="font-headline tracking-[0.05em] uppercase text-xs text-[#39FF14] font-bold border-b border-[#39FF14] px-2 py-1" href="#">CONFLICT_RESOLUTION</a>
+</nav>
+</div>
+<div class="flex items-center gap-4 text-[#39FF14]">
+<div class="bg-neutral-900 px-3 py-1 flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-xs font-mono w-32 uppercase" placeholder="CMD_INPUT..." type="text"/>
+</div>
+<span class="material-symbols-outlined cursor-pointer hover:bg-neutral-900 p-1">settings_input_component</span>
+<span class="material-symbols-outlined cursor-pointer hover:bg-neutral-900 p-1">notifications_active</span>
+<span class="material-symbols-outlined cursor-pointer hover:bg-neutral-900 p-1">account_tree</span>
+</div>
+</header>
+<!-- SideNavBar Shell -->
+<aside class="fixed left-0 h-full w-20 md:w-64 bg-[#131313] flex flex-col py-8 z-40 mt-14 border-none">
+<div class="px-6 mb-10">
+<div class="font-headline uppercase tracking-widest text-[#39FF14] font-black text-lg">HORIZON_01</div>
+<div class="font-headline uppercase tracking-widest text-neutral-600 text-[10px]">SECTOR_GRID_ALPHA</div>
+</div>
+<nav class="flex-1 flex flex-col">
+<div class="flex items-center gap-4 px-6 py-4 text-neutral-600 hover:bg-[#201f1f] hover:text-[#39FF14] transition-colors cursor-pointer group">
+<span class="material-symbols-outlined" data-icon="radar">radar</span>
+<span class="font-headline uppercase tracking-widest hidden md:block">RADAR</span>
+</div>
+<div class="flex items-center gap-4 px-6 py-4 text-neutral-600 hover:bg-[#201f1f] hover:text-[#39FF14] transition-colors cursor-pointer group">
+<span class="material-symbols-outlined" data-icon="settings_input_antenna">settings_input_antenna</span>
+<span class="font-headline uppercase tracking-widest hidden md:block">TOWER</span>
+</div>
+<div class="flex items-center gap-4 px-6 py-4 text-neutral-600 hover:bg-[#201f1f] hover:text-[#39FF14] transition-colors cursor-pointer group">
+<span class="material-symbols-outlined" data-icon="forum">forum</span>
+<span class="font-headline uppercase tracking-widest hidden md:block">COMMS</span>
+</div>
+<div class="flex items-center gap-4 px-6 py-4 bg-[#1a1919] text-[#39FF14] border-l-2 border-[#39FF14] cursor-pointer">
+<span class="material-symbols-outlined" data-icon="warning">warning</span>
+<span class="font-headline uppercase tracking-widest hidden md:block">CONFLICTS</span>
+</div>
+</nav>
+<div class="px-4 mb-4">
+<button class="w-full bg-primary text-on-primary py-3 font-headline font-bold uppercase tracking-widest text-xs pulse-on-hover">DEPLOY_AGENT</button>
+</div>
+<div class="mt-auto border-t border-outline-variant/10 pt-4">
+<div class="flex items-center gap-4 px-6 py-3 text-neutral-600 hover:text-[#39FF14] cursor-pointer">
+<span class="material-symbols-outlined" data-icon="terminal">terminal</span>
+<span class="font-headline uppercase tracking-widest text-xs hidden md:block">TERMINAL</span>
+</div>
+<div class="flex items-center gap-4 px-6 py-3 text-neutral-600 hover:text-[#39FF14] cursor-pointer">
+<span class="material-symbols-outlined" data-icon="list_alt">list_alt</span>
+<span class="font-headline uppercase tracking-widest text-xs hidden md:block">LOGS</span>
+</div>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="ml-20 md:ml-64 mt-14 p-6 min-h-screen bg-surface-container-lowest">
+<!-- Header Alert Section -->
+<div class="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
+<div>
+<div class="flex items-center gap-3 text-tertiary mb-2">
+<span class="material-symbols-outlined animate-pulse" style="font-variation-settings: 'FILL' 1;">warning</span>
+<span class="font-headline font-bold tracking-widest uppercase text-sm">AGENT Conflict Detected</span>
+</div>
+<h1 class="text-4xl font-headline font-extrabold tracking-tight text-white">CORE_DAEMON_v4.ts</h1>
+<p class="text-on-surface-variant font-mono text-xs mt-1">/src/runtime/engine/CORE_DAEMON_v4.ts • COLLISION_ID: 0x88FF12</p>
+</div>
+<div class="flex gap-4">
+<div class="bg-surface-container border-l-2 border-tertiary p-4 flex flex-col">
+<span class="text-[10px] text-on-surface-variant font-headline uppercase tracking-widest">Time to Lockout</span>
+<span class="text-xl font-mono text-white">00:42:12</span>
+</div>
+<div class="bg-surface-container border-l-2 border-primary p-4 flex flex-col">
+<span class="text-[10px] text-on-surface-variant font-headline uppercase tracking-widest">Priority Level</span>
+<span class="text-xl font-mono text-white">CRITICAL_01</span>
+</div>
+</div>
+</div>
+<!-- Triple Column Diff View -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-1 h-[calc(100vh-280px)] min-h-[600px]">
+<!-- AGENT_ALPHA Source -->
+<div class="lg:col-span-3 bg-surface-container flex flex-col border border-outline-variant/5">
+<div class="bg-surface-container-high p-3 flex justify-between items-center border-b border-outline-variant/10">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 bg-secondary shadow-[0_0_8px_rgba(0,207,252,0.6)]"></div>
+<span class="font-headline font-bold text-xs uppercase tracking-widest text-secondary">AGENT_ALPHA</span>
+</div>
+<span class="text-[10px] font-mono text-on-surface-variant">v2.1.4</span>
+</div>
+<div class="flex-1 overflow-auto p-4 font-mono text-[11px] leading-relaxed text-on-surface-variant bg-surface-container-low">
+<div class="opacity-40">041: export const initialize = () =&gt; {</div>
+<div class="opacity-40">042:   console.log("ENGINE_START");</div>
+<div class="bg-secondary/10 text-secondary border-l-2 border-secondary px-2 my-1 py-0.5">
+                        043:   const buffer = new SharedArrayBuffer(2048);
+                    </div>
+<div class="bg-secondary/10 text-secondary border-l-2 border-secondary px-2 my-1 py-0.5">
+                        044:   this.stack = Atomics.wait(buffer, 0, 0);
+                    </div>
+<div class="opacity-40">045:   return true;</div>
+<div class="opacity-40">046: }</div>
+</div>
+<div class="p-3">
+<button class="w-full bg-secondary/10 border border-secondary/30 text-secondary py-2 font-headline text-[10px] font-bold uppercase tracking-widest hover:bg-secondary/20 transition-all">
+                        Accept Agent Alpha
+                    </button>
+</div>
+</div>
+<!-- CENTRAL_MANIFEST (Merged/Current) -->
+<div class="lg:col-span-6 bg-surface-container-lowest flex flex-col relative border border-primary/20">
+<div class="absolute inset-0 pointer-events-none opacity-[0.03]" style="background-image: linear-gradient(rgba(142, 255, 113, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(142, 255, 113, 0.1) 1px, transparent 1px); background-size: 20px 20px;"></div>
+<div class="bg-surface-container-highest p-3 flex justify-between items-center z-10 border-b border-outline-variant/10">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-sm" style="font-variation-settings: 'FILL' 1;">terminal</span>
+<span class="font-headline font-bold text-xs uppercase tracking-widest text-primary">CENTRAL_MANIFEST</span>
+</div>
+<div class="flex gap-2">
+<span class="bg-tertiary/20 text-tertiary text-[9px] px-2 py-0.5 font-bold">2_CONFLICTS</span>
+<span class="bg-primary/20 text-primary text-[9px] px-2 py-0.5 font-bold">L_43-44</span>
+</div>
+</div>
+<div class="flex-1 overflow-auto p-6 font-mono text-sm leading-relaxed z-10">
+<div class="text-on-surface-variant flex gap-4"><span class="w-8 opacity-30">041</span><span>export const initialize = () =&gt; {</span></div>
+<div class="text-on-surface-variant flex gap-4"><span class="w-8 opacity-30">042</span><span>  console.log("ENGINE_START");</span></div>
+<div class="my-4 border border-tertiary/30 bg-tertiary/5 relative group">
+<div class="absolute -left-1 top-0 bottom-0 w-1 bg-tertiary shadow-[0_0_10px_rgba(255,209,111,0.5)]"></div>
+<div class="flex items-center justify-between bg-tertiary/10 px-3 py-1 text-[10px] font-headline font-bold text-tertiary tracking-tighter">
+<span>CONFLICT_ZONE_01</span>
+<div class="flex gap-2">
+<button class="hover:underline">USE_A</button>
+<span>/</span>
+<button class="hover:underline">USE_B</button>
+<span>/</span>
+<button class="hover:underline">MANUAL</button>
+</div>
+</div>
+<div class="p-4 space-y-1">
+<div class="flex gap-4 text-tertiary"><span class="w-8 opacity-30 italic">???</span><span class="italic underline decoration-dotted">RESOLVE_LOGIC_REQUIRED</span></div>
+<div class="flex gap-4 text-tertiary"><span class="w-8 opacity-30 italic">???</span><span class="italic underline decoration-dotted">RESOLVE_LOGIC_REQUIRED</span></div>
+</div>
+</div>
+<div class="text-on-surface-variant flex gap-4"><span class="w-8 opacity-30">045</span><span>  return true;</span></div>
+<div class="text-on-surface-variant flex gap-4"><span class="w-8 opacity-30">046</span><span>}</span></div>
+<div class="text-on-surface-variant flex gap-4"><span class="w-8 opacity-30">047</span><span> </span></div>
+<div class="text-on-surface-variant flex gap-4"><span class="w-8 opacity-30">048</span><span class="text-primary animate-pulse">|</span></div>
+</div>
+<div class="p-4 bg-surface-container-high border-t border-outline-variant/10 flex justify-end gap-3 z-10">
+<button class="px-6 py-2 border border-outline text-on-surface-variant font-headline text-[10px] font-bold uppercase tracking-widest hover:text-white transition-colors">Discard All</button>
+<button class="px-8 py-2 bg-primary text-on-primary font-headline text-[10px] font-bold uppercase tracking-widest shadow-[0_0_20px_rgba(142,255,113,0.3)]">Push To Production</button>
+</div>
+</div>
+<!-- AGENT_BETA Source -->
+<div class="lg:col-span-3 bg-surface-container flex flex-col border border-outline-variant/5">
+<div class="bg-surface-container-high p-3 flex justify-between items-center border-b border-outline-variant/10">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 bg-error shadow-[0_0_8px_rgba(255,115,81,0.6)]"></div>
+<span class="font-headline font-bold text-xs uppercase tracking-widest text-error">AGENT_BETA</span>
+</div>
+<span class="text-[10px] font-mono text-on-surface-variant">v3.0.0-rc</span>
+</div>
+<div class="flex-1 overflow-auto p-4 font-mono text-[11px] leading-relaxed text-on-surface-variant bg-surface-container-low">
+<div class="opacity-40">041: export const initialize = () =&gt; {</div>
+<div class="opacity-40">042:   console.log("ENGINE_START");</div>
+<div class="bg-error/10 text-error border-l-2 border-error px-2 my-1 py-0.5">
+                        043:   const stream = new ReadableStream({
+                    </div>
+<div class="bg-error/10 text-error border-l-2 border-error px-2 my-1 py-0.5">
+                        044:     start(controller) { ... }
+                    </div>
+<div class="opacity-40">045:   return true;</div>
+<div class="opacity-40">046: }</div>
+</div>
+<div class="p-3">
+<button class="w-full bg-error/10 border border-error/30 text-error py-2 font-headline text-[10px] font-bold uppercase tracking-widest hover:bg-error/20 transition-all">
+                        Accept Agent Beta
+                    </button>
+</div>
+</div>
+</div>
+<!-- System Telemetry (Bento Style Footer) -->
+<div class="mt-8 grid grid-cols-1 md:grid-cols-4 gap-4">
+<div class="bg-surface-container p-4 border border-outline-variant/10">
+<h4 class="text-[10px] font-headline uppercase tracking-widest text-on-surface-variant mb-2">Agent A Intent</h4>
+<p class="text-xs text-white leading-tight">Optimizing memory allocation for low-latency grid processing.</p>
+<div class="mt-4 flex gap-2">
+<span class="text-[9px] bg-secondary/10 text-secondary px-1 py-0.5 font-mono">MEM_ALLOC</span>
+<span class="text-[9px] bg-secondary/10 text-secondary px-1 py-0.5 font-mono">FAST_IO</span>
+</div>
+</div>
+<div class="bg-surface-container p-4 border border-outline-variant/10">
+<h4 class="text-[10px] font-headline uppercase tracking-widest text-on-surface-variant mb-2">Agent B Intent</h4>
+<p class="text-xs text-white leading-tight">Implementing stream-based protocol for asynchronous agent comms.</p>
+<div class="mt-4 flex gap-2">
+<span class="text-[9px] bg-error/10 text-error px-1 py-0.5 font-mono">ASYNC_PROT</span>
+<span class="text-[9px] bg-error/10 text-error px-1 py-0.5 font-mono">STREAM_V2</span>
+</div>
+</div>
+<div class="md:col-span-2 bg-surface-container-high p-4 border border-outline-variant/10 relative overflow-hidden">
+<div class="absolute right-0 top-0 bottom-0 w-32 opacity-20 pointer-events-none">
+<div class="w-full h-full" style="background: repeating-linear-gradient(45deg, transparent, transparent 10px, #39FF14 10px, #39FF14 11px);"></div>
+</div>
+<h4 class="text-[10px] font-headline uppercase tracking-widest text-on-surface-variant mb-2">System Health Log</h4>
+<div class="space-y-1 font-mono text-[10px]">
+<div class="flex gap-2">
+<span class="text-on-surface-variant">14:22:01</span>
+<span class="text-secondary">[ALPHA] Requesting file lock...</span>
+</div>
+<div class="flex gap-2">
+<span class="text-on-surface-variant">14:22:01</span>
+<span class="text-error">[BETA] Force-overwriting sector 0x88...</span>
+</div>
+<div class="flex gap-2">
+<span class="text-tertiary">14:22:02 [CONFLICT] Kernel halted write operation.</span>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Contextual FAB (Only for major actions) -->
+<div class="fixed bottom-8 right-8 flex flex-col gap-4">
+<button class="w-14 h-14 bg-surface-container-highest border border-[#39FF14]/30 text-[#39FF14] flex items-center justify-center group pulse-on-hover shadow-2xl">
+<span class="material-symbols-outlined text-2xl group-hover:scale-110 transition-transform">terminal</span>
+</button>
+</div>
+</body></html>

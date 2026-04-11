@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AERO_CODE_CMD | COMMUNICATIONS_HUB</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@400;500;600&amp;family=Fira+Code:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary-fixed-variant": "#00586d",
+                        "inverse-on-surface": "#565554",
+                        "on-surface": "#ffffff",
+                        "surface-variant": "#262626",
+                        "on-primary-fixed-variant": "#0d6200",
+                        "tertiary-container": "#ffbf00",
+                        "surface": "#0e0e0e",
+                        "primary-fixed-dim": "#2be800",
+                        "on-tertiary-fixed-variant": "#614700",
+                        "secondary": "#00cffc",
+                        "on-primary": "#0d6100",
+                        "surface-dim": "#0e0e0e",
+                        "on-primary-container": "#0b5800",
+                        "inverse-primary": "#106f00",
+                        "on-primary-fixed": "#064200",
+                        "secondary-container": "#00677f",
+                        "secondary-fixed-dim": "#37d4ff",
+                        "secondary-dim": "#00c0ea",
+                        "tertiary-dim": "#eeb200",
+                        "on-tertiary": "#614700",
+                        "tertiary-fixed": "#ffbf00",
+                        "surface-bright": "#2c2c2c",
+                        "on-surface-variant": "#adaaaa",
+                        "on-tertiary-fixed": "#3d2b00",
+                        "tertiary": "#ffd16f",
+                        "secondary-fixed": "#80deff",
+                        "surface-container-low": "#131313",
+                        "on-error-container": "#ffd2c8",
+                        "outline": "#777575",
+                        "error-container": "#b92902",
+                        "primary-dim": "#2be800",
+                        "on-secondary-container": "#eef9ff",
+                        "on-error": "#450900",
+                        "primary-container": "#2ff801",
+                        "on-tertiary-container": "#563e00",
+                        "primary-fixed": "#2ff801",
+                        "tertiary-fixed-dim": "#eeb200",
+                        "surface-container-high": "#201f1f",
+                        "error": "#ff7351",
+                        "outline-variant": "#494847",
+                        "surface-container-lowest": "#000000",
+                        "on-secondary-fixed": "#003a48",
+                        "background": "#0e0e0e",
+                        "error-dim": "#d53d18",
+                        "surface-container-highest": "#262626",
+                        "primary": "#8eff71",
+                        "on-secondary": "#004050",
+                        "surface-tint": "#8eff71",
+                        "surface-container": "#1a1919",
+                        "inverse-surface": "#fcf8f8",
+                        "on-background": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0px",
+                        "lg": "0px",
+                        "xl": "0px",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Space Grotesk"],
+                        "mono": ["Fira Code", "monospace"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #0e0e0e; }
+        ::-webkit-scrollbar-thumb { background: #262626; }
+        ::-webkit-scrollbar-thumb:hover { background: #39FF14; }
+        
+        .scanline-wipe {
+            position: relative;
+            overflow: hidden;
+        }
+        .scanline-wipe::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 2px;
+            background: rgba(57, 255, 20, 0.2);
+            animation: scanline 4s linear infinite;
+        }
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(1000%); }
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body selection:bg-primary selection:text-on-primary">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full border-none bg-neutral-950 flex justify-between items-center px-6 h-14 z-50">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold tracking-tighter text-[#39FF14] font-headline">AERO_CODE_CMD</span>
+<nav class="hidden md:flex items-center gap-6">
+<a class="text-neutral-500 font-['Space_Grotesk'] tracking-[0.05em] uppercase text-xs hover:text-[#39FF14] hover:bg-neutral-900 transition-colors py-1" href="#">SYSTEM_HEALTH</a>
+<a class="text-neutral-500 font-['Space_Grotesk'] tracking-[0.05em] uppercase text-xs hover:text-[#39FF14] hover:bg-neutral-900 transition-colors py-1" href="#">ACTIVE_THREADS</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2">
+<button class="p-2 text-neutral-500 hover:text-[#39FF14] transition-colors">
+<span class="material-symbols-outlined">settings_input_component</span>
+</button>
+<button class="p-2 text-neutral-500 hover:text-[#39FF14] transition-colors relative">
+<span class="material-symbols-outlined">notifications_active</span>
+<span class="absolute top-2 right-2 w-1.5 h-1.5 bg-primary rounded-full"></span>
+</button>
+<button class="p-2 text-neutral-500 hover:text-[#39FF14] transition-colors">
+<span class="material-symbols-outlined">account_tree</span>
+</button>
+</div>
+</div>
+</header>
+<div class="flex h-screen pt-14">
+<!-- SideNavBar -->
+<aside class="fixed left-0 h-full w-20 md:w-64 border-none tonal-shift bg-[#131313] flex flex-col py-8 z-40">
+<div class="px-6 mb-8 hidden md:block">
+<h2 class="text-[#39FF14] font-black font-['Space_Grotesk'] uppercase tracking-widest text-lg">HORIZON_01</h2>
+<p class="text-neutral-600 text-[10px] font-mono mt-1">SECTOR_GRID_ALPHA</p>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="flex items-center px-6 py-3 text-neutral-600 font-['Space_Grotesk'] uppercase tracking-widest hover:bg-[#201f1f] hover:text-[#39FF14] group transition-all" href="#">
+<span class="material-symbols-outlined mr-4">radar</span>
+<span class="hidden md:inline">RADAR</span>
+</a>
+<a class="flex items-center px-6 py-3 text-neutral-600 font-['Space_Grotesk'] uppercase tracking-widest hover:bg-[#201f1f] hover:text-[#39FF14] group transition-all" href="#">
+<span class="material-symbols-outlined mr-4">settings_input_antenna</span>
+<span class="hidden md:inline">TOWER</span>
+</a>
+<a class="flex items-center px-6 py-3 bg-[#1a1919] text-[#39FF14] border-l-2 border-[#39FF14] font-['Space_Grotesk'] uppercase tracking-widest group" href="#">
+<span class="material-symbols-outlined mr-4">forum</span>
+<span class="hidden md:inline">COMMS</span>
+</a>
+<a class="flex items-center px-6 py-3 text-neutral-600 font-['Space_Grotesk'] uppercase tracking-widest hover:bg-[#201f1f] hover:text-[#39FF14] group transition-all" href="#">
+<span class="material-symbols-outlined mr-4">warning</span>
+<span class="hidden md:inline">CONFLICTS</span>
+</a>
+</nav>
+<div class="px-4 mb-4 hidden md:block">
+<button class="w-full py-3 bg-primary text-on-primary font-bold tracking-widest uppercase text-xs hover:shadow-[0_0_20px_rgba(142,255,113,0.3)] transition-all">
+                    DEPLOY_AGENT
+                </button>
+</div>
+<div class="mt-auto border-t border-white/5 pt-4">
+<a class="flex items-center px-6 py-3 text-neutral-600 font-['Space_Grotesk'] uppercase tracking-widest hover:bg-[#201f1f] hover:text-[#39FF14] transition-all" href="#">
+<span class="material-symbols-outlined mr-4">terminal</span>
+<span class="hidden md:inline text-xs">TERMINAL</span>
+</a>
+<a class="flex items-center px-6 py-3 text-neutral-600 font-['Space_Grotesk'] uppercase tracking-widest hover:bg-[#201f1f] hover:text-[#39FF14] transition-all" href="#">
+<span class="material-symbols-outlined mr-4">list_alt</span>
+<span class="hidden md:inline text-xs">LOGS</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="ml-20 md:ml-64 flex-1 bg-surface flex flex-col overflow-hidden">
+<!-- Secondary Navigation Header (Bento-style Header) -->
+<div class="p-6 grid grid-cols-12 gap-4 bg-surface-container-low border-b border-white/5">
+<div class="col-span-12 md:col-span-8 flex items-center gap-4">
+<h1 class="text-2xl font-bold font-headline tracking-tight text-on-surface">COMMUNICATIONS_HUB</h1>
+<div class="flex items-center gap-2 px-3 py-1 bg-primary/10 border border-primary/20">
+<div class="w-2 h-2 bg-primary animate-pulse"></div>
+<span class="text-[10px] font-mono text-primary uppercase">3_ACTIVE_REQUESTS</span>
+</div>
+</div>
+<div class="col-span-12 md:col-span-4 flex justify-end gap-2">
+<button class="px-4 py-2 bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant text-xs font-label transition-colors">HISTORY</button>
+<button class="px-4 py-2 bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant text-xs font-label transition-colors">FILTERS</button>
+</div>
+</div>
+<div class="flex flex-1 overflow-hidden">
+<!-- Agent Queue Sidebar (Left within Main) -->
+<div class="w-72 bg-surface-container-lowest border-r border-white/5 flex flex-col">
+<div class="p-4 border-b border-white/5 bg-surface-container">
+<span class="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">PENDING_APPROVALS</span>
+</div>
+<div class="flex-1 overflow-y-auto">
+<!-- Active Agent Item -->
+<div class="p-4 bg-surface-container-high border-l-4 border-primary scanline-wipe">
+<div class="flex justify-between items-start mb-2">
+<span class="text-xs font-mono text-primary">AGENT_REFACTOR_X</span>
+<span class="text-[9px] text-on-surface-variant bg-white/5 px-1">04m 12s</span>
+</div>
+<p class="text-sm text-on-surface font-medium mb-1">Requesting Write Access</p>
+<p class="text-[11px] text-on-surface-variant font-mono truncate">target: /src/config.ts</p>
+</div>
+<!-- Inactive Agent Item -->
+<div class="p-4 border-b border-white/5 hover:bg-surface-container transition-colors cursor-pointer group">
+<div class="flex justify-between items-start mb-2">
+<span class="text-xs font-mono text-secondary group-hover:text-primary transition-colors">AGENT_DB_WIZARD</span>
+<span class="text-[9px] text-on-surface-variant px-1">12m 45s</span>
+</div>
+<p class="text-sm text-on-surface-variant group-hover:text-on-surface transition-colors mb-1">Schema Migration Request</p>
+<p class="text-[11px] text-neutral-600 font-mono truncate">target: /migrations/001_init.sql</p>
+</div>
+<!-- Inactive Agent Item -->
+<div class="p-4 border-b border-white/5 hover:bg-surface-container transition-colors cursor-pointer group">
+<div class="flex justify-between items-start mb-2">
+<span class="text-xs font-mono text-tertiary group-hover:text-primary transition-colors">AGENT_SEO_BOT</span>
+<span class="text-[9px] text-on-surface-variant px-1">21m 02s</span>
+</div>
+<p class="text-sm text-on-surface-variant group-hover:text-on-surface transition-colors mb-1">Meta Tag Modification</p>
+<p class="text-[11px] text-neutral-600 font-mono truncate">target: /public/index.html</p>
+</div>
+</div>
+</div>
+<!-- Chat Canvas (Tiled View) -->
+<div class="flex-1 bg-surface overflow-y-auto p-6 grid grid-cols-1 gap-6">
+<!-- Chat Window 1: Primary Focus -->
+<div class="bg-surface-container flex flex-col shadow-2xl border-l-2 border-primary ring-1 ring-white/5">
+<div class="p-4 flex justify-between items-center bg-surface-container-high border-b border-white/5">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 bg-primary/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-lg">memory</span>
+</div>
+<div>
+<h3 class="text-sm font-bold font-headline text-on-surface tracking-wide">AGENT_REFACTOR_X <span class="text-neutral-500 font-normal ml-2">#8902</span></h3>
+<p class="text-[10px] text-primary font-mono">STATUS: AWAITING_PERMISSION</p>
+</div>
+</div>
+<div class="flex gap-2">
+<button class="p-1 hover:text-primary"><span class="material-symbols-outlined text-sm">fullscreen</span></button>
+<button class="p-1 hover:text-error"><span class="material-symbols-outlined text-sm">close</span></button>
+</div>
+</div>
+<div class="p-6 flex-1 space-y-6 min-h-[300px]">
+<!-- Agent Message -->
+<div class="flex gap-4">
+<div class="mt-1">
+<div class="w-6 h-6 bg-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary text-[14px]">smart_toy</span>
+</div>
+</div>
+<div class="flex-1 space-y-4">
+<div class="bg-surface-container-low p-4 font-mono text-sm leading-relaxed text-primary-fixed-dim">
+<p class="mb-3">I have completed the structural analysis of the current navigation logic. To proceed with the high-performance implementation, I require **write access** to `src/config.ts`.</p>
+<div class="bg-black/40 p-3 border-l-2 border-primary/30 my-4 overflow-x-auto">
+<code class="text-xs text-secondary-fixed">
+                                                - export const NAV_MODE = 'standard';<br/>
+                                                + export const NAV_MODE = 'command_horizon';<br/>
+                                                + export const SYSTEM_LATENCY_MAX = 150;
+                                            </code>
+</div>
+<p>This change is necessary to initialize the tactical UI layer and suppress non-critical notifications during heavy data operations.</p>
+</div>
+<div class="text-[10px] text-neutral-600 font-mono">RECEIVED AT 14:22:01 UTC</div>
+</div>
+</div>
+</div>
+<!-- Action Bar -->
+<div class="p-4 bg-surface-container-highest flex flex-wrap gap-3 items-center border-t border-white/5">
+<button class="px-6 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest hover:shadow-[0_0_15px_rgba(142,255,113,0.4)] transition-all">APPROVE</button>
+<button class="px-6 py-2 bg-error-container text-on-error-container text-xs font-bold uppercase tracking-widest hover:bg-error transition-colors">DENY</button>
+<button class="px-6 py-2 border border-outline/30 text-on-surface-variant text-xs font-bold uppercase tracking-widest hover:bg-white/5 transition-colors">ASK FOR MORE INFO</button>
+<div class="flex-1 flex justify-end">
+<div class="relative w-full max-w-xs">
+<input class="w-full bg-surface-container-lowest border-none text-xs font-mono text-secondary focus:ring-1 focus:ring-secondary placeholder:text-neutral-700 h-10" placeholder="TYPE COMMAND OR QUERY..." type="text"/>
+<button class="absolute right-2 top-2 text-secondary hover:text-primary transition-colors">
+<span class="material-symbols-outlined">send</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Tiled View for other agents (Two-column grid for smaller previews) -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 opacity-80 hover:opacity-100 transition-opacity">
+<!-- Mini Chat Tile 1 -->
+<div class="bg-surface-container border border-white/5 flex flex-col h-[280px]">
+<div class="px-4 py-2 bg-surface-container-high flex justify-between items-center border-b border-white/5">
+<span class="text-[11px] font-mono text-secondary">AGENT_DB_WIZARD</span>
+<span class="material-symbols-outlined text-xs text-neutral-500">open_in_full</span>
+</div>
+<div class="p-4 flex-1 overflow-hidden">
+<p class="text-xs font-mono text-neutral-400 leading-relaxed mb-3">
+<span class="text-secondary">#</span> Critical schema update required for persistent session storage. Requesting access to execute:
+                                </p>
+<div class="bg-black/20 p-2 font-mono text-[10px] text-neutral-500 border border-white/5 mb-3">
+                                    ALTER TABLE sessions ADD COLUMN metadata JSONB;
+                                </div>
+</div>
+<div class="p-3 bg-surface-container-high flex gap-2">
+<button class="flex-1 py-1.5 bg-secondary/10 border border-secondary/30 text-secondary text-[10px] font-bold hover:bg-secondary/20 uppercase">QUICK_APPROVE</button>
+<button class="flex-1 py-1.5 border border-white/10 text-neutral-500 text-[10px] font-bold hover:bg-white/5 uppercase">DISMISS</button>
+</div>
+</div>
+<!-- Mini Chat Tile 2 -->
+<div class="bg-surface-container border border-white/5 flex flex-col h-[280px]">
+<div class="px-4 py-2 bg-surface-container-high flex justify-between items-center border-b border-white/5">
+<span class="text-[11px] font-mono text-tertiary">AGENT_SEO_BOT</span>
+<span class="material-symbols-outlined text-xs text-neutral-500">open_in_full</span>
+</div>
+<div class="p-4 flex-1 overflow-hidden">
+<p class="text-xs font-mono text-neutral-400 leading-relaxed mb-3">
+<span class="text-tertiary">#</span> Analysis complete. Keywords missing in `index.html`. Permission to update meta tags?
+                                </p>
+</div>
+<div class="p-3 bg-surface-container-high flex gap-2">
+<button class="flex-1 py-1.5 bg-tertiary/10 border border-tertiary/30 text-tertiary text-[10px] font-bold hover:bg-tertiary/20 uppercase">QUICK_APPROVE</button>
+<button class="flex-1 py-1.5 border border-white/10 text-neutral-500 text-[10px] font-bold hover:bg-white/5 uppercase">DISMISS</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Utility Bar (Telemetry) -->
+<div class="w-64 bg-surface-container-lowest border-l border-white/5 hidden xl:flex flex-col p-6 space-y-8">
+<div>
+<h4 class="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-4">SYSTEM_LOAD</h4>
+<div class="space-y-4">
+<div>
+<div class="flex justify-between text-[10px] font-mono mb-1">
+<span>CPU_CLUSTER</span>
+<span class="text-primary">42%</span>
+</div>
+<div class="h-1 bg-surface-container-highest">
+<div class="h-full bg-primary" style="width: 42%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between text-[10px] font-mono mb-1">
+<span>MEMORY_SWAP</span>
+<span class="text-secondary">68%</span>
+</div>
+<div class="h-1 bg-surface-container-highest">
+<div class="h-full bg-secondary" style="width: 68%"></div>
+</div>
+</div>
+</div>
+</div>
+<div class="flex-1">
+<h4 class="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-4">TELEMETRY_FEED</h4>
+<div class="space-y-3 font-mono text-[9px] text-neutral-600 uppercase">
+<div class="flex gap-2">
+<span class="text-primary-fixed-dim">[OK]</span>
+<span>AGENT_X_CONNECTED</span>
+</div>
+<div class="flex gap-2">
+<span class="text-secondary">[IN]</span>
+<span>DB_WIZARD_PACKET_3</span>
+</div>
+<div class="flex gap-2">
+<span class="text-tertiary">[WA]</span>
+<span>SEO_LATENCY_SPIKE</span>
+</div>
+<div class="flex gap-2">
+<span class="text-neutral-500">[LOG]</span>
+<span>SESSION_ROTATED</span>
+</div>
+<div class="flex gap-2">
+<span class="text-primary-fixed-dim">[OK]</span>
+<span>GRID_STABILIZED</span>
+</div>
+</div>
+</div>
+<div class="pt-6 border-t border-white/5">
+<div class="p-4 bg-primary/5 border border-primary/20 flex items-center gap-3">
+<span class="material-symbols-outlined text-primary text-lg">shield</span>
+<div class="flex-1">
+<p class="text-[10px] font-bold text-primary uppercase">ENFORCER_MODE</p>
+<p class="text-[8px] text-neutral-500 uppercase">ALL AGENTS SANDBOXED</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+<!-- Mobile Navigation (BottomNavBar) -->
+<nav class="md:hidden fixed bottom-0 w-full h-16 bg-[#131313] z-50 flex justify-around items-center border-t border-white/5 px-2">
+<a class="flex flex-col items-center justify-center gap-1 text-neutral-600" href="#">
+<span class="material-symbols-outlined text-xl">radar</span>
+<span class="text-[9px] font-label tracking-tighter">RADAR</span>
+</a>
+<a class="flex flex-col items-center justify-center gap-1 text-neutral-600" href="#">
+<span class="material-symbols-outlined text-xl">settings_input_antenna</span>
+<span class="text-[9px] font-label tracking-tighter">TOWER</span>
+</a>
+<a class="flex flex-col items-center justify-center gap-1 text-[#39FF14]" href="#">
+<span class="material-symbols-outlined text-xl">forum</span>
+<span class="text-[9px] font-label tracking-tighter">COMMS</span>
+</a>
+<a class="flex flex-col items-center justify-center gap-1 text-neutral-600" href="#">
+<span class="material-symbols-outlined text-xl">warning</span>
+<span class="text-[9px] font-label tracking-tighter">CONFLICTS</span>
+</a>
+</nav>
+</body></html>
