@@ -29,9 +29,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **CNFL-01**: System detects when two or more agents write to the same file within a configurable conflict window
 - [ ] **CNFL-02**: System alerts the user immediately when a conflict is detected (visual indicator + notification)
-- [ ] **CNFL-03**: User can view a 3-way merge UI showing Agent A changes, base file, and Agent B changes side by side
-- [ ] **CNFL-04**: User can accept changes from either agent per-hunk, or manually edit the resolution
-- [ ] **CNFL-05**: System shows agent intent alongside code changes in the conflict resolution view
+- [x] **CNFL-03**: User can view a 3-way merge UI showing Agent A changes, base file, and Agent B changes side by side
+- [x] **CNFL-04**: User can accept changes from either agent per-hunk, or manually edit the resolution
+- [x] **CNFL-05**: System shows agent intent alongside code changes in the conflict resolution view
 - [ ] **CNFL-06**: Conflict detection runs in the Rust backend for real-time accuracy (not deferred to frontend)
 
 ### Communications
@@ -134,9 +134,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AGNT-07 | Phase 3 | Pending |
 | CNFL-01 | Phase 3 | Pending |
 | CNFL-02 | Phase 3 | Pending |
-| CNFL-03 | Phase 5 | Pending |
-| CNFL-04 | Phase 5 | Pending |
-| CNFL-05 | Phase 5 | Pending |
+| CNFL-03 | Phase 5 | Complete |
+| CNFL-04 | Phase 5 | Complete |
+| CNFL-05 | Phase 5 | Complete |
 | CNFL-06 | Phase 3 | Pending |
 | COMM-01 | Phase 4 | Pending |
 | COMM-02 | Phase 4 | Pending |
