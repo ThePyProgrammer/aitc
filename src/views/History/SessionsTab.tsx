@@ -3,7 +3,7 @@
 // HIST-01: Displays past agent sessions with expandable row details.
 // Uses TanStack Virtual for efficient rendering of large session lists.
 
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { AnimatePresence, motion } from 'motion/react';
 import { invoke } from '@tauri-apps/api/core';
@@ -84,12 +84,15 @@ export function SessionsTab() {
     return sorted;
   }, [sessions, sortField, sortDir]);
 
+  const expandedRowIdRef = useRef(expandedRowId);
+  useEffect(() => { expandedRowIdRef.current = expandedRowId; }, [expandedRowId]);
+
   const rowVirtualizer = useVirtualizer({
     count: sortedSessions.length,
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => {
       const session = sortedSessions[index];
-      return session && expandedRowId === session.id ? 44 + 220 : 44;
+      return session && expandedRowIdRef.current === session.id ? 44 + 220 : 44;
     },
     overscan: 10,
   });

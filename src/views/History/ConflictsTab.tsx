@@ -3,7 +3,7 @@
 // HIST-02: Displays resolved conflict records with expandable details.
 // Uses TanStack Virtual for efficient rendering.
 
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { AnimatePresence, motion } from 'motion/react';
 import { useHistoryStore, type ConflictResolutionRecord } from '../../stores/historyStore';
@@ -59,19 +59,26 @@ export function ConflictsTab() {
     return sorted;
   }, [conflictRecords, sortField, sortDir]);
 
+  const expandedRowIdRef = useRef(expandedRowId);
+  useEffect(() => { expandedRowIdRef.current = expandedRowId; }, [expandedRowId]);
+
   const rowVirtualizer = useVirtualizer({
     count: sortedRecords.length,
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => {
       const record = sortedRecords[index];
-      return record && expandedRowId === record.id ? 44 + 180 : 44;
+      return record && expandedRowIdRef.current === record.id ? 44 + 180 : 44;
     },
     overscan: 10,
   });
 
   const handleRowClick = useCallback((record: ConflictResolutionRecord) => {
-    setExpandedRowId((prev) => (prev === record.id ? null : record.id));
-  }, []);
+    setExpandedRowId((prev) => {
+      const next = prev === record.id ? null : record.id;
+      setTimeout(() => rowVirtualizer.measure(), 0);
+      return next;
+    });
+  }, [rowVirtualizer]);
 
   const sortArrow = (field: SortField) =>
     sortField === field ? (sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : '';

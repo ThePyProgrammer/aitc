@@ -3,7 +3,7 @@
 // HIST-03: Displays approval/denial decisions with expandable details.
 // Uses TanStack Virtual for efficient rendering.
 
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { AnimatePresence, motion } from 'motion/react';
 import { useHistoryStore, type ApprovalRecord } from '../../stores/historyStore';
@@ -59,19 +59,26 @@ export function ApprovalsTab() {
     return sorted;
   }, [approvalRecords, sortField, sortDir]);
 
+  const expandedRowIdRef = useRef(expandedRowId);
+  useEffect(() => { expandedRowIdRef.current = expandedRowId; }, [expandedRowId]);
+
   const rowVirtualizer = useVirtualizer({
     count: sortedRecords.length,
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => {
       const record = sortedRecords[index];
-      return record && expandedRowId === record.id ? 44 + 140 : 44;
+      return record && expandedRowIdRef.current === record.id ? 44 + 140 : 44;
     },
     overscan: 10,
   });
 
   const handleRowClick = useCallback((record: ApprovalRecord) => {
-    setExpandedRowId((prev) => (prev === record.id ? null : record.id));
-  }, []);
+    setExpandedRowId((prev) => {
+      const next = prev === record.id ? null : record.id;
+      setTimeout(() => rowVirtualizer.measure(), 0);
+      return next;
+    });
+  }, [rowVirtualizer]);
 
   const sortArrow = (field: SortField) =>
     sortField === field ? (sortDir === 'asc' ? ' \u25B2' : ' \u25BC') : '';
