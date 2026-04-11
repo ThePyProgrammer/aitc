@@ -18,15 +18,18 @@ A developer can see exactly what every AI agent is doing across their codebase i
 - [x] Agent launcher — spawn Claude Code, Codex, OpenCode sessions from within the app — Validated in Phase 3
 - [x] Agent observation — detect and monitor externally-launched agents — Validated in Phase 3 (partial: self-registration works, passive scan bridge pending)
 - [x] Extensible agent adapter architecture (plugin system for any coding agent) — Validated in Phase 3
-- [x] Conflict detection when multiple agents touch the same file, with side-by-side merge UI — Validated in Phase 3 (detection + alert; merge UI in Phase 5)
+- [x] Conflict detection when multiple agents touch the same file, with side-by-side merge UI — Validated in Phase 3 (detection + alert) and Phase 5 (merge UI + resolution workflow)
+- [x] Spatial radar view plotting agents as dots on a file-tree-based codebase map — Validated in Phase 4: Core UI Views
+- [x] Communications hub for agent approval requests with approve/deny/chat workflow — Validated in Phase 4
+- [x] Codebase structure mapping (file tree as spatial layout for the radar) — Validated in Phase 4
+- [x] Native OS notifications and system tray alerts for urgent agent requests — Validated in Phase 4
+- [x] Session history — past agent sessions, resolved conflicts, approval logs — Validated in Phase 5: Conflict Resolution + History
+- [x] 3-way merge conflict resolution with agent intent context — Validated in Phase 5
+- [x] File heat map overlay showing cross-agent contention intensity — Validated in Phase 5
 
 ### Active
 
-- [ ] Spatial radar view plotting agents as dots on a file-tree-based codebase map
-- [ ] Communications hub for agent approval requests with approve/deny/chat workflow
-- [ ] Codebase structure mapping (file tree as spatial layout for the radar)
-- [ ] Native OS notifications and system tray alerts for urgent agent requests
-- [ ] Session history — past agent sessions, resolved conflicts, approval logs
+No active requirements — all v1 requirements validated.
 
 ### Out of Scope
 
@@ -82,4 +85,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-10 after Phase 3 completion*
+*Last updated: 2026-04-11 after Phase 5 completion — all v1 milestone phases complete*
