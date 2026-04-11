@@ -50,9 +50,12 @@ export function ApprovalsTab() {
         case 'status':
           cmp = a.status.localeCompare(b.status);
           break;
-        case 'decidedAt':
-          cmp = new Date(a.resolvedAt ?? 0).getTime() - new Date(b.resolvedAt ?? 0).getTime();
+        case 'decidedAt': {
+          const aTime = a.resolvedAt ? new Date(a.resolvedAt).getTime() : 0;
+          const bTime = b.resolvedAt ? new Date(b.resolvedAt).getTime() : 0;
+          cmp = (isNaN(aTime) ? 0 : aTime) - (isNaN(bTime) ? 0 : bTime);
           break;
+        }
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
