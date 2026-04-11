@@ -476,22 +476,22 @@ impl BackupManager {
 | A4 | Shiki `github-dark` theme is appropriate for Command Horizon aesthetic | Code Examples | Low -- theme can be swapped; may need a custom theme to match the exact dark room palette |
 | A5 | node-diff3's `diff3Merge` output structure has `ok` and `conflict` keys | Code Examples | Medium -- API shape based on docs review, should verify at implementation time |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Base File Acquisition Strategy**
    - What we know: 3-way merge needs a "base" version. Git is the most reliable source (`git show HEAD:<path>`).
    - What's unclear: What happens for untracked files, or when agents use different worktrees with different branches? The ConflictEngine detects overlapping writes but doesn't capture the pre-write file state.
-   - Recommendation: Use `git show HEAD:<path>` as primary strategy. Fall back to the earliest captured version from the conflict window. For untracked files, treat the empty string as base.
+   - RESOLVED: Use `git show HEAD:<path>` as primary strategy. Fall back to the earliest captured version from the conflict window. For untracked files, treat the empty string as base.
 
 2. **Shiki Theme Customization**
    - What we know: Command Horizon uses a very specific dark palette (#0e0e0e background, #adaaaa text, #8eff71 green).
    - What's unclear: Whether `github-dark` or another built-in Shiki theme closely matches, or if a custom theme JSON is needed.
-   - Recommendation: Start with `github-dark` (darkest built-in), customize CSS wrapper backgrounds to match Command Horizon. If syntax colors clash, create a minimal custom Shiki theme.
+   - RESOLVED: Start with `github-dark` (darkest built-in), customize CSS wrapper backgrounds to match Command Horizon. If syntax colors clash, create a minimal custom Shiki theme.
 
 3. **Session File Tracking: Event-Driven vs Query-Time**
    - What we know: D-09 requires per-file write counts per session.
    - What's unclear: Whether to accumulate `session_files` rows as events arrive (event-driven) or query the event/write log at display time.
-   - Recommendation: Event-driven accumulation using `INSERT ... ON CONFLICT DO UPDATE` (upsert) on the `session_files` table. This keeps History queries fast without scanning raw event data.
+   - RESOLVED: Event-driven accumulation using `INSERT ... ON CONFLICT DO UPDATE` (upsert) on the `session_files` table. This keeps History queries fast without scanning raw event data.
 
 ## Validation Architecture
 
