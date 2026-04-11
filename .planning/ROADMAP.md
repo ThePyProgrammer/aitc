@@ -105,7 +105,7 @@ Plans:
 - [x] 05-02-PLAN.md -- Frontend libraries: node-diff3 + shiki install, merge.ts (3-way merge computation), contention.ts (heat map scoring), useSyntaxHighlight hook, historyStore
 - [x] 05-03-PLAN.md -- Merge UI: conflictStore resolution state, MergeView layout, UnifiedDiff with syntax highlighting, HunkNavigator, HunkResolutionControls, IntentPanel, ResolutionToolbar
 - [x] 05-04-PLAN.md -- Heat map overlay on radar (HeatMapOverlay Canvas function, radarStore extension, toggle button) + History view (HistoryView with 3 tabbed virtualized tables, sidebar/router update)
-- [ ] 05-05-PLAN.md -- Integration wiring (contention score updates, StatusBadge/Button extensions, type fixes) + visual verification checkpoint
+- [x] 05-05-PLAN.md -- Integration wiring (contention score updates, StatusBadge/Button extensions, type fixes) + visual verification checkpoint
 **UI hint**: yes
 
 ## Progress
