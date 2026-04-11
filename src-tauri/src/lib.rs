@@ -37,7 +37,6 @@ pub fn run() {
             conflict::commands::get_conflict_settings,
             conflict::commands::update_conflict_window,
             comms::commands::list_approval_requests,
-            comms::commands::create_approval_request,
             comms::commands::approve_request,
             comms::commands::deny_request,
             comms::commands::ask_more_info,

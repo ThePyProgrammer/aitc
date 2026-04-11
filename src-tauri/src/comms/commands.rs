@@ -128,34 +128,10 @@ pub async fn list_approval_requests(
     Ok(rows.iter().map(map_approval_row).collect())
 }
 
-/// Create a new approval request (frontend-facing Tauri command).
-/// Delegates to create_approval_request_internal.
-///
-/// T-04-03 mitigation: Only called from Rust backend (adapter hooks or protected
-/// path detection). Frontend can approve/deny/ask but not fabricate requests
-/// through this command in normal workflow.
-#[tauri::command]
-#[specta::specta]
-pub async fn create_approval_request(
-    agent_id: String,
-    request_type: String,
-    file_path: Option<String>,
-    diff_content: Option<String>,
-    urgency: String,
-    pool: tauri::State<'_, Pool<Sqlite>>,
-    app_handle: tauri::AppHandle,
-) -> Result<ApprovalRequest, String> {
-    create_approval_request_internal(
-        &agent_id,
-        &request_type,
-        file_path.as_deref(),
-        diff_content.as_deref(),
-        &urgency,
-        pool.inner(),
-        &app_handle,
-    )
-    .await
-}
+// WR-03: create_approval_request removed from Tauri command surface.
+// Backend-only callers use create_approval_request_internal directly.
+// Exposing this as a #[tauri::command] allowed the frontend to fabricate
+// arbitrary approval requests, contradicting the T-04-03 security model.
 
 /// Approve a pending request.
 #[tauri::command]
