@@ -17,6 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 3: Agent Management + Conflict Detection** - Agent registry with adapter architecture, launch/observe agents, conflict detection engine
 - [ ] **Phase 4: Core UI Views** - Tower Control manifest, Communications Hub, Airspace Radar visualization, system tray notifications
 - [ ] **Phase 5: Conflict Resolution + History** - 3-way merge UI, session/conflict/approval history, file heat map, final polish
+- [ ] **Phase 6: Pipeline Activation + Integration Wiring** - Wire usePipelineChannel into UI, bridge ProcessSnapshot→AgentRegistry, activate session file tracking (gap closure)
 
 ## Phase Details
 
@@ -108,10 +109,22 @@ Plans:
 - [x] 05-05-PLAN.md -- Integration wiring (contention score updates, StatusBadge/Button extensions, type fixes) + visual verification checkpoint
 **UI hint**: yes
 
+### Phase 6: Pipeline Activation + Integration Wiring
+**Goal**: All cross-phase integration points are connected — pipeline activates from UI, passive agent detection works, and session file tracking populates data
+**Depends on**: Phase 5
+**Requirements**: FMON-01, FMON-02, FMON-03, FMON-04, AGNT-03, HIST-01
+**Success Criteria** (what must be TRUE):
+  1. File watcher starts automatically when a repository is opened via the UI (usePipelineChannel wired into TowerControl or App mount)
+  2. ProcessSnapshot candidates are periodically bridged to AgentRegistry for passive agent detection
+  3. Session file write counts are populated via record_session_file during pipeline events
+  4. Radar treemap populates with live file tree data when a watch is active
+**Plans**: TBD
+**Gap Closure**: Closes gaps from v1.0 milestone audit
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -120,3 +133,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 3. Agent Management + Conflict Detection | 0/4 | Planning complete | - |
 | 4. Core UI Views | 0/5 | Planning complete | - |
 | 5. Conflict Resolution + History | 0/5 | Planning complete | - |
+| 6. Pipeline Activation + Integration Wiring | 0/0 | Not started | - |
