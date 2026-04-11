@@ -174,7 +174,12 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     });
   }
 
-  // Main render loop
+  // Store viewport in a ref so the render loop always reads current values
+  // WR-05: Render loop runs once (empty deps) and reads changing values via refs
+  const viewportRef = useRef(viewport);
+  useEffect(() => { viewportRef.current = viewport; }, [viewport]);
+
+  // Main render loop -- single rAF loop for the lifetime of the component
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -186,6 +191,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
 
     function render() {
       if (!ctx) return;
+      const vp = viewportRef.current;
 
       if (dirtyRef.current || hasAnimatingDots) {
         ctx.save();
@@ -195,18 +201,18 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
 
         // Reset transform and apply viewport
         ctx.setTransform(
-          viewport.zoom * (window.devicePixelRatio || 1),
+          vp.zoom * (window.devicePixelRatio || 1),
           0,
           0,
-          viewport.zoom * (window.devicePixelRatio || 1),
-          viewport.panX * (window.devicePixelRatio || 1),
-          viewport.panY * (window.devicePixelRatio || 1),
+          vp.zoom * (window.devicePixelRatio || 1),
+          vp.panX * (window.devicePixelRatio || 1),
+          vp.panY * (window.devicePixelRatio || 1),
         );
 
-        drawTreemap(ctx, layoutRef.current, viewport.zoom);
-        drawLeadLines(ctx, layoutRef.current, viewport.zoom);
-        drawAgentHighlight(ctx, layoutRef.current, viewport.zoom);
-        hasAnimatingDots = drawAgentDots(ctx, layoutRef.current, viewport.zoom);
+        drawTreemap(ctx, layoutRef.current, vp.zoom);
+        drawLeadLines(ctx, layoutRef.current, vp.zoom);
+        drawAgentHighlight(ctx, layoutRef.current, vp.zoom);
+        hasAnimatingDots = drawAgentDots(ctx, layoutRef.current, vp.zoom);
         dirtyRef.current = false;
       }
 
@@ -215,7 +221,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
 
     animFrameRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animFrameRef.current);
-  });
+  }, []); // empty deps: one loop for the lifetime of the component
 
   // Draw treemap rectangles with progressive detail
   function drawTreemap(ctx: CanvasRenderingContext2D, rects: TreemapRect[], zoom: number) {
