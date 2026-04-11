@@ -74,6 +74,21 @@ export function useSyntaxHighlight(): {
  * @param lang - Shiki language ID (e.g. 'typescript', 'rust')
  * @returns Array of HTML strings, one per line
  */
+/**
+ * Validate that a color value is a safe CSS color (hex, named, or rgb/rgba).
+ * Rejects anything that could break out of a style attribute or inject CSS expressions.
+ */
+function safeCssColor(value: string): string {
+  const v = value.trim();
+  // Accept hex colors (#rgb, #rrggbb, #rrggbbaa)
+  if (/^#[0-9a-fA-F]{3,8}$/.test(v)) return v;
+  // Accept basic named CSS colors (alphabetic only, reasonable length)
+  if (/^[a-zA-Z]{2,30}$/.test(v)) return v;
+  // Accept rgb() / rgba() with numeric args only
+  if (/^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(\s*,\s*[\d.]+)?\s*\)$/.test(v)) return v;
+  return '#d4d4d4'; // fallback to safe default
+}
+
 export function highlightLines(
   highlighter: HighlighterCore,
   code: string,
@@ -84,7 +99,7 @@ export function highlightLines(
   return result.tokens.map((line) =>
     line
       .map((token) => {
-        const color = token.color ?? '#d4d4d4';
+        const color = safeCssColor(token.color ?? '#d4d4d4');
         // Shiki already HTML-escapes token content (T-05-07)
         const escaped = token.content
           .replace(/&/g, '&amp;')
