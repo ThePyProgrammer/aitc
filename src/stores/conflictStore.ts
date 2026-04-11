@@ -78,6 +78,7 @@ export const useConflictStore = create<ConflictStore>((set, get) => ({
   alerts: [],
   windowMs: 5000,
   activeMerge: null,
+  _resolveTimeoutId: null as ReturnType<typeof setTimeout> | null,
 
   fetchConflicts: async () => {
     const alerts = await invoke<ConflictAlert[]>('list_conflicts');
@@ -118,6 +119,13 @@ export const useConflictStore = create<ConflictStore>((set, get) => ({
   // --- Merge resolution actions ---
 
   openMerge: async (conflictId: string) => {
+    // Cancel any pending resolve timeout from a previous merge
+    const { _resolveTimeoutId } = get();
+    if (_resolveTimeoutId) {
+      clearTimeout(_resolveTimeoutId);
+      set({ _resolveTimeoutId: null });
+    }
+
     set({
       activeMerge: {
         conflictId,
@@ -232,10 +240,13 @@ export const useConflictStore = create<ConflictStore>((set, get) => ({
       // Emit conflict-resolved event
       await emit('conflict-resolved', { conflictId: activeMerge.conflictId });
 
-      // Clear merge after 2s delay
-      setTimeout(() => {
-        set({ activeMerge: null });
+      // Clear merge after 2s delay (store timeout ID for cancellation)
+      const { _resolveTimeoutId: prevTimeout } = get();
+      if (prevTimeout) clearTimeout(prevTimeout);
+      const timeoutId = setTimeout(() => {
+        set({ activeMerge: null, _resolveTimeoutId: null });
       }, 2000);
+      set({ _resolveTimeoutId: timeoutId });
     } catch (e) {
       set((s) => ({
         activeMerge: s.activeMerge
@@ -246,7 +257,9 @@ export const useConflictStore = create<ConflictStore>((set, get) => ({
   },
 
   discardAll: () => {
-    set({ activeMerge: null });
+    const { _resolveTimeoutId } = get();
+    if (_resolveTimeoutId) clearTimeout(_resolveTimeoutId);
+    set({ activeMerge: null, _resolveTimeoutId: null });
   },
 
   unresolvedCount: () => {
