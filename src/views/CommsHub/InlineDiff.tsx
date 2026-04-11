@@ -130,24 +130,25 @@ export function InlineDiff({ diffContent, onEditsChange, onEditStart }: InlineDi
               {line.lineNumber}
             </span>
 
-            {/* Line content */}
-            <span
-              className={`flex-1 font-mono text-xs leading-5 px-2 ${textColor} ${additionalStyles} ${
-                isEditable ? 'outline-none' : ''
-              }`}
-              contentEditable={isEditable}
-              suppressContentEditableWarning={isEditable}
-              onBlur={(e) => {
-                if (isEditable) {
-                  const newText = (e.target as HTMLElement).innerText;
+            {/* Line content -- CR-02: use controlled input for editable lines
+                instead of contentEditable to prevent XSS via unsanitized HTML */}
+            {isEditable ? (
+              <input
+                type="text"
+                className={`flex-1 font-mono text-xs leading-5 px-2 bg-transparent border-none outline-none ${textColor}`}
+                defaultValue={displayContent}
+                onBlur={(e) => {
+                  const newText = e.target.value;
                   if (newText !== line.content) {
                     handleContentEdit(index, newText);
                   }
-                }
-              }}
-            >
-              {displayContent}
-            </span>
+                }}
+              />
+            ) : (
+              <span className={`flex-1 font-mono text-xs leading-5 px-2 ${textColor} ${additionalStyles}`}>
+                {displayContent}
+              </span>
+            )}
           </div>
         );
       })}
