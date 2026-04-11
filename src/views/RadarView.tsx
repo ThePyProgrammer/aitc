@@ -1,12 +1,15 @@
 // Phase 4 RadarView -- Airspace Radar layout.
 //
-// VIZN-01: Main radar view with treemap canvas and empty state.
-// Shows AWAITING_SIGNAL when no watch session is active.
-// Fetches tree index and starts agent polling on mount.
+// VIZN-01, VIZN-02: Main radar view with treemap canvas, agent manifest,
+// tooltip overlay, and minimap. Shows AWAITING_SIGNAL when no watch session
+// is active. Fetches tree index and starts agent polling on mount.
 
-import { useEffect } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { RadarPulse } from '../components/ui/RadarPulse';
 import { RadarCanvas } from './Radar/RadarCanvas';
+import { RadarManifest } from './Radar/RadarManifest';
+import { AgentTooltip } from './Radar/AgentTooltip';
+import { RadarMinimap } from './Radar/RadarMinimap';
 import { useRadarStore } from '../stores/radarStore';
 import { useAgentStore } from '../stores/agentStore';
 import { usePipelineStore } from '../stores/pipelineStore';
@@ -17,6 +20,12 @@ export function RadarView() {
   const fetchAgents = useAgentStore((s) => s.fetchAgents);
   const startPolling = useAgentStore((s) => s.startPolling);
   const isWatching = usePipelineStore((s) => s.isWatching);
+  const agents = useAgentStore((s) => s.agents);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [containerRect, setContainerRect] = useState<DOMRect | null>(null);
 
   useEffect(() => {
     fetchTreeIndex();
@@ -24,6 +33,30 @@ export function RadarView() {
     const cleanup = startPolling();
     return cleanup;
   }, [fetchTreeIndex, fetchAgents, startPolling]);
+
+  // Track container rect for tooltip clamping
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      setContainerRect(el.getBoundingClientRect());
+    });
+    observer.observe(el);
+    setContainerRect(el.getBoundingClientRect());
+    return () => observer.disconnect();
+  }, []);
+
+  const handleHoveredAgentChange = useCallback(
+    (agentId: string | null, mouseX: number, mouseY: number) => {
+      setHoveredAgentId(agentId);
+      setMousePos({ x: mouseX, y: mouseY });
+    },
+    [],
+  );
+
+  const hoveredAgent = hoveredAgentId
+    ? agents.find((a) => a.id === hoveredAgentId) ?? null
+    : null;
 
   const showEmptyState = treeData.length === 0 && !isWatching;
 
@@ -85,9 +118,20 @@ export function RadarView() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-56px)] bg-surface">
-      <RadarCanvas />
-      {/* RadarManifest panel added in Plan 05 */}
+    <div ref={containerRef} className="flex h-[calc(100vh-56px)] bg-surface relative">
+      <RadarCanvas onHoveredAgentChange={handleHoveredAgentChange} />
+      <RadarManifest />
+      <RadarMinimap />
+
+      {/* Agent tooltip overlay */}
+      {hoveredAgent && (
+        <AgentTooltip
+          agent={hoveredAgent}
+          mouseX={mousePos.x}
+          mouseY={mousePos.y}
+          containerRect={containerRect}
+        />
+      )}
     </div>
   );
 }

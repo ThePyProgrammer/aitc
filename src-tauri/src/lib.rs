@@ -3,7 +3,6 @@ mod comms;
 mod conflict;
 mod db;
 mod pipeline;
-pub mod system_load;
 mod tray;
 
 use std::sync::Arc;
@@ -48,7 +47,6 @@ pub fn run() {
             comms::commands::list_protected_paths,
             comms::commands::add_protected_path,
             comms::commands::remove_protected_path,
-            system_load::get_system_load,
         ])
         .typ::<pipeline::events::FileEvent>()
         .typ::<pipeline::events::FileEventBatch>()
@@ -63,8 +61,7 @@ pub fn run() {
         .typ::<comms::types::ApprovalRequest>()
         .typ::<comms::types::ChatMessage>()
         .typ::<comms::types::ProtectedPath>()
-        .typ::<comms::types::TreeIndexEntry>()
-        .typ::<system_load::SystemLoadInfo>();
+        .typ::<comms::types::TreeIndexEntry>();
 
     #[cfg(debug_assertions)]
     specta_builder

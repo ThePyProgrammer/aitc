@@ -1,12 +1,17 @@
 // Phase 4 RadarCanvas -- Canvas 2D treemap renderer.
 //
-// D-09, D-10, D-11, VIZN-01, VIZN-04, VIZN-05:
+// D-09, D-10, D-11, VIZN-01, VIZN-02, VIZN-04, VIZN-05:
 // Renders squarified treemap of codebase on Canvas 2D with:
 // - HiDPI scaling (devicePixelRatio)
 // - Zoom/pan via useCanvasZoomPan
 // - Progressive detail (dirs at 1x, files at 3x, details at 8x)
 // - Agent dots with pulse animation at file positions
+// - Lead lines from agent dots to recently-touched files (VIZN-02)
+// - Agent highlight glow for selected agent
 // - Dirty-flag render loop via requestAnimationFrame
+//
+// T-04-13: Lead lines limited to last 10 events per agent. Lines older
+// than 30s fade to 30% opacity. Sub-pixel culling applies.
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useRadarStore } from '../../stores/radarStore';
@@ -15,6 +20,12 @@ import { useAgentStore } from '../../stores/agentStore';
 import { usePipelineStore } from '../../stores/pipelineStore';
 import { useTreemapLayout, type TreemapRect } from '../../hooks/useTreemapLayout';
 import { useCanvasZoomPan } from '../../hooks/useCanvasZoomPan';
+import type { FileEvent } from '../../bindings';
+
+// Lead line fade: 30s max age
+const LEAD_LINE_MAX_AGE_MS = 30_000;
+const LEAD_LINE_MIN_OPACITY = 0.3;
+const MAX_LEAD_LINES_PER_AGENT = 10;
 
 // Surface colors from Command Horizon design system
 const COLORS = {
@@ -25,7 +36,26 @@ const COLORS = {
   onSurfaceVariant: '#adaaaa',
 };
 
-export function RadarCanvas() {
+/** Parse hex color to RGB components */
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const h = hex.replace('#', '');
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+}
+
+export interface RadarCanvasHandle {
+  hoveredAgentId: string | null;
+  mousePos: { x: number; y: number };
+}
+
+interface RadarCanvasProps {
+  onHoveredAgentChange?: (agentId: string | null, mouseX: number, mouseY: number) => void;
+}
+
+export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const dirtyRef = useRef(true);
@@ -35,6 +65,7 @@ export function RadarCanvas() {
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
 
   const treeData = useRadarStore((s) => s.treeData);
+  const selectedAgentId = useRadarStore((s) => s.selectedAgentId);
   const agents = useAgentStore((s) => s.agents);
   const events = usePipelineStore((s) => s.events);
 
@@ -56,7 +87,7 @@ export function RadarCanvas() {
   // Mark dirty on viewport or agents change
   useEffect(() => {
     dirtyRef.current = true;
-  }, [viewport, agents, events]);
+  }, [viewport, agents, events, selectedAgentId]);
 
   // ResizeObserver for container
   useEffect(() => {
@@ -97,10 +128,8 @@ export function RadarCanvas() {
   // Build agent-to-file mapping from recent events
   const getAgentFileMap = useCallback(() => {
     const agentFiles = new Map<string, string>();
-    // Attribute recent events to agents via PID
     for (const agent of agents) {
       if (!agent.pid) continue;
-      // Find most recent event attributed to this agent's PID
       const agentEvent = events.find((ev) => {
         if (ev.attribution.kind === 'pid') {
           return ev.attribution.value === agent.pid;
@@ -117,6 +146,34 @@ export function RadarCanvas() {
     return agentFiles;
   }, [agents, events]);
 
+  // Get recent events per agent (for lead lines, T-04-13 limited to 10)
+  const getAgentRecentEvents = useCallback(() => {
+    const result = new Map<string, FileEvent[]>();
+    for (const agent of agents) {
+      if (!agent.pid) continue;
+      const agentEvents = events
+        .filter((ev) => {
+          if (ev.attribution.kind === 'pid') return ev.attribution.value === agent.pid;
+          if (ev.attribution.kind === 'ambiguous') return ev.attribution.value.includes(agent.pid!);
+          return false;
+        })
+        .slice(0, MAX_LEAD_LINES_PER_AGENT);
+      if (agentEvents.length > 0) {
+        result.set(agent.id, agentEvents);
+      }
+    }
+    return result;
+  }, [agents, events]);
+
+  // Find treemap rect for a file path
+  function findRect(rects: TreemapRect[], filePath: string): TreemapRect | undefined {
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    return rects.find((r) => {
+      const rPath = r.path.replace(/\\/g, '/');
+      return rPath === normalizedPath || normalizedPath.endsWith(rPath) || rPath.endsWith(normalizedPath);
+    });
+  }
+
   // Main render loop
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -131,7 +188,6 @@ export function RadarCanvas() {
       if (!ctx) return;
 
       if (dirtyRef.current || hasAnimatingDots) {
-        const dpr = window.devicePixelRatio || 1;
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas!.width, canvas!.height);
@@ -148,6 +204,8 @@ export function RadarCanvas() {
         );
 
         drawTreemap(ctx, layoutRef.current, viewport.zoom);
+        drawLeadLines(ctx, layoutRef.current, viewport.zoom);
+        drawAgentHighlight(ctx, layoutRef.current, viewport.zoom);
         hasAnimatingDots = drawAgentDots(ctx, layoutRef.current, viewport.zoom);
         dirtyRef.current = false;
       }
@@ -172,14 +230,12 @@ export function RadarCanvas() {
       const h = rect.y1 - rect.y0;
 
       if (rect.isFile) {
-        // File cell
         ctx.fillStyle = COLORS.surface;
         ctx.fillRect(rect.x0, rect.y0, w, h);
         ctx.strokeStyle = `rgba(73, 72, 71, 0.15)`;
         ctx.lineWidth = 0.5;
         ctx.strokeRect(rect.x0, rect.y0, w, h);
       } else {
-        // Directory rectangle
         ctx.fillStyle = COLORS.surfaceContainerLow;
         ctx.fillRect(rect.x0, rect.y0, w, h);
         ctx.strokeStyle = `rgba(73, 72, 71, 0.3)`;
@@ -234,6 +290,109 @@ export function RadarCanvas() {
     }
   }
 
+  // Draw lead lines from agent dots to recently-touched files (D-10, VIZN-02)
+  // Only visible at zoom >= 3 (progressive detail per D-11)
+  function drawLeadLines(
+    ctx: CanvasRenderingContext2D,
+    rects: TreemapRect[],
+    zoom: number,
+  ) {
+    if (zoom < 3) return;
+
+    const agentFileMap = getAgentFileMap();
+    const agentRecentEvents = getAgentRecentEvents();
+    const now = Date.now();
+
+    for (const agent of agents) {
+      const primaryFilePath = agentFileMap.get(agent.id);
+      if (!primaryFilePath) continue;
+
+      const primaryRect = findRect(rects, primaryFilePath);
+      if (!primaryRect) continue;
+
+      const dotCx = (primaryRect.x0 + primaryRect.x1) / 2;
+      const dotCy = (primaryRect.y0 + primaryRect.y1) / 2;
+      const color = getAgentColor(agent.id);
+      const rgb = hexToRgb(color);
+
+      const recentEvents = agentRecentEvents.get(agent.id) ?? [];
+
+      for (const ev of recentEvents) {
+        const targetRect = findRect(rects, ev.path);
+        if (!targetRect) continue;
+
+        const targetCx = (targetRect.x0 + targetRect.x1) / 2;
+        const targetCy = (targetRect.y0 + targetRect.y1) / 2;
+
+        // Skip if same as agent dot position
+        if (Math.abs(dotCx - targetCx) < 0.5 && Math.abs(dotCy - targetCy) < 0.5) continue;
+
+        // Lead line fade animation: opacity based on event age (30s max)
+        const ageMs = now - ev.timestampMs;
+        const fadeOpacity = Math.max(LEAD_LINE_MIN_OPACITY, 1.0 - (ageMs / LEAD_LINE_MAX_AGE_MS));
+
+        // Gradient from full opacity at agent dot to 10% at target file
+        const gradient = ctx.createLinearGradient(dotCx, dotCy, targetCx, targetCy);
+        gradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${fadeOpacity * 0.4})`);
+        gradient.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${fadeOpacity * 0.1})`);
+
+        ctx.beginPath();
+        ctx.moveTo(dotCx, dotCy);
+        ctx.lineTo(targetCx, targetCy);
+        ctx.strokeStyle = gradient;
+        ctx.lineWidth = 0.5 / zoom;
+        ctx.stroke();
+
+        // Timestamp label at midpoint (Data-sm role, JetBrains Mono 10px)
+        const midX = (dotCx + targetCx) / 2;
+        const midY = (dotCy + targetCy) / 2;
+        const ageSec = Math.round(ageMs / 1000);
+        ctx.font = `${10 / zoom}px "JetBrains Mono", monospace`;
+        ctx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${fadeOpacity * 0.5})`;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${ageSec}s`, midX, midY);
+        ctx.textAlign = 'left'; // Reset
+      }
+    }
+  }
+
+  // Draw selected agent highlight (ambient glow circle, 2s pulsing cycle)
+  function drawAgentHighlight(
+    ctx: CanvasRenderingContext2D,
+    rects: TreemapRect[],
+    zoom: number,
+  ) {
+    if (!selectedAgentId) return;
+
+    const agentFileMap = getAgentFileMap();
+    const filePath = agentFileMap.get(selectedAgentId);
+    if (!filePath) return;
+
+    const rect = findRect(rects, filePath);
+    if (!rect) return;
+
+    const cx = (rect.x0 + rect.x1) / 2;
+    const cy = (rect.y0 + rect.y1) / 2;
+    const color = getAgentColor(selectedAgentId);
+    const rgb = hexToRgb(color);
+
+    // 2s pulsing cycle for glow
+    const phase = (Date.now() % 2000) / 2000;
+    const glowAlpha = 0.1 + 0.05 * Math.sin(phase * Math.PI * 2);
+    const glowRadius = 40 / zoom;
+
+    // Radial gradient glow
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowRadius);
+    gradient.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${glowAlpha})`);
+    gradient.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0)`);
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, glowRadius, 0, Math.PI * 2);
+    ctx.fillStyle = gradient;
+    ctx.fill();
+  }
+
   // Draw agent dots with pulse animation
   function drawAgentDots(
     ctx: CanvasRenderingContext2D,
@@ -247,22 +406,17 @@ export function RadarCanvas() {
       const filePath = agentFileMap.get(agent.id);
       if (!filePath) continue;
 
-      // Find matching treemap rect (normalize path separators)
-      const normalizedPath = filePath.replace(/\\/g, '/');
-      const rect = rects.find((r) => {
-        const rPath = r.path.replace(/\\/g, '/');
-        return rPath === normalizedPath || normalizedPath.endsWith(rPath) || rPath.endsWith(normalizedPath);
-      });
+      const rect = findRect(rects, filePath);
       if (!rect) continue;
 
       const cx = (rect.x0 + rect.x1) / 2;
       const cy = (rect.y0 + rect.y1) / 2;
-      const dotRadius = 4 / zoom; // 8px diameter in screen space
+      const dotRadius = 4 / zoom;
       const color = getAgentColor(agent.id);
 
       // Pulse animation: 2s cycle
       const phase = (Date.now() % 2000) / 2000;
-      const pulseScale1 = 1 + phase * 1.5; // 1 to 2.5
+      const pulseScale1 = 1 + phase * 1.5;
       const pulseScale2 = 1 + ((phase + 0.25) % 1) * 1.5;
       const pulseAlpha1 = 0.3 * (1 - phase);
       const pulseAlpha2 = 0.2 * (1 - ((phase + 0.25) % 1));
@@ -308,11 +462,7 @@ export function RadarCanvas() {
         const filePath = agentFileMap.get(agent.id);
         if (!filePath) continue;
 
-        const normalizedPath = filePath.replace(/\\/g, '/');
-        const tmRect = layoutRef.current.find((r) => {
-          const rPath = r.path.replace(/\\/g, '/');
-          return rPath === normalizedPath || normalizedPath.endsWith(rPath) || rPath.endsWith(normalizedPath);
-        });
+        const tmRect = findRect(layoutRef.current, filePath);
         if (!tmRect) continue;
 
         const cx = (tmRect.x0 + tmRect.x1) / 2;
@@ -325,8 +475,9 @@ export function RadarCanvas() {
       }
 
       setHoveredAgentId(found);
+      onHoveredAgentChange?.(found, screenX, screenY);
     },
-    [screenToWorld, agents, getAgentFileMap, viewport.zoom],
+    [screenToWorld, agents, getAgentFileMap, viewport.zoom, onHoveredAgentChange],
   );
 
   // Attach native event handlers (onWheel needs passive: false)
@@ -359,7 +510,7 @@ export function RadarCanvas() {
         data-hovered-agent={hoveredAgentId}
       />
       {/* Zoom indicator */}
-      <div className="absolute bottom-3 right-3 font-mono text-[10px] text-on-surface-variant/50 select-none">
+      <div className="absolute bottom-3 left-3 font-mono text-[10px] text-on-surface-variant/50 select-none">
         {viewport.zoom.toFixed(1)}x
       </div>
     </div>
