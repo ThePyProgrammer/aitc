@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  Clock,
   MessageSquare,
   Radar,
   Building2,
@@ -17,6 +18,7 @@ const navItems = [
   { to: '/tower', label: 'TOWER', icon: Building2 },
   { to: '/comms', label: 'COMMS', icon: MessageSquare },
   { to: '/conflicts', label: 'CONFLICTS', icon: AlertTriangle },
+  { to: '/history', label: 'HISTORY', icon: Clock },
 ] as const;
 
 export function Sidebar() {

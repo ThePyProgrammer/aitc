@@ -4,6 +4,7 @@ import { RadarView } from './views/RadarView';
 import { TowerView } from './views/TowerView';
 import { CommsView } from './views/CommsView';
 import { ConflictsView } from './views/ConflictsView';
+import { HistoryView } from './views/HistoryView';
 
 const router = createMemoryRouter([
   {
@@ -15,6 +16,7 @@ const router = createMemoryRouter([
       { path: 'tower', element: <TowerView /> },
       { path: 'comms', element: <CommsView /> },
       { path: 'conflicts', element: <ConflictsView /> },
+      { path: 'history', element: <HistoryView /> },
     ],
   },
 ]);

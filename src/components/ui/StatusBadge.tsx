@@ -7,7 +7,16 @@ type StatusVariant =
   // Phase 3 agent status variants
   | 'running'
   | 'waiting'
-  | 'error';
+  | 'error'
+  // Phase 5 history + resolution variants
+  | 'completed'
+  | 'terminated'
+  | 'resolved'
+  | 'success'
+  | 'warning'
+  | 'primary'
+  | 'secondary'
+  | 'tertiary';
 
 interface StatusBadgeProps {
   variant: StatusVariant;
@@ -21,6 +30,14 @@ const variantStyles: Record<StatusVariant, string> = {
   running: 'bg-[#8eff71]/10 text-[#8eff71] border border-[#8eff71]/20',
   waiting: 'bg-[#ffd16f]/10 text-[#ffd16f] border border-[#ffd16f]/20',
   error: 'bg-[#ff7351]/10 text-[#ff7351] border border-[#ff7351]/20',
+  completed: 'bg-[#8eff71]/10 text-[#8eff71] border border-[#8eff71]/20',
+  terminated: 'bg-[#ffd16f]/10 text-[#ffd16f] border border-[#ffd16f]/20',
+  resolved: 'bg-primary/10 text-primary border border-primary/20',
+  success: 'bg-[#8eff71]/10 text-[#8eff71] border border-[#8eff71]/20',
+  warning: 'bg-[#ffd16f]/10 text-[#ffd16f] border border-[#ffd16f]/20',
+  primary: 'bg-primary/10 text-primary border border-primary/20',
+  secondary: 'bg-[#00cffc]/10 text-[#00cffc] border border-[#00cffc]/20',
+  tertiary: 'bg-[#ffd16f]/10 text-[#ffd16f] border border-[#ffd16f]/20',
 };
 
 export function StatusBadge({ variant, children }: StatusBadgeProps) {
