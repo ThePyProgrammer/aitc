@@ -99,7 +99,13 @@ Plans:
   2. User can accept changes per-hunk from either agent or manually edit the resolution
   3. File heat map overlay on the radar shows contention intensity across the codebase
   4. User can browse past agent sessions, resolved conflicts, and approval decision history from the app
-**Plans**: TBD
+**Plans:** 5 plans
+Plans:
+- [ ] 05-01-PLAN.md -- Rust backend: SQLite migration (conflict_resolutions, session_files tables), BackupManager, resolution Tauri commands, session/history queries
+- [ ] 05-02-PLAN.md -- Frontend libraries: node-diff3 + shiki install, merge.ts (3-way merge computation), contention.ts (heat map scoring), useSyntaxHighlight hook, historyStore
+- [ ] 05-03-PLAN.md -- Merge UI: conflictStore resolution state, MergeView layout, UnifiedDiff with syntax highlighting, HunkNavigator, HunkResolutionControls, IntentPanel, ResolutionToolbar
+- [ ] 05-04-PLAN.md -- Heat map overlay on radar (HeatMapOverlay Canvas function, radarStore extension, toggle button) + History view (HistoryView with 3 tabbed virtualized tables, sidebar/router update)
+- [ ] 05-05-PLAN.md -- Integration wiring (contention score updates, StatusBadge/Button extensions, type fixes) + visual verification checkpoint
 **UI hint**: yes
 
 ## Progress
@@ -113,4 +119,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 2. Real-Time Data Pipeline | 4/4 | Complete    | 2026-04-10 |
 | 3. Agent Management + Conflict Detection | 0/4 | Planning complete | - |
 | 4. Core UI Views | 0/5 | Planning complete | - |
-| 5. Conflict Resolution + History | 0/0 | Not started | - |
+| 5. Conflict Resolution + History | 0/5 | Planning complete | - |
