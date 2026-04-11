@@ -104,7 +104,7 @@ Plans:
 - [x] 05-01-PLAN.md -- Rust backend: SQLite migration (conflict_resolutions, session_files tables), BackupManager, resolution Tauri commands, session/history queries
 - [x] 05-02-PLAN.md -- Frontend libraries: node-diff3 + shiki install, merge.ts (3-way merge computation), contention.ts (heat map scoring), useSyntaxHighlight hook, historyStore
 - [x] 05-03-PLAN.md -- Merge UI: conflictStore resolution state, MergeView layout, UnifiedDiff with syntax highlighting, HunkNavigator, HunkResolutionControls, IntentPanel, ResolutionToolbar
-- [ ] 05-04-PLAN.md -- Heat map overlay on radar (HeatMapOverlay Canvas function, radarStore extension, toggle button) + History view (HistoryView with 3 tabbed virtualized tables, sidebar/router update)
+- [x] 05-04-PLAN.md -- Heat map overlay on radar (HeatMapOverlay Canvas function, radarStore extension, toggle button) + History view (HistoryView with 3 tabbed virtualized tables, sidebar/router update)
 - [ ] 05-05-PLAN.md -- Integration wiring (contention score updates, StatusBadge/Button extensions, type fixes) + visual verification checkpoint
 **UI hint**: yes
 

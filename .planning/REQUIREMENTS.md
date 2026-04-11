@@ -13,7 +13,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **FMON-02**: System attributes file events to specific agent processes (PID-based correlation)
 - [ ] **FMON-03**: System handles large codebases (10k+ files) without excessive CPU/memory via debouncing and event batching
 - [ ] **FMON-04**: System detects whether agents operate on a shared working tree or isolated git worktrees
-- [ ] **FMON-05**: System generates a file heat map showing which files/regions are touched by multiple agents
+- [x] **FMON-05**: System generates a file heat map showing which files/regions are touched by multiple agents
 
 ### Agent Management
 
@@ -47,7 +47,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **VIZN-01**: User can view a 2D spatial radar plotting agents as dots on a file-tree-based codebase map
 - [ ] **VIZN-02**: Radar shows agent trajectories (lead lines indicating which files an agent is approaching/recently touched)
-- [ ] **VIZN-03**: File heat map overlay on radar shows contention intensity (color = number of agents touching a region)
+- [x] **VIZN-03**: File heat map overlay on radar shows contention intensity (color = number of agents touching a region)
 - [ ] **VIZN-04**: Radar renders performantly via Canvas 2D for codebases with 10k+ files
 - [ ] **VIZN-05**: Codebase map uses file tree structure (directories = regions, files = points) as spatial layout
 
@@ -60,10 +60,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Persistence & History
 
-- [ ] **HIST-01**: System stores agent session records (start time, end time, files touched, outcome) in local SQLite database
-- [ ] **HIST-02**: System stores conflict resolution records (which agents, which files, how resolved, timestamp)
-- [ ] **HIST-03**: System stores approval decision audit log (request, response, timestamp)
-- [ ] **HIST-04**: User can browse past sessions and their event history
+- [x] **HIST-01**: System stores agent session records (start time, end time, files touched, outcome) in local SQLite database
+- [x] **HIST-02**: System stores conflict resolution records (which agents, which files, how resolved, timestamp)
+- [x] **HIST-03**: System stores approval decision audit log (request, response, timestamp)
+- [x] **HIST-04**: User can browse past sessions and their event history
 
 ### Application Shell
 
@@ -124,7 +124,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FMON-02 | Phase 2 | Pending |
 | FMON-03 | Phase 2 | Pending |
 | FMON-04 | Phase 2 | Pending |
-| FMON-05 | Phase 5 | Pending |
+| FMON-05 | Phase 5 | Complete |
 | AGNT-01 | Phase 3 | Pending |
 | AGNT-02 | Phase 3 | Pending |
 | AGNT-03 | Phase 3 | Pending |
@@ -146,17 +146,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 | COMM-06 | Phase 4 | Pending |
 | VIZN-01 | Phase 4 | Pending |
 | VIZN-02 | Phase 4 | Pending |
-| VIZN-03 | Phase 5 | Pending |
+| VIZN-03 | Phase 5 | Complete |
 | VIZN-04 | Phase 4 | Pending |
 | VIZN-05 | Phase 4 | Pending |
 | DSGN-01 | Phase 1 | Pending |
 | DSGN-02 | Phase 1 | Pending |
 | DSGN-03 | Phase 1 | Pending |
 | DSGN-04 | Phase 1 | Pending |
-| HIST-01 | Phase 5 | Pending |
-| HIST-02 | Phase 5 | Pending |
-| HIST-03 | Phase 5 | Pending |
-| HIST-04 | Phase 5 | Pending |
+| HIST-01 | Phase 5 | Complete |
+| HIST-02 | Phase 5 | Complete |
+| HIST-03 | Phase 5 | Complete |
+| HIST-04 | Phase 5 | Complete |
 | SHELL-01 | Phase 1 | Pending |
 | SHELL-02 | Phase 1 | Pending |
 | SHELL-03 | Phase 1 | Pending |
