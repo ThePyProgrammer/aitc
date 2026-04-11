@@ -48,6 +48,13 @@ pub fn run() {
             comms::commands::add_protected_path,
             comms::commands::remove_protected_path,
             system_load::get_system_load,
+            conflict::resolution::read_conflict_files,
+            conflict::resolution::apply_resolution,
+            conflict::resolution::list_conflict_resolutions,
+            conflict::resolution::list_session_files,
+            conflict::resolution::record_session_file,
+            conflict::resolution::list_sessions,
+            conflict::resolution::list_approval_history,
         ])
         .typ::<pipeline::events::FileEvent>()
         .typ::<pipeline::events::FileEventBatch>()
@@ -63,7 +70,13 @@ pub fn run() {
         .typ::<comms::types::ChatMessage>()
         .typ::<comms::types::ProtectedPath>()
         .typ::<comms::types::TreeIndexEntry>()
-        .typ::<system_load::SystemLoadInfo>();
+        .typ::<system_load::SystemLoadInfo>()
+        .typ::<conflict::resolution::ConflictFileVersions>()
+        .typ::<conflict::resolution::HunkResolution>()
+        .typ::<conflict::resolution::ResolutionRecord>()
+        .typ::<conflict::resolution::SessionRecord>()
+        .typ::<conflict::resolution::SessionFileRecord>()
+        .typ::<conflict::resolution::ApprovalHistoryRecord>();
 
     #[cfg(debug_assertions)]
     specta_builder
@@ -109,6 +122,15 @@ pub fn run() {
                     panic!("Database initialization failed: {e}");
                 });
             app.manage(pool);
+
+            // Initialize BackupManager for conflict resolution file snapshots
+            let app_dir = app
+                .handle()
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("failed to get app data dir for backups: {e}"))?;
+            let backup_manager = conflict::backup::BackupManager::new(app_dir);
+            app.manage(backup_manager);
 
             // Splash screen display + transition to main window
             let app_handle = app.handle().clone();
