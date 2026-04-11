@@ -96,23 +96,23 @@ pub fn run() {
                 }
             });
 
-            // SQLite database
+            // SQLite database -- initialized synchronously via block_on so the pool
+            // is registered as managed state before any Tauri command can fire.
+            // CR-01: Previously spawned as an async task, creating a race window
+            // where commands requiring Pool<Sqlite> could panic.
+            let app_handle = app.handle().clone();
+            let pool = tauri::async_runtime::block_on(db::init_db(&app_handle))
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to initialize database: {}", e);
+                    app_handle.exit(1);
+                    // Exit should terminate, but satisfy the type system
+                    panic!("Database initialization failed: {e}");
+                });
+            app.manage(pool);
+
+            // Splash screen display + transition to main window
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                // Initialize DB -- exit on failure since app cannot function without it
-                let pool = match db::init_db(&app_handle).await {
-                    Ok(pool) => pool,
-                    Err(e) => {
-                        eprintln!("Failed to initialize database: {}", e);
-                        if let Some(splash) = app_handle.get_webview_window("splashscreen") {
-                            let _ = splash.close();
-                        }
-                        app_handle.exit(1);
-                        return;
-                    }
-                };
-                app_handle.manage(pool);
-
                 // Wait 2 seconds for branded splash display (D-14)
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
