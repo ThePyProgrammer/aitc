@@ -13,6 +13,7 @@ import { RadarMinimap } from './Radar/RadarMinimap';
 import { useRadarStore } from '../stores/radarStore';
 import { useAgentStore } from '../stores/agentStore';
 import { usePipelineStore } from '../stores/pipelineStore';
+import { useConflictStore } from '../stores/conflictStore';
 
 export function RadarView() {
   const treeData = useRadarStore((s) => s.treeData);
@@ -20,7 +21,10 @@ export function RadarView() {
   const fetchAgents = useAgentStore((s) => s.fetchAgents);
   const startPolling = useAgentStore((s) => s.startPolling);
   const isWatching = usePipelineStore((s) => s.isWatching);
+  const events = usePipelineStore((s) => s.events);
   const agents = useAgentStore((s) => s.agents);
+  const alerts = useConflictStore((s) => s.alerts);
+  const updateContentionScores = useRadarStore((s) => s.updateContentionScores);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
@@ -33,6 +37,30 @@ export function RadarView() {
     const cleanup = startPolling();
     return cleanup;
   }, [fetchTreeIndex, fetchAgents, startPolling]);
+
+  // Periodic contention score updates (every 5s per T-05-14 mitigation)
+  useEffect(() => {
+    const buildAgentFileEvents = () => {
+      const agentFileEvents = new Map<string, string[]>();
+      for (const ev of events) {
+        if (ev.attribution.kind === 'pid') {
+          const key = `PID-${ev.attribution.value}`;
+          const existing = agentFileEvents.get(key) ?? [];
+          existing.push(ev.path);
+          agentFileEvents.set(key, existing);
+        }
+      }
+      return agentFileEvents;
+    };
+
+    // Immediate update when alerts change
+    updateContentionScores(alerts, buildAgentFileEvents());
+
+    const interval = setInterval(() => {
+      updateContentionScores(alerts, buildAgentFileEvents());
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [alerts, events, updateContentionScores]);
 
   // Track container rect for tooltip clamping
   useEffect(() => {

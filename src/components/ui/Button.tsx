@@ -1,7 +1,7 @@
 import { type ButtonHTMLAttributes } from 'react';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant: 'primary' | 'ghost';
+  variant: 'primary' | 'ghost' | 'destructive';
   tooltip?: string;
 }
 
@@ -10,6 +10,8 @@ const variantStyles = {
     'bg-primary text-on-primary font-headline text-xs font-bold uppercase tracking-widest hover:shadow-[0_0_10px_rgba(142,255,113,0.4)] active:bg-primary-container',
   ghost:
     'bg-transparent border border-outline/20 text-secondary font-headline text-xs font-bold uppercase tracking-widest hover:bg-surface-container-high',
+  destructive:
+    'bg-error text-white font-headline text-xs font-bold uppercase tracking-widest hover:shadow-[0_0_10px_rgba(255,115,81,0.4)]',
 };
 
 export function Button({
