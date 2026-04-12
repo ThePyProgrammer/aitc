@@ -162,6 +162,28 @@ impl AgentAdapter for GenericAdapter {
     }
 }
 
+/// Sentinel adapter used for PASSIVE-scan entries (AGNT-03 / D-06).
+///
+/// Returns a `GenericAdapter` configured with a process_names pattern that
+/// never matches any real process (`__passive__never_matches__`). Passive
+/// entries are view-only — attempting to `terminate` one falls through to
+/// `launcher::terminate_process` with the original PID, which is what the
+/// UI already disables for unknown agent_type per 06-RESEARCH.md Q1.
+pub fn passive_sentinel_adapter() -> std::sync::Arc<dyn AgentAdapter> {
+    // Minimal TOML -- only mandatory fields. from_toml validates regexes and
+    // caps process_names, neither of which can fail on this config.
+    const PASSIVE_SENTINEL_TOML: &str = r#"
+name = "passive-scan"
+process_names = ["__passive__never_matches__"]
+launch_command = ""
+launch_args = []
+"#;
+    std::sync::Arc::new(
+        GenericAdapter::from_toml(PASSIVE_SENTINEL_TOML)
+            .expect("passive_sentinel_adapter TOML is well-formed"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
