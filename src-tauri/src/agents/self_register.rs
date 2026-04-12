@@ -88,6 +88,7 @@ impl RateLimiter {
 async fn register_agent(
     Extension(registry): Extension<Arc<AgentRegistry>>,
     Extension(rate_limiter): Extension<Arc<RateLimiter>>,
+    Extension(pool): Extension<sqlx::SqlitePool>,
     Json(payload): Json<RegisterPayload>,
 ) -> impl IntoResponse {
     // T-03-07: Rate limit
@@ -143,14 +144,38 @@ async fn register_agent(
         intent: payload.intent,
     };
 
+    // D-07: Remove any prior PASSIVE entry for this PID so we don't double-list.
+    let _ = registry
+        .remove_agent(&format!("PASSIVE-{}", payload.pid))
+        .await;
+
+    let agent_type_for_session = info.agent_type.clone();
     match registry
         .upsert_agent(agent_id.clone(), info, adapter, false)
         .await
     {
-        Ok(()) => (
-            StatusCode::OK,
-            Json(serde_json::json!({"id": agent_id})),
-        ),
+        Ok(()) => {
+            // HIST-01 Open Question 2: always insert a session row on successful
+            // self-register so HistoryView sees the launch even if no file event fires.
+            if let Err(e) = crate::db::session::ensure_open_session(
+                &agent_id,
+                &agent_type_for_session,
+                &pool,
+            )
+            .await
+            {
+                tracing::warn!(
+                    agent_id = %agent_id,
+                    error = %e,
+                    "ensure_open_session on self-register failed"
+                );
+                // Non-fatal: registration still succeeds.
+            }
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({"id": agent_id})),
+            )
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": e})),
@@ -166,6 +191,7 @@ async fn register_agent(
 /// Returns the actual bound port number.
 pub async fn start_registration_server(
     registry: Arc<AgentRegistry>,
+    pool: sqlx::SqlitePool,
     preferred_port: u16,
 ) -> Result<u16, String> {
     let rate_limiter = Arc::new(RateLimiter::new());
@@ -173,7 +199,8 @@ pub async fn start_registration_server(
     let app = Router::new()
         .route("/register", post(register_agent))
         .layer(Extension(registry))
-        .layer(Extension(rate_limiter));
+        .layer(Extension(rate_limiter))
+        .layer(Extension(pool));
 
     // Try preferred port first, fallback to OS-assigned
     let listener = match TcpListener::bind(format!("127.0.0.1:{preferred_port}")).await {
@@ -207,6 +234,89 @@ pub async fn start_registration_server(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agents::adapter::{AgentInfo, AgentState};
+    use crate::agents::registry::AgentRegistry;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::sync::Arc;
+
+    async fn make_pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE agent_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                agent_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'idle',
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                file_count INTEGER NOT NULL DEFAULT 0
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn removes_prior_passive_on_kagent_register() {
+        // Seed a PASSIVE entry, then simulate the handler's PASSIVE removal step.
+        let mut reg = AgentRegistry::new();
+        reg.register_adapter(Arc::new(crate::agents::claude_code::ClaudeCodeAdapter));
+        let reg = Arc::new(reg);
+
+        let adapter = reg
+            .find_adapter_for_process("claude-code")
+            .expect("claude-code adapter registered");
+        reg.upsert_agent(
+            "PASSIVE-1234".into(),
+            AgentInfo {
+                id: "PASSIVE-1234".into(),
+                agent_type: "unknown".into(),
+                protocol: "passive-scan".into(),
+                state: AgentState::Running,
+                pid: Some(1234),
+                cwd: None,
+                intent: None,
+            },
+            adapter,
+            false,
+        )
+        .await
+        .unwrap();
+
+        // Simulate the reconciliation the handler now performs.
+        let removed = reg.remove_agent(&format!("PASSIVE-{}", 1234u32)).await;
+        assert!(removed.is_some());
+        assert!(reg.get_agent("PASSIVE-1234").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn kagent_register_inserts_agent_session_row() {
+        let pool = make_pool().await;
+        // Simulate the ensure_open_session call the handler now performs.
+        let id = crate::db::session::ensure_open_session(
+            "KAGENT-1234",
+            "claude-code",
+            &pool,
+        )
+        .await
+        .unwrap();
+        assert!(id > 0);
+        let (cnt,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM agent_sessions WHERE agent_id = ?",
+        )
+        .bind("KAGENT-1234")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cnt, 1);
+    }
 
     #[test]
     fn register_payload_deserializes() {

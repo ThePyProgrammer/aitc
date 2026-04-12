@@ -108,15 +108,6 @@ pub fn run() {
             // System tray (D-13)
             tray::setup_tray(app)?;
 
-            // Start the self-registration server
-            let registry_clone = agent_registry.clone();
-            tauri::async_runtime::spawn(async move {
-                match agents::self_register::start_registration_server(registry_clone, 9417).await {
-                    Ok(port) => tracing::info!(port, "AITC registration server started"),
-                    Err(e) => tracing::warn!(error = %e, "Failed to start registration server"),
-                }
-            });
-
             // SQLite database -- initialized synchronously via block_on so the pool
             // is registered as managed state before any Tauri command can fire.
             // CR-01: Previously spawned as an async task, creating a race window
@@ -129,7 +120,17 @@ pub fn run() {
                     // Exit should terminate, but satisfy the type system
                     panic!("Database initialization failed: {e}");
                 });
-            app.manage(pool);
+            app.manage(pool.clone());
+
+            // Start the self-registration server (HIST-01: needs pool for ensure_open_session)
+            let registry_clone = agent_registry.clone();
+            let pool_for_server = pool.clone();
+            tauri::async_runtime::spawn(async move {
+                match agents::self_register::start_registration_server(registry_clone, pool_for_server, 9417).await {
+                    Ok(port) => tracing::info!(port, "AITC registration server started"),
+                    Err(e) => tracing::warn!(error = %e, "Failed to start registration server"),
+                }
+            });
 
             // Initialize BackupManager for conflict resolution file snapshots
             let app_dir = app
