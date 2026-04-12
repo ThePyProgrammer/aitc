@@ -12,6 +12,8 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    repo_session::capture_launch_cwd();
+
     // Build the agent registry with built-in adapters
     let mut agent_registry = agents::AgentRegistry::new();
     agent_registry.register_adapter(Arc::new(agents::claude_code::ClaudeCodeAdapter));
@@ -26,6 +28,10 @@ pub fn run() {
             pipeline::commands::stop_watch,
             pipeline::commands::list_worktrees,
             pipeline::commands::get_tree_index,
+            repo_session::get_launch_cwd,
+            repo_session::detect_git_root,
+            repo_session::persist_last_repo,
+            repo_session::get_last_repo,
             agents::commands::list_agents,
             agents::commands::launch_agent,
             agents::commands::terminate_agent,
