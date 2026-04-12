@@ -1,3 +1,5 @@
+pub mod session;
+
 use sqlx::sqlite::SqlitePoolOptions;
 use tauri::Manager;
 

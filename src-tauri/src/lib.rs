@@ -3,6 +3,7 @@ mod comms;
 mod conflict;
 mod db;
 mod pipeline;
+mod repo_session;
 pub mod system_load;
 mod tray;
 
