@@ -514,20 +514,20 @@ pub async fn close_session(agent_id: &str, pool: &SqlitePool) -> Result<(), Stri
 
 **None of these change the phase scope.** A2 is the one to watch — visually confirm during verification that auto-detect works from a terminal-launched dev build.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **How should the passive sentinel adapter behave on `terminate(pid)`?**
    - What we know: `AgentAdapter::terminate` is called from `terminate_agent` command. For PASSIVE agents, users may want a "detach / forget" vs. a real kill.
    - What's unclear: Does D-06 imply passive agents are view-only (can't be terminated) or can users kill them via the Tower UI?
-   - Recommendation: For Phase 6, disable the terminate button in AgentRow for agents with `agent_type === 'unknown'` (protocol `passive-scan`). Flag for Phase 7 if real termination is desired.
+   - **RESOLVED:** Passive agents are view-only for Phase 6. Disable the terminate button in AgentRow for agents with `agent_type === 'unknown'` (protocol `passive-scan`). Real termination of passively-detected processes is deferred to a future phase. Plan 04 honors this by not wiring any terminate path for PASSIVE-prefixed agents.
 
 2. **Should `ensure_open_session` also insert on self-registration even if no file event arrives?**
    - What we know: HIST-01 wants session records; a self-registered agent that never writes a file today would have no DB row.
-   - Recommendation: Yes — call `ensure_open_session` inside the self-registration HTTP handler success path, independent of any file event. Keeps History view showing all launches.
+   - **RESOLVED:** Yes. Plan 03 Task 3 calls `ensure_open_session` inside the self-registration HTTP handler success path, independent of any file event. This guarantees every launched agent has an `agent_sessions` row (satisfies HIST-01) and closes the FK-violation gap for `record_session_file` so History view shows all launches.
 
 3. **Does the pause toggle clear `pipelineStore.events` or preserve them?**
    - What we know: Current `reset()` clears events and resets `droppedBatches`. Pause-via-unregister would call reset.
-   - Recommendation: Modify pause path to skip `reset()`, so the user sees the last events up to the pause. Only `changeRepo` should reset — that's a true session boundary.
+   - **RESOLVED:** Preserve events on pause. Plan 05 wires the pause path to call `unregister()` without `reset()`, so the user sees the last events up to the pause. Only `changeRepo` triggers `reset()` — that's a true session boundary. Plan 05 Task 2's acceptance criteria encode this split.
 
 ## Environment Availability
 
