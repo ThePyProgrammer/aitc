@@ -89,6 +89,43 @@ impl AgentRegistry {
         self.agents.write().await.remove(id)
     }
 
+    /// Find any agent (PASSIVE or KAGENT or launched) whose info.pid matches.
+    /// Scans the full map; registry is capped at MAX_AGENTS so O(n) is fine.
+    #[allow(dead_code)]
+    pub async fn find_agent_by_pid(&self, pid: u32) -> Option<AgentInfo> {
+        let agents = self.agents.read().await;
+        for (_id, managed) in agents.iter() {
+            if managed.info.pid == Some(pid) {
+                return Some(managed.info.clone());
+            }
+        }
+        None
+    }
+
+    /// Remove all PASSIVE-{pid} entries whose pid is NOT in `live_pids`.
+    /// Never touches non-PASSIVE keys. Returns the count of removed entries.
+    #[allow(dead_code)]
+    pub async fn reap_passive_agents(&self, live_pids: &std::collections::HashSet<u32>) -> usize {
+        let mut agents = self.agents.write().await;
+        let stale: Vec<String> = agents
+            .iter()
+            .filter(|(id, managed)| {
+                id.starts_with("PASSIVE-")
+                    && managed
+                        .info
+                        .pid
+                        .map(|p| !live_pids.contains(&p))
+                        .unwrap_or(true)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        let n = stale.len();
+        for id in stale {
+            agents.remove(&id);
+        }
+        n
+    }
+
     /// Get a clone of an agent's info by ID.
     pub async fn get_agent(&self, id: &str) -> Option<AgentInfo> {
         self.agents.read().await.get(id).map(|a| a.info.clone())
@@ -301,4 +338,115 @@ mod tests {
         // Should still be 1 agent, not 2
         assert_eq!(reg.all_agents().await.len(), 1);
     }
+
+    mod merge_by_pid {
+        use super::*;
+
+        fn info_with_pid(id: &str, pid: Option<u32>) -> AgentInfo {
+            AgentInfo {
+                id: id.into(),
+                agent_type: "unknown".into(),
+                protocol: "test".into(),
+                state: AgentState::Running,
+                pid,
+                cwd: None,
+                intent: None,
+            }
+        }
+
+        fn dummy_adapter() -> Arc<dyn AgentAdapter> {
+            Arc::new(TestAdapter::new("dummy", vec!["dummy"]))
+        }
+
+        #[tokio::test]
+        async fn find_agent_by_pid_returns_kagent_when_pids_match() {
+            let reg = AgentRegistry::new();
+            let adapter = dummy_adapter();
+            reg.upsert_agent(
+                "KAGENT-1234".into(),
+                info_with_pid("KAGENT-1234", Some(1234)),
+                adapter.clone(),
+                false,
+            )
+            .await
+            .unwrap();
+            reg.upsert_agent(
+                "PASSIVE-5678".into(),
+                info_with_pid("PASSIVE-5678", Some(5678)),
+                adapter.clone(),
+                false,
+            )
+            .await
+            .unwrap();
+            let found = reg.find_agent_by_pid(1234).await.unwrap();
+            assert_eq!(found.id, "KAGENT-1234");
+        }
+
+        #[tokio::test]
+        async fn find_agent_by_pid_returns_none_when_no_match() {
+            let reg = AgentRegistry::new();
+            assert!(reg.find_agent_by_pid(9999).await.is_none());
+        }
+
+        #[tokio::test]
+        async fn find_agent_by_pid_finds_passive() {
+            let reg = AgentRegistry::new();
+            let adapter = dummy_adapter();
+            reg.upsert_agent(
+                "PASSIVE-5678".into(),
+                info_with_pid("PASSIVE-5678", Some(5678)),
+                adapter,
+                false,
+            )
+            .await
+            .unwrap();
+            let found = reg.find_agent_by_pid(5678).await.unwrap();
+            assert_eq!(found.id, "PASSIVE-5678");
+        }
+
+        #[tokio::test]
+        async fn reap_drops_dead_passives() {
+            use std::collections::HashSet;
+            let reg = AgentRegistry::new();
+            let adapter = dummy_adapter();
+            for (id, pid) in [("PASSIVE-100", 100u32), ("PASSIVE-200", 200u32)] {
+                reg.upsert_agent(id.into(), info_with_pid(id, Some(pid)), adapter.clone(), false)
+                    .await
+                    .unwrap();
+            }
+            reg.upsert_agent(
+                "KAGENT-300".into(),
+                info_with_pid("KAGENT-300", Some(300)),
+                adapter.clone(),
+                false,
+            )
+            .await
+            .unwrap();
+            let live: HashSet<u32> = [200, 300].into_iter().collect();
+            let removed = reg.reap_passive_agents(&live).await;
+            assert_eq!(removed, 1);
+            assert!(reg.get_agent("PASSIVE-100").await.is_none());
+            assert!(reg.get_agent("PASSIVE-200").await.is_some());
+            assert!(reg.get_agent("KAGENT-300").await.is_some());
+        }
+
+        #[tokio::test]
+        async fn reap_drops_dead_passives_never_removes_kagent() {
+            use std::collections::HashSet;
+            let reg = AgentRegistry::new();
+            let adapter = dummy_adapter();
+            reg.upsert_agent(
+                "KAGENT-999".into(),
+                info_with_pid("KAGENT-999", Some(999)),
+                adapter,
+                false,
+            )
+            .await
+            .unwrap();
+            let live: HashSet<u32> = HashSet::new();
+            reg.reap_passive_agents(&live).await;
+            assert!(reg.get_agent("KAGENT-999").await.is_some());
+        }
+    }
 }
+
