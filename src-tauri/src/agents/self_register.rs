@@ -18,9 +18,9 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 
 /// Payload sent by an external agent to register itself with AITC.
 #[derive(Debug, Clone, Deserialize)]
@@ -39,48 +39,40 @@ struct RegisterResponse {
 }
 
 /// Simple rate limiter: tracks registration count per second.
+///
+/// WR-06: Uses a `tokio::sync::Mutex<(window, count)>` instead of two separate
+/// atomics. The previous CAS-based reset had a race where threads crossing
+/// the window boundary could double-count or slip past the cap. At 10 rps
+/// the lock contention is negligible and the logic becomes obviously correct.
 struct RateLimiter {
-    count: AtomicU64,
-    window_start: AtomicU64,
+    inner: Mutex<(u64, u64)>, // (window_secs, count)
 }
 
 impl RateLimiter {
     fn new() -> Self {
         Self {
-            count: AtomicU64::new(0),
-            window_start: AtomicU64::new(
+            inner: Mutex::new((
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs(),
-            ),
+                0,
+            )),
         }
     }
 
     /// Returns true if the request is allowed (under 10/sec).
-    ///
-    /// Uses compare_exchange on window_start so only one thread wins
-    /// the window reset, preventing burst-injection beyond 10 RPS.
-    fn check(&self) -> bool {
+    async fn check(&self) -> bool {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        let window = self.window_start.load(Ordering::Acquire);
-
-        if now != window {
-            // Attempt to claim the new window; only one thread wins the reset
-            if self
-                .window_start
-                .compare_exchange(window, now, Ordering::AcqRel, Ordering::Acquire)
-                .is_ok()
-            {
-                self.count.store(1, Ordering::Release);
-                return true;
-            }
+        let mut g = self.inner.lock().await;
+        if g.0 != now {
+            *g = (now, 0);
         }
-        let prev = self.count.fetch_add(1, Ordering::AcqRel);
-        prev < 10 // T-03-07: max 10 registrations per second
+        g.1 += 1;
+        g.1 <= 10 // T-03-07: max 10 registrations per second
     }
 }
 
@@ -92,7 +84,7 @@ async fn register_agent(
     Json(payload): Json<RegisterPayload>,
 ) -> impl IntoResponse {
     // T-03-07: Rate limit
-    if !rate_limiter.check() {
+    if !rate_limiter.check().await {
         return (
             StatusCode::TOO_MANY_REQUESTS,
             Json(serde_json::json!({"error": "rate limited"})),
