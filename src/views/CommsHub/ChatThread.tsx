@@ -8,7 +8,7 @@ interface ChatThreadProps {
 
 export function ChatThread({ agentId }: ChatThreadProps) {
   const fetchMessages = useCommsStore((s) => s.fetchMessages);
-  const messages = useCommsStore((s) => s.messages[agentId] ?? []);
+  const messages = useCommsStore((s) => s.messages[agentId]) ?? [];
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
