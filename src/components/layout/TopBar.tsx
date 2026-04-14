@@ -1,5 +1,8 @@
 import { Minus, Square, X } from 'lucide-react';
 import { useWindowControls } from '../../hooks/useWindowControls';
+import { RepoStatusChip } from '../repo/RepoStatusChip';
+import { PauseMonitoringToggle } from '../repo/PauseMonitoringToggle';
+import { ChangeRepoButton } from '../repo/ChangeRepoButton';
 
 export function TopBar() {
   const { minimize, toggleMaximize, close } = useWindowControls();
@@ -14,6 +17,13 @@ export function TopBar() {
         <h1 className="text-primary font-headline text-xl font-bold tracking-tighter select-none">
           AERO_CODE_CMD
         </h1>
+      </div>
+
+      {/* Repo session controls — right-aligned cluster, sits before window controls */}
+      <div className="ml-auto flex items-center gap-2 pr-2">
+        <RepoStatusChip />
+        <PauseMonitoringToggle />
+        <ChangeRepoButton />
       </div>
 
       {/* Window controls */}
