@@ -22,10 +22,12 @@ use crate::pipeline::pipeline_state::{ActiveWatch, PipelineState};
 use crate::pipeline::process_snapshot::{
     spawn_snapshot_refresher, start_attributing_stream, ProcessSnapshot,
 };
+use crate::pipeline::tree_index::FileNode;
 use crate::pipeline::watcher::spawn_watcher;
 use crate::pipeline::worktree::{list_worktrees as do_list_worktrees, Worktree};
 use sqlx::{Pool, Sqlite};
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::Manager;
@@ -220,6 +222,7 @@ pub async fn start_watch(
         snapshot,
         channel,
         tree_index: watcher_output.initial_tree,
+        repo_root: canonical.clone(),
     });
 
     tracing::info!(
@@ -256,6 +259,43 @@ pub async fn list_worktrees(repo_root: String) -> Result<Vec<Worktree>, String> 
     do_list_worktrees(&path)
 }
 
+/// Serialize the in-memory tree index into repo-relative TreeIndexEntry rows.
+///
+/// Strips the `repo_root` prefix from each absolute HashMap key so the
+/// frontend treemap renders a repo-rooted hierarchy (e.g. `src/foo.rs`)
+/// instead of absolute OS paths (e.g. `C:/Users/.../aitc/src/foo.rs`).
+///
+/// Skips the repo-root entry itself (empty relative path) — the frontend
+/// synthesizes its own root node. Normalizes Windows backslashes to forward
+/// slashes so the frontend treemap's `split('/')` yields correct segments.
+///
+/// In-memory HashMap keys remain absolute PathBufs; attribution and
+/// reconciliation depend on that invariant and are NOT touched here.
+pub(crate) fn serialize_tree_index(
+    tree: &HashMap<PathBuf, FileNode>,
+    repo_root: &Path,
+) -> Vec<TreeIndexEntry> {
+    tree.iter()
+        .filter_map(|(path, node)| {
+            let rel = path.strip_prefix(repo_root).ok()?;
+            if rel.as_os_str().is_empty() {
+                return None;
+            }
+            let path_str = rel.to_string_lossy().replace('\\', "/");
+            let depth = rel.components().count() as u32;
+            Some(TreeIndexEntry {
+                path: path_str,
+                size: node.size,
+                // WR-01: read is_dir from the walker-populated FileNode
+                // instead of hardcoding false, so the frontend treemap
+                // can render folder aggregates correctly.
+                is_dir: node.is_dir,
+                depth,
+            })
+        })
+        .collect()
+}
+
 /// Get the file tree index from the active watch for the Phase 4 radar spatial map.
 /// Returns an empty vec if no watch is active.
 #[tauri::command]
@@ -265,26 +305,7 @@ pub async fn get_tree_index(
 ) -> Result<Vec<TreeIndexEntry>, String> {
     let guard = state.inner.lock().await;
     match guard.as_ref() {
-        Some(active) => {
-            let entries: Vec<TreeIndexEntry> = active
-                .tree_index
-                .iter()
-                .map(|(path, node)| {
-                    let path_str = path.to_string_lossy().to_string();
-                    let depth = path.components().count() as u32;
-                    TreeIndexEntry {
-                        path: path_str,
-                        size: node.size,
-                        // WR-01: read is_dir from the walker-populated FileNode
-                        // instead of hardcoding false, so the frontend treemap
-                        // can render folder aggregates correctly.
-                        is_dir: node.is_dir,
-                        depth,
-                    }
-                })
-                .collect();
-            Ok(entries)
-        }
+        Some(active) => Ok(serialize_tree_index(&active.tree_index, &active.repo_root)),
         None => Ok(Vec::new()),
     }
 }
@@ -332,6 +353,108 @@ pub async fn persist_attributed_batch(
         {
             tracing::warn!(session_id, path = %path, error = %e, "record_session_file_internal failed");
         }
+    }
+}
+
+#[cfg(test)]
+mod serialize_tests {
+    use super::*;
+    use crate::pipeline::tree_index::FileNode;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    fn node(size: u64, is_dir: bool) -> FileNode {
+        FileNode {
+            size,
+            modified_at: None,
+            is_dir,
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn repo_root() -> PathBuf {
+        PathBuf::from("/tmp/repo")
+    }
+    #[cfg(windows)]
+    fn repo_root() -> PathBuf {
+        PathBuf::from(r"C:\repo")
+    }
+
+    fn under_root(rel: &str) -> PathBuf {
+        let mut p = repo_root();
+        for part in rel.split('/') {
+            p.push(part);
+        }
+        p
+    }
+
+    #[test]
+    fn emits_repo_relative_file_path() {
+        let mut tree: HashMap<PathBuf, FileNode> = HashMap::new();
+        tree.insert(under_root("src/foo.rs"), node(123, false));
+        let entries = serialize_tree_index(&tree, &repo_root());
+        assert_eq!(entries.len(), 1);
+        let e = &entries[0];
+        assert_eq!(e.path, "src/foo.rs");
+        assert!(!e.path.starts_with('/'), "leading slash leaked: {}", e.path);
+        assert!(!e.path.contains(':'), "drive letter leaked: {}", e.path);
+        assert_eq!(e.size, 123);
+        assert!(!e.is_dir);
+        assert_eq!(e.depth, 2);
+    }
+
+    #[test]
+    fn emits_repo_relative_dir_path() {
+        let mut tree: HashMap<PathBuf, FileNode> = HashMap::new();
+        tree.insert(under_root("src"), node(0, true));
+        let entries = serialize_tree_index(&tree, &repo_root());
+        assert_eq!(entries.len(), 1);
+        let e = &entries[0];
+        assert_eq!(e.path, "src");
+        assert!(e.is_dir);
+        assert_eq!(e.depth, 1);
+    }
+
+    #[test]
+    fn skips_repo_root_entry() {
+        let mut tree: HashMap<PathBuf, FileNode> = HashMap::new();
+        tree.insert(repo_root(), node(0, true));
+        tree.insert(under_root("src/foo.rs"), node(10, false));
+        let entries = serialize_tree_index(&tree, &repo_root());
+        // Only the src/foo.rs entry, not the repo root itself.
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, "src/foo.rs");
+    }
+
+    #[test]
+    fn forward_slash_normalized() {
+        let mut tree: HashMap<PathBuf, FileNode> = HashMap::new();
+        tree.insert(under_root("src/pipeline/commands.rs"), node(1, false));
+        let entries = serialize_tree_index(&tree, &repo_root());
+        assert_eq!(entries.len(), 1);
+        assert!(
+            !entries[0].path.contains('\\'),
+            "backslash leaked: {}",
+            entries[0].path
+        );
+        assert_eq!(entries[0].path, "src/pipeline/commands.rs");
+        assert_eq!(entries[0].depth, 3);
+    }
+
+    #[test]
+    fn skips_paths_outside_repo_root() {
+        // Paths not under repo_root (shouldn't happen in practice but we
+        // shouldn't panic or leak them with absolute form).
+        let mut tree: HashMap<PathBuf, FileNode> = HashMap::new();
+        #[cfg(not(windows))]
+        let outside = PathBuf::from("/other/place/x.rs");
+        #[cfg(windows)]
+        let outside = PathBuf::from(r"D:\elsewhere\x.rs");
+        tree.insert(outside, node(1, false));
+        tree.insert(under_root("src/foo.rs"), node(1, false));
+        let entries = serialize_tree_index(&tree, &repo_root());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, "src/foo.rs");
     }
 }
 

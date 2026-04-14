@@ -34,6 +34,10 @@ pub struct ActiveWatch {
     pub channel: tauri::ipc::Channel<FileEventBatch>,
     /// In-memory file tree index for Phase 4 radar spatial map.
     pub tree_index: HashMap<PathBuf, FileNode>,
+    /// Canonical (UNC-stripped) repo root. Paired with `tree_index` whose keys
+    /// are absolute paths; used to strip the prefix when serializing to the
+    /// frontend so the radar treemap renders a repo-rooted tree.
+    pub repo_root: PathBuf,
 }
 
 pub struct PipelineState {
