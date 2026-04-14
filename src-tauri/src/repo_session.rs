@@ -1,9 +1,8 @@
 //! Repo session resolution (D-01, D-02, D-03).
 
 use sqlx::SqlitePool;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use tokio::process::Command;
 
 static LAUNCH_CWD: OnceLock<Option<PathBuf>> = OnceLock::new();
 
@@ -21,10 +20,32 @@ pub async fn get_launch_cwd() -> Result<Option<String>, String> {
         .map(|p| p.to_string_lossy().to_string()))
 }
 
+/// Walk up from `start` looking for a `.git` directory or file marker.
+///
+/// CR-02: Pure Rust implementation, no subprocess. Previously this shelled
+/// out to `git rev-parse --show-toplevel` which is an RCE vector inside
+/// attacker-controlled trees via `core.fsmonitor`, `core.hooksPath`,
+/// shell aliases, and multi-submodule/symlink attacks (CVE-2022-41953,
+/// CVE-2024-32002 family). Walking parents for a `.git` entry avoids
+/// running any git config or hook while still correctly identifying the
+/// repo root (including git worktrees, where `.git` is a file pointing to
+/// the real gitdir).
+fn find_git_root(start: &Path) -> Option<PathBuf> {
+    let mut cur: Option<&Path> = Some(start);
+    while let Some(dir) = cur {
+        if dir.join(".git").exists() {
+            return Some(dir.to_path_buf());
+        }
+        cur = dir.parent();
+    }
+    None
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn detect_git_root(path: String) -> Result<Option<String>, String> {
-    // Reject traversal tokens before shelling out (T-06-02-01).
+    // Reject traversal tokens (T-06-02-01) -- still useful as a defense in depth
+    // against path-string manipulation even though the lookup no longer shells out.
     if path.contains("..") {
         return Err("path must not contain '..' segments".into());
     }
@@ -32,20 +53,7 @@ pub async fn detect_git_root(path: String) -> Result<Option<String>, String> {
     if !p.exists() || !p.is_dir() {
         return Ok(None);
     }
-    let out = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(&p)
-        .output()
-        .await
-        .map_err(|e| format!("git: {e}"))?;
-    if !out.status.success() {
-        return Ok(None);
-    }
-    let root = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if root.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(root))
+    Ok(find_git_root(&p).map(|r| r.to_string_lossy().to_string()))
 }
 
 #[tauri::command]
