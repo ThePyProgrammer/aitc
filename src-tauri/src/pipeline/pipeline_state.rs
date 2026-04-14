@@ -23,6 +23,8 @@ pub struct ActiveWatch {
     pub forwarder_task: tokio::task::JoinHandle<()>,
     /// Conflict engine task: processes batches via broadcast, emits Tauri events.
     pub conflict_task: tokio::task::JoinHandle<()>,
+    /// Passive-scan bridge (AGNT-03): PASSIVE-{pid} upserts + reaps; aborted on stop_watch.
+    pub bridge_task: tokio::task::JoinHandle<()>,
     /// Protected path trigger task: checks writes against protected globs (D-07).
     pub protected_path_handle: Option<tokio::task::JoinHandle<()>>,
     /// Shared snapshot used by attributing_task + refresher.
@@ -59,6 +61,7 @@ impl Drop for ActiveWatch {
         self.attributing_task.abort();
         self.forwarder_task.abort();
         self.conflict_task.abort();
+        self.bridge_task.abort();
         if let Some(handle) = self.protected_path_handle.take() {
             handle.abort();
         }
