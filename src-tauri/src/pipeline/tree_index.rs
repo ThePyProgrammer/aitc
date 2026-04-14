@@ -20,6 +20,39 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
+/// Denylist of binary asset extensions filtered from the tree index so
+/// the radar treemap stays focused on source files agents actually edit.
+/// Conservative for v1 — no config toggle yet. Case-insensitive match.
+/// Gitignore filtering is already enforced upstream by `build_walker`.
+pub const BINARY_EXTENSIONS: &[&str] = &[
+    // Images
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg", "avif", "heic",
+    // Video
+    "mp4", "mov", "webm", "mkv", "avi",
+    // Audio
+    "mp3", "wav", "ogg", "flac", "m4a",
+    // Archives
+    "zip", "tar", "gz", "7z",
+    // Compiled artifacts / binaries
+    "exe", "dll", "so", "dylib",
+    // Fonts
+    "woff", "woff2", "ttf", "otf", "eot",
+    // Design / document binaries
+    "pdf", "psd", "ai", "sketch",
+];
+
+/// Returns true if `path`'s extension (case-insensitive) is in the
+/// binary denylist. Files without an extension are never filtered here.
+fn is_binary_asset(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            let lower = e.to_ascii_lowercase();
+            BINARY_EXTENSIONS.contains(&lower.as_str())
+        })
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Clone)]
 pub struct FileNode {
     pub size: u64,
@@ -69,6 +102,14 @@ pub fn build_tree_index(root: &Path) -> HashMap<PathBuf, FileNode> {
                 return WalkState::Continue;
             }
             if !ft.is_file() {
+                return WalkState::Continue;
+            }
+            // Extension denylist: skip binary assets so the radar treemap focuses
+            // on source files. Must live INSIDE the walker closure, not as a
+            // WalkBuilder filter, because `ignore`'s override semantics don't
+            // cleanly express "skip by extension only for files".
+            let path_ref = entry.path();
+            if is_binary_asset(path_ref) {
                 return WalkState::Continue;
             }
             let meta = entry.metadata().ok();
@@ -137,6 +178,40 @@ mod tests {
         // 100 src files + 1 README.md = 101
         let file_count = idx.values().filter(|n| !n.is_dir).count();
         assert_eq!(file_count, 101, "expected 101 files, got {}", file_count);
+    }
+
+    #[test]
+    fn skips_binary_assets() {
+        let tmp = make_temp_repo();
+        write_file(tmp.path(), "src/main.rs", "fn main() {}");
+        // A .png file with arbitrary bytes — write_file takes &str so use
+        // fs::write directly for the binary.
+        fs::create_dir_all(tmp.path().join("assets")).unwrap();
+        fs::write(tmp.path().join("assets").join("logo.png"), b"\x89PNG\r\n").unwrap();
+        // Case-insensitivity check.
+        fs::write(tmp.path().join("assets").join("BANNER.JPG"), b"\xff\xd8").unwrap();
+        let idx = build_tree_index(tmp.path());
+        let files: Vec<String> = idx
+            .iter()
+            .filter(|(_, n)| !n.is_dir)
+            .map(|(p, _)| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert!(
+            files.iter().any(|n| n == "main.rs"),
+            "main.rs missing from index: {files:?}"
+        );
+        assert!(
+            files.iter().any(|n| n == "README.md"),
+            "README.md missing from index: {files:?}"
+        );
+        assert!(
+            !files.iter().any(|n| n == "logo.png"),
+            "logo.png leaked into index: {files:?}"
+        );
+        assert!(
+            !files.iter().any(|n| n.eq_ignore_ascii_case("banner.jpg")),
+            "BANNER.JPG leaked into index: {files:?}"
+        );
     }
 
     #[test]
