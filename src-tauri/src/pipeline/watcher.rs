@@ -435,9 +435,11 @@ mod tests {
         write_file(tmp.path(), "src/a.rs", "a");
         write_file(tmp.path(), "src/b.rs", "b");
         let (_h, _rx, tree) = spawn_test_watcher(tmp.path()).await;
-        // Expect README.md + src/a.rs + src/b.rs = 3
+        // WR-01: tree_index now also records directory entries. Count only
+        // the file rows here (README.md + src/a.rs + src/b.rs = 3).
+        let file_count = tree.values().filter(|n| !n.is_dir).count();
         assert_eq!(
-            tree.len(),
+            file_count,
             3,
             "initial tree: {:?}",
             tree.keys().collect::<Vec<_>>()
