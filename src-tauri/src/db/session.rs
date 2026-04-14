@@ -61,12 +61,18 @@ pub async fn close_session(agent_id: &str, pool: &SqlitePool) -> Result<(), Stri
 }
 
 /// Non-Tauri variant of record_session_file. Called from the pipeline forwarder.
+///
+/// WR-04: Both statements run inside a single transaction so session_files and
+/// agent_sessions.file_count stay consistent. Without the transaction, a
+/// failure on the UPDATE leaves file_count drifting below the actual row count.
 #[allow(dead_code)]
 pub async fn record_session_file_internal(
     session_id: i64,
     file_path: &str,
     pool: &SqlitePool,
 ) -> Result<(), String> {
+    let mut tx = pool.begin().await.map_err(|e| format!("begin tx: {e}"))?;
+
     sqlx::query(
         r#"INSERT INTO session_files (session_id, file_path, write_count, last_written_at)
            VALUES (?, ?, 1, datetime('now'))
@@ -76,7 +82,7 @@ pub async fn record_session_file_internal(
     )
     .bind(session_id)
     .bind(file_path)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| format!("record session file: {e}"))?;
 
@@ -87,9 +93,11 @@ pub async fn record_session_file_internal(
     )
     .bind(session_id)
     .bind(session_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| format!("update file_count: {e}"))?;
+
+    tx.commit().await.map_err(|e| format!("commit: {e}"))?;
     Ok(())
 }
 
