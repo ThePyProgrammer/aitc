@@ -4,6 +4,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { useRepoStore } from '../stores/repoStore';
 import { usePipelineChannel } from '../hooks/usePipelineChannel';
+import { installRadarPipelineBridge } from '../stores/radarStore';
 
 export function RepoSessionProvider({ children }: { children: ReactNode }) {
   const { register, unregister } = usePipelineChannel();
@@ -18,6 +19,13 @@ export function RepoSessionProvider({ children }: { children: ReactNode }) {
     useRepoStore.getState().resolveInitialRepo().catch((err) => {
       useRepoStore.getState().setError(String(err));
     });
+  }, []);
+
+  // D-08: Install pipelineStore.events → radarStore.fetchTreeIndex bridge.
+  // Unsubscribe on unmount to prevent debounce leaks (T-06-05-01).
+  useEffect(() => {
+    const unsub = installRadarPipelineBridge();
+    return unsub;
   }, []);
 
   // Register when activeRepo changes (and not paused); unregister on pause or unmount.

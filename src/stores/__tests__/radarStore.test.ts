@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { useRadarStore, getAgentColor, AGENT_DOT_PALETTE } from '../radarStore';
+import { useRadarStore, getAgentColor, AGENT_DOT_PALETTE, installRadarPipelineBridge } from '../radarStore';
 import type { TreeIndexEntry } from '../radarStore';
+import { usePipelineStore } from '../pipelineStore';
 import { buildFileTree, computeTreemapLayout } from '../../hooks/useTreemapLayout';
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -109,6 +110,49 @@ describe('buildFileTree', () => {
     expect(tree.children[0].name).toBe('readme.md');
     expect(tree.children[0].size).toBe(42);
     expect(tree.size).toBe(42);
+  });
+});
+
+describe('installRadarPipelineBridge', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    usePipelineStore.setState({ events: [] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('calls fetchTreeIndex after debounce window when events change', () => {
+    const spy = vi.spyOn(useRadarStore.getState(), 'fetchTreeIndex').mockResolvedValue(undefined);
+    const unsub = installRadarPipelineBridge();
+    usePipelineStore.setState({ events: [{ path: 'a.rs' } as any] });
+    expect(spy).not.toHaveBeenCalled(); // debounced
+    vi.advanceTimersByTime(600);
+    expect(spy).toHaveBeenCalledTimes(1);
+    unsub();
+  });
+
+  it('debounces rapid event updates into one fetch', () => {
+    const spy = vi.spyOn(useRadarStore.getState(), 'fetchTreeIndex').mockResolvedValue(undefined);
+    const unsub = installRadarPipelineBridge();
+    for (let i = 0; i < 5; i++) {
+      usePipelineStore.setState({ events: [{ path: `${i}.rs` } as any] });
+      vi.advanceTimersByTime(50);
+    }
+    vi.advanceTimersByTime(600);
+    expect(spy).toHaveBeenCalledTimes(1);
+    unsub();
+  });
+
+  it('unsubscribe stops further fetches', () => {
+    const spy = vi.spyOn(useRadarStore.getState(), 'fetchTreeIndex').mockResolvedValue(undefined);
+    const unsub = installRadarPipelineBridge();
+    unsub();
+    usePipelineStore.setState({ events: [{ path: 'x.rs' } as any] });
+    vi.advanceTimersByTime(1000);
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 

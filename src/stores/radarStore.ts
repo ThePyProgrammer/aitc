@@ -8,6 +8,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { computeContentionScore } from '../lib/contention';
 import type { ConflictAlert } from './conflictStore';
+import { usePipelineStore } from './pipelineStore';
 
 export interface TreeIndexEntry {
   path: string;
@@ -132,3 +133,27 @@ export const useRadarStore = create<RadarStore>((set) => ({
       contentionScores: new Map(),
     }),
 }));
+
+const BRIDGE_DEBOUNCE_MS = 500;
+
+/**
+ * D-08: Wire pipelineStore.events → radarStore.fetchTreeIndex (debounced 500ms).
+ * Returns an unsubscribe function. Caller MUST store it in a ref and call
+ * on unmount to avoid leaks (06-RESEARCH.md Pitfall 6).
+ */
+export function installRadarPipelineBridge(): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const unsub = usePipelineStore.subscribe((state, prev) => {
+    if (state.events === prev.events) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      useRadarStore.getState().fetchTreeIndex().catch(() => {
+        /* tree-index refresh is best-effort; errors already logged by fetchTreeIndex */
+      });
+    }, BRIDGE_DEBOUNCE_MS);
+  });
+  return () => {
+    if (timer) clearTimeout(timer);
+    unsub();
+  };
+}
