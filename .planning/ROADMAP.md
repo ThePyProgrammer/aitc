@@ -120,11 +120,11 @@ Plans:
   4. Radar treemap populates with live file tree data when a watch is active
 **Plans:** 5 plans
 Plans:
-- [ ] 06-01-PLAN.md -- Wave 0: install tauri-plugin-dialog (Rust + TS), scaffold test files + module stubs
-- [ ] 06-02-PLAN.md -- Wave 1: repo_session.rs commands + repoStore + RepoSessionProvider mount (FMON-01, FMON-04)
-- [ ] 06-03-PLAN.md -- Wave 2: db/session.rs lifecycle + AgentRegistry::find_agent_by_pid/reap_passive_agents + self_register PASSIVE/KAGENT reconciliation (HIST-01, AGNT-03, FMON-02)
-- [ ] 06-04-PLAN.md -- Wave 3: pipeline/passive_bridge.rs + forwarder session-file persistence (AGNT-03, FMON-02, HIST-01)
-- [ ] 06-05-PLAN.md -- Wave 4: radar↔pipeline bridge + TopBar RepoStatusChip/PauseToggle/ChangeRepo + e2e smoke + human-verify checkpoint (FMON-01, FMON-03, FMON-04)
+- [x] 06-01-PLAN.md -- Wave 0: install tauri-plugin-dialog (Rust + TS), scaffold test files + module stubs
+- [x] 06-02-PLAN.md -- Wave 1: repo_session.rs commands + repoStore + RepoSessionProvider mount (FMON-01, FMON-04)
+- [x] 06-03-PLAN.md -- Wave 2: db/session.rs lifecycle + AgentRegistry::find_agent_by_pid/reap_passive_agents + self_register PASSIVE/KAGENT reconciliation (HIST-01, AGNT-03, FMON-02)
+- [x] 06-04-PLAN.md -- Wave 3: pipeline/passive_bridge.rs + forwarder session-file persistence (AGNT-03, FMON-02, HIST-01)
+- [x] 06-05-PLAN.md -- Wave 4: radar↔pipeline bridge + TopBar RepoStatusChip/PauseToggle/ChangeRepo + e2e smoke + human-verify checkpoint (FMON-01, FMON-03, FMON-04)
 **Gap Closure**: Closes gaps from v1.0 milestone audit
 
 ## Progress
