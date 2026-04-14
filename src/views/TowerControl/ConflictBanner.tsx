@@ -5,8 +5,9 @@ import { useConflictStore } from '../../stores/conflictStore';
 const MAX_VISIBLE = 3;
 
 export function ConflictBanner() {
-  const alerts = useConflictStore((s) => s.alerts.filter((a) => !a.dismissed));
+  const allAlerts = useConflictStore((s) => s.alerts);
   const dismissConflict = useConflictStore((s) => s.dismissConflict);
+  const alerts = allAlerts.filter((a) => !a.dismissed);
 
   if (alerts.length === 0) return null;
 
