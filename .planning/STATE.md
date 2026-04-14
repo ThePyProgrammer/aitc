@@ -83,6 +83,12 @@ None yet.
 - Phase 3: Conflict window data model has no existing reference implementations
 - Phase 5: 3-way merge UI complexity -- study GitKraken, VS Code merge editor for patterns
 
+## Quick Tasks Completed
+
+| ID | Description | Date | Commits |
+|----|-------------|------|---------|
+| 260414-k8p | Cross-OS CI (Linux/Windows/macOS + Arch container) | 2026-04-14 | e29775b, 0346d38, d8678f9 |
+
 ## Session Continuity
 
 Last session: 2026-04-11T17:54:06.910Z
