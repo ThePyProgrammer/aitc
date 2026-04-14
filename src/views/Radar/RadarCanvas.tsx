@@ -74,7 +74,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const events = usePipelineStore((s) => s.events);
 
   const layout = useTreemapLayout(treeData, canvasSize.width, canvasSize.height);
-  const { viewport, setViewport, handlers, screenToWorld } = useCanvasZoomPan();
+  const { viewport, handlers, screenToWorld } = useCanvasZoomPan();
 
   // Sync viewport to store for persistence
   const storeSetViewport = useRadarStore((s) => s.setViewport);

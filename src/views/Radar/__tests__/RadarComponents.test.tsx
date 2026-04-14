@@ -4,6 +4,7 @@ import { RadarManifest } from '../RadarManifest';
 import { AgentManifestRow } from '../AgentManifestRow';
 import { RadarMinimap } from '../RadarMinimap';
 import type { AgentInfo } from '../../../stores/agentStore';
+import type { TreeIndexEntry } from '../../../bindings';
 
 // Mock motion/react to avoid animation issues in tests
 vi.mock('motion/react', () => ({
@@ -29,7 +30,7 @@ vi.mock('lucide-react', () => ({
 
 // Store mock state
 const mockRadarState = {
-  treeData: [],
+  treeData: [] as TreeIndexEntry[],
   viewport: { zoom: 1, panX: 0, panY: 0 },
   selectedAgentId: null as string | null,
   isManifestOpen: true,
@@ -69,7 +70,7 @@ const mockPipelineState = {
 // Mock stores
 vi.mock('../../../stores/radarStore', () => ({
   useRadarStore: (selector: (s: typeof mockRadarState) => unknown) => selector(mockRadarState),
-  getAgentColor: (id: string) => '#8eff71',
+  getAgentColor: (_id: string) => '#8eff71',
   AGENT_DOT_PALETTE: ['#8eff71', '#00cffc', '#ffd16f', '#ff7351'],
 }));
 

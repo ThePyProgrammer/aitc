@@ -72,6 +72,8 @@ interface ConflictStore {
   discardAll: () => void;
   unresolvedCount: () => number;
   resolvedCount: () => number;
+
+  _resolveTimeoutId: ReturnType<typeof setTimeout> | null;
 }
 
 export const useConflictStore = create<ConflictStore>((set, get) => ({

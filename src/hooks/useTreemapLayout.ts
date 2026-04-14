@@ -129,7 +129,7 @@ export function computeTreemapLayout(
     const rects = squarify(inputData, container);
 
     for (const rect of rects) {
-      const childNode = (rect as { _node: FileTreeNode })._node;
+      const childNode = (rect as unknown as { _node: FileTreeNode })._node;
       const tmRect: TreemapRect = {
         x0: rect.x0,
         y0: rect.y0,

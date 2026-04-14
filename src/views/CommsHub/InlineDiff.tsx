@@ -58,7 +58,7 @@ export function InlineDiff({ diffContent, onEditsChange, onEditStart }: InlineDi
   const [edits, setEdits] = useState<Map<number, string>>(new Map());
 
   const handleLineClick = useCallback(
-    (lineIndex: number, lineType: string) => {
+    (_lineIndex: number, lineType: string) => {
       if (lineType !== 'added') return;
       onEditStart?.();
     },
