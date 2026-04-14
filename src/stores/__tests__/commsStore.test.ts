@@ -144,23 +144,35 @@ describe('commsStore', () => {
     expect(request?.status).toBe('approved');
   });
 
-  it('subscribeToApprovals uses listen approval-request-created and adds to requests', async () => {
-    let capturedCallback: ((event: { payload: ApprovalRequest }) => void) | undefined;
-    const mockUnlisten = vi.fn();
-    mockListen.mockImplementationOnce(async (_event: string, callback: any) => {
-      capturedCallback = callback;
-      return mockUnlisten;
+  it('subscribeToApprovals listens to all 3 approval events and adds new requests', async () => {
+    // WR-04: store subscribes to created/resolved/updated and returns a combined unlisten
+    const callbacks: Record<string, (event: { payload: any }) => void> = {};
+    const unlistenFns: Record<string, ReturnType<typeof vi.fn>> = {
+      'approval-request-created': vi.fn(),
+      'approval-resolved': vi.fn(),
+      'approval-updated': vi.fn(),
+    };
+    mockListen.mockImplementation(async (event: string, callback: any) => {
+      callbacks[event] = callback;
+      return unlistenFns[event];
     });
 
     const unlisten = await useCommsStore.getState().subscribeToApprovals();
 
     expect(mockListen).toHaveBeenCalledWith('approval-request-created', expect.any(Function));
-    expect(unlisten).toBe(mockUnlisten);
+    expect(mockListen).toHaveBeenCalledWith('approval-resolved', expect.any(Function));
+    expect(mockListen).toHaveBeenCalledWith('approval-updated', expect.any(Function));
 
-    // Simulate incoming event
-    capturedCallback!({ payload: mockRequest });
+    // Simulate incoming created event
+    callbacks['approval-request-created']!({ payload: mockRequest });
     expect(useCommsStore.getState().requests).toHaveLength(1);
     expect(useCommsStore.getState().requests[0].id).toBe(1);
+
+    // Combined unlisten should invoke all 3 individual unlisten fns
+    unlisten();
+    expect(unlistenFns['approval-request-created']).toHaveBeenCalledOnce();
+    expect(unlistenFns['approval-resolved']).toHaveBeenCalledOnce();
+    expect(unlistenFns['approval-updated']).toHaveBeenCalledOnce();
   });
 
   it('pendingCount returns count of requests with status pending', () => {
