@@ -183,6 +183,20 @@ impl Default for ProcessSnapshot {
     }
 }
 
+#[cfg(test)]
+impl ProcessSnapshot {
+    /// Construct a ProcessSnapshot pre-seeded with explicit candidates (for tests
+    /// in sibling modules that need a deterministic candidates() output without
+    /// depending on the live OS process table).
+    pub fn from_candidates_for_test(candidates: Vec<CandidateProc>) -> Self {
+        let mut snap = ProcessSnapshot::new();
+        for c in candidates {
+            snap.candidates.insert(c.pid, c);
+        }
+        snap
+    }
+}
+
 /// Spawn a tokio task that refreshes `snapshot` every `interval`. Returns the
 /// `JoinHandle`; the caller should hold it (typically inside a WatcherHandle
 /// in Plan 02-04) and `.abort()` it on stop_watch.

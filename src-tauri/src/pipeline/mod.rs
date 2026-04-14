@@ -16,6 +16,7 @@
 pub mod commands;
 pub mod events;
 pub mod ignore_filter;
+pub mod passive_bridge;
 pub mod pipeline_state;
 pub mod process_snapshot;
 pub mod tree_index;

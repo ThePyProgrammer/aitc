@@ -11,7 +11,7 @@
 //!       Standalone worktree lookup (Phase 3 refresh per D-09).
 
 use crate::agents::notifications::{dispatch_state_notification, NotificationState};
-use crate::agents::AgentState;
+use crate::agents::{AgentRegistry, AgentState};
 use crate::comms::protected_path_trigger::spawn_protected_path_watcher;
 use crate::comms::types::TreeIndexEntry;
 use crate::conflict::engine::ConflictEngine;
@@ -100,6 +100,21 @@ pub async fn start_watch(
     let refresher =
         spawn_snapshot_refresher(snapshot.clone(), Duration::from_millis(PID_POLL_INTERVAL_MS));
 
+    // Pull shared states needed by the passive bridge + session-file forwarder.
+    let registry_arc: Arc<AgentRegistry> = app_handle
+        .state::<Arc<AgentRegistry>>()
+        .inner()
+        .clone();
+    let pool_arc: sqlx::SqlitePool = pool.inner().clone();
+
+    // AGNT-03: passive PID → AgentRegistry bridge (2s tick). Aborted when
+    // ActiveWatch is dropped (Drop impl in pipeline_state.rs).
+    let bridge_task = crate::pipeline::passive_bridge::spawn_passive_bridge(
+        registry_arc.clone(),
+        snapshot.clone(),
+        Duration::from_millis(crate::pipeline::passive_bridge::BRIDGE_INTERVAL_MS),
+    );
+
     // Spawn the attributing stream (Plan 03).
     let attributing = start_attributing_stream(raw_rx, attributed_tx, snapshot.clone());
 
@@ -115,13 +130,18 @@ pub async fn start_watch(
     let protected_rx = conflict_tx.subscribe();
 
     // Spawn the Channel forwarder: reads attributed batches, fans out to
-    // conflict engine via broadcast, then sends over the Tauri Channel.
+    // conflict engine via broadcast, persists attributed session-file rows
+    // (D-09, HIST-01), then sends over the Tauri Channel.
     let channel_clone = channel.clone();
     let conflict_tx_clone = conflict_tx.clone();
+    let registry_for_forwarder = registry_arc.clone();
+    let pool_for_forwarder = pool_arc.clone();
     let forwarder = tokio::spawn(async move {
         while let Some(batch) = attributed_rx.recv().await {
             // Fan out to conflict engine (non-blocking; drop if no receivers)
             let _ = conflict_tx_clone.send(batch.clone());
+            // D-09: persist session-file records for every attributed write.
+            persist_attributed_batch(&batch, &registry_for_forwarder, &pool_for_forwarder).await;
             if let Err(e) = channel_clone.send(batch) {
                 tracing::warn!(error = ?e, "channel send failed -- frontend channel dead");
                 break;
@@ -178,6 +198,7 @@ pub async fn start_watch(
         attributing_task: attributing,
         forwarder_task: forwarder,
         conflict_task,
+        bridge_task,
         protected_path_handle,
         snapshot,
         channel,
@@ -248,6 +269,52 @@ pub async fn get_tree_index(
     }
 }
 
+/// Persist every attributed file event in `batch` to SQLite (D-09, HIST-01).
+///
+/// Unattributed / Ambiguous events are silently skipped — per D-09 only
+/// `Attribution::Pid(p)` events with a matching registry entry produce
+/// session_files rows. Failures are logged and skipped; the forwarder never
+/// blocks frontend delivery on DB writes.
+pub(crate) async fn persist_attributed_batch(
+    batch: &crate::pipeline::events::FileEventBatch,
+    registry: &crate::agents::AgentRegistry,
+    pool: &sqlx::SqlitePool,
+) {
+    use crate::pipeline::events::Attribution;
+    for ev in &batch.events {
+        let pid = match ev.attribution {
+            Attribution::Pid(p) => p,
+            _ => continue,
+        };
+        let Some(info) = registry.find_agent_by_pid(pid).await else {
+            continue;
+        };
+        let session_id = match crate::db::session::ensure_open_session(
+            &info.id,
+            &info.agent_type,
+            pool,
+        )
+        .await
+        {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!(agent_id = %info.id, error = %e, "ensure_open_session failed in forwarder");
+                continue;
+            }
+        };
+        let path = ev.path.to_string_lossy();
+        if let Err(e) = crate::db::session::record_session_file_internal(
+            session_id,
+            &path,
+            pool,
+        )
+        .await
+        {
+            tracing::warn!(session_id, path = %path, error = %e, "record_session_file_internal failed");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,5 +327,139 @@ mod tests {
     #[test]
     fn pipeline_mpsc_capacity_matches_research_recommendation() {
         assert_eq!(PIPELINE_MPSC_CAPACITY, 1024);
+    }
+}
+
+#[cfg(test)]
+mod forwarder_persist_tests {
+    use super::*;
+    use crate::agents::adapter::{AgentInfo, AgentState};
+    use crate::agents::AgentRegistry;
+    use crate::pipeline::events::{Attribution, FileEvent, FileEventBatch, FileEventKind};
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    async fn pool_with_schema() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for stmt in [
+            "CREATE TABLE agent_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                agent_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'idle',
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                file_count INTEGER NOT NULL DEFAULT 0
+            )",
+            "CREATE TABLE session_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL REFERENCES agent_sessions(id),
+                file_path TEXT NOT NULL,
+                write_count INTEGER NOT NULL DEFAULT 1,
+                last_written_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(session_id, file_path)
+            )",
+        ] {
+            sqlx::query(stmt).execute(&pool).await.unwrap();
+        }
+        pool
+    }
+
+    fn batch_with_attrib(attr: Attribution, path: &str) -> FileEventBatch {
+        FileEventBatch {
+            events: vec![FileEvent {
+                path: PathBuf::from(path),
+                kind: FileEventKind::Modify,
+                attribution: attr,
+                timestamp_ms: 0,
+            }],
+            batch_id: 0,
+            dropped_batches: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn forwarder_persist_attributed_batch_records_files_for_matched_pid() {
+        let pool = pool_with_schema().await;
+        let reg = Arc::new(AgentRegistry::new());
+        let adapter = crate::agents::generic::passive_sentinel_adapter();
+        reg.upsert_agent(
+            "KAGENT-111".into(),
+            AgentInfo {
+                id: "KAGENT-111".into(),
+                agent_type: "claude-code".into(),
+                protocol: "http".into(),
+                state: AgentState::Running,
+                pid: Some(111),
+                cwd: None,
+                intent: None,
+            },
+            adapter,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let batch = batch_with_attrib(Attribution::Pid(111), "src/foo.rs");
+        persist_attributed_batch(&batch, &reg, &pool).await;
+
+        let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM session_files")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(cnt, 1);
+
+        // And a session row should have been created.
+        let (sess_cnt,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM agent_sessions WHERE agent_id = 'KAGENT-111'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(sess_cnt, 1);
+    }
+
+    #[tokio::test]
+    async fn forwarder_persist_attributed_batch_skips_unattributed() {
+        let pool = pool_with_schema().await;
+        let reg = Arc::new(AgentRegistry::new());
+        let batch = batch_with_attrib(Attribution::Unattributed, "src/foo.rs");
+        persist_attributed_batch(&batch, &reg, &pool).await;
+        let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM session_files")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(cnt, 0);
+    }
+
+    #[tokio::test]
+    async fn forwarder_persist_attributed_batch_skips_ambiguous() {
+        let pool = pool_with_schema().await;
+        let reg = Arc::new(AgentRegistry::new());
+        let batch = batch_with_attrib(Attribution::Ambiguous(vec![1, 2]), "src/foo.rs");
+        persist_attributed_batch(&batch, &reg, &pool).await;
+        let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM session_files")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(cnt, 0);
+    }
+
+    #[tokio::test]
+    async fn forwarder_persist_attributed_batch_skips_pid_with_no_registry_match() {
+        let pool = pool_with_schema().await;
+        let reg = Arc::new(AgentRegistry::new()); // empty
+        let batch = batch_with_attrib(Attribution::Pid(9999), "src/foo.rs");
+        persist_attributed_batch(&batch, &reg, &pool).await;
+        let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM session_files")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(cnt, 0);
     }
 }

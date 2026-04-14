@@ -160,3 +160,94 @@ fn bench_sysinfo_refresh_cost() {
         );
     }
 }
+
+/// Phase 6 Plan 04 end-to-end backend smoke: passive_bridge upserts a
+/// PASSIVE-{pid} entry from a seeded snapshot, then the forwarder-path helper
+/// (`persist_attributed_batch`) persists a session_files row for the same PID.
+///
+/// This chains Task 1 (bridge) and Task 2 (forwarder persist) in a single
+/// library-level smoke. The full Tauri-layer end-to-end lives in
+/// `src-tauri/tests/end_to_end_smoke.rs` (Plan 05).
+#[tokio::test]
+async fn bridge_populates_registry_and_records_session_file() {
+    use crate::agents::AgentRegistry;
+    use crate::pipeline::events::{FileEvent, FileEventBatch, FileEventKind};
+    use crate::pipeline::process_snapshot::{CandidateProc, ProcessSnapshot};
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    // Phase-6-relevant schema subset.
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    for stmt in [
+        "CREATE TABLE agent_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_id TEXT NOT NULL, agent_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'idle',
+            started_at TEXT NOT NULL, ended_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            file_count INTEGER NOT NULL DEFAULT 0
+        )",
+        "CREATE TABLE session_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL REFERENCES agent_sessions(id),
+            file_path TEXT NOT NULL,
+            write_count INTEGER NOT NULL DEFAULT 1,
+            last_written_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(session_id, file_path)
+        )",
+    ] {
+        sqlx::query(stmt).execute(&pool).await.unwrap();
+    }
+
+    let reg = Arc::new(AgentRegistry::new());
+    let snap = Arc::new(RwLock::new(ProcessSnapshot::from_candidates_for_test(vec![
+        CandidateProc {
+            pid: 4242,
+            name: "claude-code".into(),
+            cwd: PathBuf::from("/tmp/smoke-cwd"),
+            exe: None,
+            parent: None,
+        },
+    ])));
+
+    // (a) bridge tick → PASSIVE-4242 appears.
+    crate::pipeline::passive_bridge::bridge_tick(&reg, &snap).await.unwrap();
+    assert!(reg.get_agent("PASSIVE-4242").await.is_some());
+
+    // (b) forwarder-path persistence for the same PID.
+    let batch = FileEventBatch {
+        events: vec![FileEvent {
+            path: PathBuf::from("src/live.rs"),
+            kind: FileEventKind::Modify,
+            attribution: Attribution::Pid(4242),
+            timestamp_ms: 0,
+        }],
+        batch_id: 0,
+        dropped_batches: 0,
+    };
+    crate::pipeline::commands::persist_attributed_batch(&batch, &reg, &pool).await;
+
+    let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM session_files")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        cnt, 1,
+        "expected exactly one session_files row after forwarder persist"
+    );
+
+    // And the session row is linked to the passive agent id.
+    let (agent_id,): (String,) = sqlx::query_as(
+        "SELECT agent_id FROM agent_sessions
+         JOIN session_files ON session_files.session_id = agent_sessions.id LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(agent_id, "PASSIVE-4242");
+}
