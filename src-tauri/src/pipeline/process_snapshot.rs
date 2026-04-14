@@ -183,11 +183,11 @@ impl Default for ProcessSnapshot {
     }
 }
 
-#[cfg(test)]
 impl ProcessSnapshot {
     /// Construct a ProcessSnapshot pre-seeded with explicit candidates (for tests
-    /// in sibling modules that need a deterministic candidates() output without
-    /// depending on the live OS process table).
+    /// in sibling modules or integration tests that need a deterministic
+    /// candidates() output without depending on the live OS process table).
+    #[doc(hidden)]
     pub fn from_candidates_for_test(candidates: Vec<CandidateProc>) -> Self {
         let mut snap = ProcessSnapshot::new();
         for c in candidates {

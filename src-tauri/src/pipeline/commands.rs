@@ -275,7 +275,7 @@ pub async fn get_tree_index(
 /// `Attribution::Pid(p)` events with a matching registry entry produce
 /// session_files rows. Failures are logged and skipped; the forwarder never
 /// blocks frontend delivery on DB writes.
-pub(crate) async fn persist_attributed_batch(
+pub async fn persist_attributed_batch(
     batch: &crate::pipeline::events::FileEventBatch,
     registry: &crate::agents::AgentRegistry,
     pool: &sqlx::SqlitePool,
