@@ -10,7 +10,7 @@ interface MiniChatCardProps {
 
 export function MiniChatCard({ agentId, agentType }: MiniChatCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const messages = useCommsStore((s) => s.messages[agentId] ?? []);
+  const messages = useCommsStore((s) => s.messages[agentId]) ?? [];
 
   const lastMessages = messages.slice(-5);
   const lastMessage = messages[messages.length - 1];
