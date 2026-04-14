@@ -24,6 +24,10 @@ use std::time::SystemTime;
 pub struct FileNode {
     pub size: u64,
     pub modified_at: Option<SystemTime>,
+    /// WR-01: whether this entry represents a directory vs a file. The walker
+    /// inserts both files and their ancestor directories so the frontend
+    /// treemap can render folder aggregates.
+    pub is_dir: bool,
 }
 
 /// Walk the repo root respecting .gitignore + hardcoded excludes and build
@@ -47,6 +51,23 @@ pub fn build_tree_index(root: &Path) -> HashMap<PathBuf, FileNode> {
             let Some(ft) = entry.file_type() else {
                 return WalkState::Continue;
             };
+            // WR-01: insert directory entries so frontend treemap can render
+            // folder aggregates. The walker visits both files and dirs; we
+            // include dirs explicitly with is_dir=true, size=0.
+            if ft.is_dir() {
+                let path = entry.into_path();
+                if let Ok(mut guard) = idx.lock() {
+                    guard.insert(
+                        path,
+                        FileNode {
+                            size: 0,
+                            modified_at: None,
+                            is_dir: true,
+                        },
+                    );
+                }
+                return WalkState::Continue;
+            }
             if !ft.is_file() {
                 return WalkState::Continue;
             }
@@ -55,7 +76,14 @@ pub fn build_tree_index(root: &Path) -> HashMap<PathBuf, FileNode> {
             let modified_at = meta.as_ref().and_then(|m| m.modified().ok());
             // Short critical section: only the HashMap insert is locked.
             if let Ok(mut guard) = idx.lock() {
-                guard.insert(entry.into_path(), FileNode { size, modified_at });
+                guard.insert(
+                    entry.into_path(),
+                    FileNode {
+                        size,
+                        modified_at,
+                        is_dir: false,
+                    },
+                );
             }
             WalkState::Continue
         })
@@ -76,12 +104,13 @@ mod tests {
         // .git is in HARDCODED_EXCLUDES; src/ is empty; only README.md should appear.
         let tmp = make_temp_repo();
         let idx = build_tree_index(tmp.path());
-        let filenames: Vec<String> = idx
-            .keys()
-            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+        let files: Vec<String> = idx
+            .iter()
+            .filter(|(_, n)| !n.is_dir)
+            .map(|(p, _)| p.file_name().unwrap().to_string_lossy().to_string())
             .collect();
-        assert_eq!(idx.len(), 1, "expected 1 file, got {:?}", filenames);
-        assert!(filenames.iter().any(|n| n == "README.md"));
+        assert_eq!(files.len(), 1, "expected 1 file, got {:?}", files);
+        assert!(files.iter().any(|n| n == "README.md"));
     }
 
     #[test]
@@ -106,7 +135,8 @@ mod tests {
         }
         let idx = build_tree_index(tmp.path());
         // 100 src files + 1 README.md = 101
-        assert_eq!(idx.len(), 101, "expected 101 files, got {}", idx.len());
+        let file_count = idx.values().filter(|n| !n.is_dir).count();
+        assert_eq!(file_count, 101, "expected 101 files, got {}", file_count);
     }
 
     #[test]
@@ -142,12 +172,13 @@ mod tests {
         let t0 = Instant::now();
         let idx = build_tree_index(tmp.path());
         let elapsed = t0.elapsed();
+        let file_count = idx.values().filter(|n| !n.is_dir).count();
         println!(
             "bench_walk_10k_files_under_500ms: {} files in {}ms",
-            idx.len(),
+            file_count,
             elapsed.as_millis()
         );
-        assert_eq!(idx.len(), 10_001, "expected 10001 files (10000 + README.md)");
+        assert_eq!(file_count, 10_001, "expected 10001 files (10000 + README.md)");
         assert!(
             elapsed.as_millis() < 500,
             "walk took {}ms, target <500ms — consider WalkBuilder::build_parallel",

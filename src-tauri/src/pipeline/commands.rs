@@ -258,7 +258,10 @@ pub async fn get_tree_index(
                     TreeIndexEntry {
                         path: path_str,
                         size: node.size,
-                        is_dir: false,
+                        // WR-01: read is_dir from the walker-populated FileNode
+                        // instead of hardcoding false, so the frontend treemap
+                        // can render folder aggregates correctly.
+                        is_dir: node.is_dir,
                         depth,
                     }
                 })
