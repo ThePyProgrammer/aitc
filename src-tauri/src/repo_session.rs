@@ -53,7 +53,18 @@ pub async fn detect_git_root(path: String) -> Result<Option<String>, String> {
     if !p.exists() || !p.is_dir() {
         return Ok(None);
     }
-    Ok(find_git_root(&p).map(|r| r.to_string_lossy().to_string()))
+    Ok(find_git_root(&p).map(|r| {
+        // WR-02: normalize to forward slashes on Windows so frontend activeRepo
+        // (previously shaped by `git rev-parse --show-toplevel`, which emits
+        // POSIX-style paths) keeps matching after the shell-out was replaced.
+        let s = r.to_string_lossy().to_string();
+        #[cfg(windows)]
+        {
+            return s.replace('\\', "/");
+        }
+        #[cfg(not(windows))]
+        s
+    }))
 }
 
 #[tauri::command]

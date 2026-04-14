@@ -42,6 +42,22 @@ const PID_POLL_INTERVAL_MS: u64 = 1000;
 /// 1024 is the research-recommended cap (02-RESEARCH.md Pitfall 3 threat model).
 const PIPELINE_MPSC_CAPACITY: usize = 1024;
 
+/// WR-02: Strip the Windows `\\?\` (extended-length / UNC) prefix that
+/// `std::fs::canonicalize` emits on Windows, so backend-side canonical paths
+/// match the forward-slash repo roots that `detect_git_root` returns to the
+/// frontend. Without this, `tree_index` keys and frontend `activeRepo`
+/// compare unequal for the same directory.
+fn strip_unc(p: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = p.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    p
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn start_watch(
@@ -63,6 +79,7 @@ pub async fn start_watch(
     }
     let canonical = repo_root_path
         .canonicalize()
+        .map(strip_unc)
         .map_err(|e| format!("canonicalize repo_root: {e}"))?;
 
     // If a watch is already active, stop it first (idempotent start).
