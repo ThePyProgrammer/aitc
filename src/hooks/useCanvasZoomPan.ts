@@ -30,16 +30,19 @@ export function useCanvasZoomPan(initialViewport?: Partial<CanvasViewport>) {
 
   const onWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
+    // Capture event-derived values before setViewport: native event
+    // currentTarget is nulled after dispatch, and React 19 StrictMode
+    // re-invokes state updaters — either would throw on e.currentTarget.
+    const target = e.currentTarget as HTMLCanvasElement | null;
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    const cursorX = e.clientX - rect.left;
+    const cursorY = e.clientY - rect.top;
+    const deltaY = e.deltaY;
     setViewport((vp) => {
-      const factor = e.deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
+      const factor = deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
       const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, vp.zoom * factor));
 
-      // Zoom toward cursor position
-      const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
-      const cursorX = e.clientX - rect.left;
-      const cursorY = e.clientY - rect.top;
-
-      // Adjust pan so cursor stays at same world point
       const scale = newZoom / vp.zoom;
       const newPanX = cursorX - scale * (cursorX - vp.panX);
       const newPanY = cursorY - scale * (cursorY - vp.panY);
