@@ -13,12 +13,25 @@ export function RepoSessionProvider({ children }: { children: ReactNode }) {
   const resolvedOnce = useRef(false);
 
   // Resolve repo on mount (exactly once across StrictMode double-invoke).
+  // WR-05: Only latch `resolvedOnce` on success. If the initial resolve throws
+  // (e.g., transient Tauri IPC failure during startup), leave the ref false so
+  // a subsequent mount / re-render can retry instead of stranding the user on
+  // the error banner.
   useEffect(() => {
     if (resolvedOnce.current) return;
-    resolvedOnce.current = true;
-    useRepoStore.getState().resolveInitialRepo().catch((err) => {
-      useRepoStore.getState().setError(String(err));
-    });
+    let cancelled = false;
+    (async () => {
+      try {
+        await useRepoStore.getState().resolveInitialRepo();
+        if (!cancelled) resolvedOnce.current = true;
+      } catch (err) {
+        useRepoStore.getState().setError(String(err));
+        // leave resolvedOnce false so the next mount can retry
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // D-08: Install pipelineStore.events → radarStore.fetchTreeIndex bridge.
