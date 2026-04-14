@@ -6,13 +6,47 @@
 // Memoized via useMemo to prevent recomputation on every render (Pitfall 2).
 
 import { useMemo } from 'react';
+// squarify is a CJS package (main: lib/index.js) whose real layout function lives
+// at `exports.default` (a 2-arg `(data, container)` fn). It also exports a named
+// `exports.squarify` which is a 4-arg INTERNAL helper -- NOT the one we want.
+//
+// Vite pre-bundles CJS deps and emits `export default require_lib()` where the
+// default IS the whole exports object. Neither a plain `import squarify from
+// 'squarify'` nor `import * as squarifyMod from 'squarify'` reliably unwraps to
+// the function on its own in Vite dev (the namespace wrapper even sets
+// `.default` to the exports object itself, masking the real default).
+//
+// We therefore import the raw module object and walk down to the function,
+// tolerating both wrapped shapes:
+//   A) `mod.default` is the function (Node ESM / Vitest / prod Rollup interop)
+//   B) `mod.default.default` is the function (Vite dev pre-bundle shape)
+//   C) `mod` itself is the function (ES module default-export unwrap)
+// See .planning/debug/resolved/squarify-not-a-function.md for full analysis.
 import * as squarifyMod from 'squarify';
-// squarify ships CJS with both `exports.default` (the layout fn we want) and
-// a lower-arity `exports.squarify` helper. Vite's interop can surface the
-// module namespace instead of unwrapping default, so resolve it defensively.
-const squarify = ((squarifyMod as { default?: typeof squarifyMod.default })
-  .default ?? (squarifyMod as unknown as typeof squarifyMod.default));
 import type { TreeIndexEntry } from '../stores/radarStore';
+
+type SquarifyFn = (
+  data: Array<{ value: number } & Record<string, unknown>>,
+  container: { x0: number; y0: number; x1: number; y1: number },
+) => Array<{ x0: number; y0: number; x1: number; y1: number } & Record<string, unknown>>;
+
+function resolveSquarify(mod: unknown): SquarifyFn {
+  const candidates: unknown[] = [];
+  if (mod && typeof mod === 'object') {
+    const m = mod as { default?: unknown };
+    candidates.push(m.default);
+    if (m.default && typeof m.default === 'object') {
+      candidates.push((m.default as { default?: unknown }).default);
+    }
+  }
+  candidates.push(mod);
+  for (const c of candidates) {
+    if (typeof c === 'function') return c as SquarifyFn;
+  }
+  throw new Error('squarify: could not resolve default layout function from module');
+}
+
+const squarify: SquarifyFn = resolveSquarify(squarifyMod);
 
 export interface FileTreeNode {
   path: string;
