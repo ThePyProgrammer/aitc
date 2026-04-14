@@ -6,7 +6,12 @@
 // Memoized via useMemo to prevent recomputation on every render (Pitfall 2).
 
 import { useMemo } from 'react';
-import squarify from 'squarify';
+import * as squarifyMod from 'squarify';
+// squarify ships CJS with both `exports.default` (the layout fn we want) and
+// a lower-arity `exports.squarify` helper. Vite's interop can surface the
+// module namespace instead of unwrapping default, so resolve it defensively.
+const squarify = ((squarifyMod as { default?: typeof squarifyMod.default })
+  .default ?? (squarifyMod as unknown as typeof squarifyMod.default));
 import type { TreeIndexEntry } from '../stores/radarStore';
 
 export interface FileTreeNode {
