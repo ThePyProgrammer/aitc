@@ -114,8 +114,12 @@ async fn register_agent(
         }
     }
 
-    // Generate agent ID from PID
-    let agent_id = format!("KAGENT-{:04}", payload.pid % 10000);
+    // Generate agent ID from PID. Use the full PID -- PIDs exceed 10,000 on
+    // modern OSes (Windows 32-bit PIDs, Linux pid_max commonly 4,194,304), and
+    // `passive_bridge::bridge_tick` emits the full PID for `PASSIVE-{pid}`.
+    // Truncating with `% 10000` caused collisions and broke PASSIVE→KAGENT
+    // reconciliation (CR-01).
+    let agent_id = format!("KAGENT-{}", payload.pid);
     let protocol = payload.protocol.as_deref().unwrap_or("unknown").to_string();
 
     // Find matching adapter -- reject unknown agent types with 400 instead of
