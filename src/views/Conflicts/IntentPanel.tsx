@@ -4,7 +4,7 @@
  * Shows Agent A and Agent B intent from agentStore so users can
  * understand why each agent made their changes. Phase 5 Plan 03 -- D-03.
  */
-import { useAgentStore } from '../../stores/agentStore';
+import { useScopedAgents } from '../../hooks/useScopedAgents';
 
 interface IntentPanelProps {
   agentAId: string;
@@ -12,7 +12,7 @@ interface IntentPanelProps {
 }
 
 export function IntentPanel({ agentAId, agentBId }: IntentPanelProps) {
-  const agents = useAgentStore((s) => s.agents);
+  const agents = useScopedAgents();
   const agentA = agents.find((a) => a.id === agentAId);
   const agentB = agents.find((a) => a.id === agentBId);
 

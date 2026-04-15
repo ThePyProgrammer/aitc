@@ -1,43 +1,23 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Rocket } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { useAgentStore } from '../../stores/agentStore';
 import { useConflictStore } from '../../stores/conflictStore';
-import { useRepoStore } from '../../stores/repoStore';
+import { useScopedAgents } from '../../hooks/useScopedAgents';
 import { AgentManifest } from './AgentManifest';
 import { DeployDialog } from './DeployDialog';
 import { ConflictBanner } from './ConflictBanner';
 import { QuickCommands } from './QuickCommands';
 import { SystemLogs } from './SystemLogs';
 
-// Keep in sync with AgentManifest.tsx cwdInsideRepo; the two views must
-// count the same set of agents.
-function cwdInsideRepo(cwd: string | null, root: string): boolean {
-  if (!cwd) return true;
-  const strip = (p: string) => p.replace(/[\\/]+$/, '');
-  const c = strip(cwd);
-  const r = strip(root);
-  if (c === r) return true;
-  return c.startsWith(`${r}/`) || c.startsWith(`${r}\\`);
-}
-
 export function TowerControl() {
   const [deployOpen, setDeployOpen] = useState(false);
-  const allAgents = useAgentStore((s) => s.agents);
+  const agents = useScopedAgents();
   const fetchAgents = useAgentStore((s) => s.fetchAgents);
   const startPolling = useAgentStore((s) => s.startPolling);
   const activeConflicts = useConflictStore((s) => s.activeCount());
   const fetchConflicts = useConflictStore((s) => s.fetchConflicts);
   const subscribeToEvents = useConflictStore((s) => s.subscribeToEvents);
-  const activeRepo = useRepoStore((s) => s.activeRepo);
-
-  const agents = useMemo(
-    () =>
-      activeRepo
-        ? allAgents.filter((a) => cwdInsideRepo(a.cwd, activeRepo))
-        : allAgents,
-    [allAgents, activeRepo],
-  );
 
   useEffect(() => {
     // Initial data fetch

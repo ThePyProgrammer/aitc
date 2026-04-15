@@ -1,33 +1,14 @@
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { useAgentStore } from '../../stores/agentStore';
-import { useRepoStore } from '../../stores/repoStore';
+import { useScopedAgents } from '../../hooks/useScopedAgents';
 import { AgentRow } from './AgentRow';
 
-// Match when an agent's cwd sits inside the monitored repo root. Mirrors the
-// backend containment check (handles trailing separators, avoids prefix-match
-// false positives like /foo/barn matching /foo/bar). Agents without a cwd
-// stay visible since we can't determine scope.
-function cwdInsideRepo(cwd: string | null, root: string): boolean {
-  if (!cwd) return true;
-  const strip = (p: string) => p.replace(/[\\/]+$/, '');
-  const c = strip(cwd);
-  const r = strip(root);
-  if (c === r) return true;
-  return c.startsWith(`${r}/`) || c.startsWith(`${r}\\`);
-}
-
 export function AgentManifest() {
-  const allAgents = useAgentStore((s) => s.agents);
+  // Scoped to the currently-watched repo -- agents running elsewhere are
+  // still tracked by the registry but listing them here just confuses the
+  // user, who expects "agents in this airspace".
+  const agents = useScopedAgents();
   const isLoading = useAgentStore((s) => s.isLoading);
-  const activeRepo = useRepoStore((s) => s.activeRepo);
-
-  // Tower Control is scoped to the currently-watched repo: agents running
-  // elsewhere are still tracked by the registry (for cross-repo conflict
-  // detection later) but listing them here just confuses the user, who
-  // expects "agents in this airspace".
-  const agents = activeRepo
-    ? allAgents.filter((a) => cwdInsideRepo(a.cwd, activeRepo))
-    : allAgents;
 
   if (agents.length === 0 && !isLoading) {
     return (

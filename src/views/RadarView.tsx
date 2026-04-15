@@ -12,6 +12,7 @@ import { AgentTooltip } from './Radar/AgentTooltip';
 import { RadarMinimap } from './Radar/RadarMinimap';
 import { useRadarStore } from '../stores/radarStore';
 import { useAgentStore } from '../stores/agentStore';
+import { useScopedAgents } from '../hooks/useScopedAgents';
 import { usePipelineStore } from '../stores/pipelineStore';
 import { useConflictStore } from '../stores/conflictStore';
 
@@ -22,7 +23,7 @@ export function RadarView() {
   const startPolling = useAgentStore((s) => s.startPolling);
   const isWatching = usePipelineStore((s) => s.isWatching);
   const events = usePipelineStore((s) => s.events);
-  const agents = useAgentStore((s) => s.agents);
+  const agents = useScopedAgents();
   const alerts = useConflictStore((s) => s.alerts);
   const updateContentionScores = useRadarStore((s) => s.updateContentionScores);
 

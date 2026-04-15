@@ -7,14 +7,14 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
 import { useRadarStore } from '../../stores/radarStore';
-import { useAgentStore } from '../../stores/agentStore';
+import { useScopedAgents } from '../../hooks/useScopedAgents';
 import { AgentManifestRow } from './AgentManifestRow';
 import { AlertDetail } from './AlertDetail';
 
 export function RadarManifest() {
   const isManifestOpen = useRadarStore((s) => s.isManifestOpen);
   const toggleManifest = useRadarStore((s) => s.toggleManifest);
-  const agents = useAgentStore((s) => s.agents);
+  const agents = useScopedAgents();
 
   return (
     <div className="relative flex">

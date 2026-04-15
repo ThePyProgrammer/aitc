@@ -17,7 +17,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { Flame } from 'lucide-react';
 import { useRadarStore } from '../../stores/radarStore';
 import { getAgentColor } from '../../stores/radarStore';
-import { useAgentStore } from '../../stores/agentStore';
+import { useScopedAgents } from '../../hooks/useScopedAgents';
 import { usePipelineStore } from '../../stores/pipelineStore';
 import { useTreemapLayout, type TreemapRect } from '../../hooks/useTreemapLayout';
 import { useCanvasZoomPan } from '../../hooks/useCanvasZoomPan';
@@ -70,7 +70,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const selectedAgentId = useRadarStore((s) => s.selectedAgentId);
   const heatMapEnabled = useRadarStore((s) => s.heatMapEnabled);
   const contentionScores = useRadarStore((s) => s.contentionScores);
-  const agents = useAgentStore((s) => s.agents);
+  const agents = useScopedAgents();
   const events = usePipelineStore((s) => s.events);
 
   const layout = useTreemapLayout(treeData, canvasSize.width, canvasSize.height);
