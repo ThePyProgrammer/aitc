@@ -10,12 +10,14 @@ import { buildFileTree, computeTreemapLayout } from '../../hooks/useTreemapLayou
 
 const MINIMAP_W = 160;
 const MINIMAP_H = 120;
+const MANIFEST_W = 280;
 
 export function RadarMinimap() {
   const containerRef = useRef<HTMLDivElement>(null);
   const treeData = useRadarStore((s) => s.treeData);
   const viewport = useRadarStore((s) => s.viewport);
   const setViewport = useRadarStore((s) => s.setViewport);
+  const isManifestOpen = useRadarStore((s) => s.isManifestOpen);
 
   // Compute a tiny treemap layout at minimap scale
   const minimapRects = useMemo(() => {
@@ -76,10 +78,11 @@ export function RadarMinimap() {
   return (
     <div
       ref={containerRef}
-      className="absolute bottom-3 right-3 border border-outline/20 cursor-crosshair z-40 overflow-hidden"
+      className="absolute bottom-3 border border-outline/20 cursor-crosshair z-40 overflow-hidden transition-[right] duration-200 ease-in-out"
       style={{
         width: MINIMAP_W,
         height: MINIMAP_H,
+        right: isManifestOpen ? MANIFEST_W + 12 : 12,
         backgroundColor: 'rgba(14, 14, 14, 0.8)',
       }}
       onClick={handleClick}
