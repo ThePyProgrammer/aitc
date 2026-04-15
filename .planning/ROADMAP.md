@@ -188,11 +188,11 @@ Plans:
 **Goal:** Ship the ARSENAL page — a master/detail view under /arsenal that surfaces Skills, Agents, Plugins, and Configuration (Hooks+Commands+Settings+MCP) from both ~/.claude/ (global) and <cwd>/.claude/ (project) via a multi-root extension of the pipeline watcher, and provides an inline textarea editor for <cwd>/CLAUDE.md and <cwd>/.claude/CLAUDE.md with atomic writes + 10-second undo toast + non-blocking external-change banner. Backend parses all formats in Rust (gray_matter + serde_json), frontend mirrors the Phase 2 Channel<T>+Zustand trio. Establishes MasterDetailShell as a reusable layout primitive.
 **Requirements**: (none — phase added mid-milestone; behavioral spec lives in D-01..D-15 of 09-CONTEXT.md)
 **Depends on:** Phase 8
-**Plans:** 3/5 plans executed
+**Plans:** 5/5 plans executed (UAT skipped at user request)
 
 Plans:
 - [x] 09-01-PLAN.md -- Wave 0: backend deps (gray_matter, runtime tempfile, dirs), claude_resources module skeleton, ResourceEvent/Resource/Category/Scope types registered via tauri-specta, fixture tree, frontend Arsenal placeholders
 - [x] 09-02-PLAN.md -- Wave 1: parse.rs (all resource categories + MCP secret masking), scan.rs (allowlist + exclude cache/session-env/projects/backups/downloads), routing.rs (classify + category_for_path), write_fence.rs (TTL suppression)
 - [x] 09-03-PLAN.md -- Wave 2: claude_md.rs (atomic_write + editable whitelist), watcher_routing.rs (two-Debouncer architecture — persistent global + ephemeral project), commands.rs (start/stop/readClaudeMd/writeClaudeMd with D-13 write gate), state management, bindings regen
 - [x] 09-04-PLAN.md -- Wave 2: frontend foundations — claudeResourcesStore (with D-03 shadow suppression in selectCombined), useClaudeResourcesChannel hook, MasterDetailShell primitive, ScopeChip/UndoToast/ExternalChangeBanner components
-- [ ] 09-05-PLAN.md -- Wave 3: ArsenalView assembly — Sidebar ARSENAL entry (Lucide Package, after TOWER), /arsenal route, ScopeTabs/CategoryRail/ResourceList/ResourceRow/DetailPanel/FrontmatterTable/ContentPreview/ClaudeMdEditor, save+undo+external-change wiring, 12-step human-verify checkpoint
+- [x] 09-05-PLAN.md -- Wave 3: ArsenalView assembly — Sidebar ARSENAL entry (Lucide Package, after TOWER), /arsenal route, ScopeTabs/CategoryRail/ResourceList/ResourceRow/DetailPanel/FrontmatterTable/ContentPreview/ClaudeMdEditor, save+undo+external-change wiring (human-verify checkpoint skipped per user)
