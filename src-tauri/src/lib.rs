@@ -190,6 +190,69 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Terminate every AITC-launched agent before the process exits.
+            // Self-registered / passively-scanned agents (launched_by_aitc=false)
+            // are left alone -- those belong to the user, not to us.
+            //
+            // RunEvent::Exit fires after the main loop has stopped and all
+            // windows are down, so we're safe to block the thread briefly.
+            // RunEvent::ExitRequested fires before that (e.g. on Cmd+Q) but
+            // we already prevent close-to-tray via the window handler above,
+            // so the only paths that reach Exit are actual quits (menu Quit,
+            // app.exit(), SIGTERM from the dev-server hot reload).
+            if matches!(event, tauri::RunEvent::Exit) {
+                terminate_launched_agents_on_exit(app_handle);
+            }
+        });
+}
+
+/// Walk the registry and terminate every agent we launched. Called from the
+/// RunEvent::Exit handler so spawned claude/codex/opencode processes don't
+/// get orphaned to init when AITC quits (a particular problem during dev
+/// hot-reload on Linux).
+fn terminate_launched_agents_on_exit(app_handle: &tauri::AppHandle) {
+    let Some(registry_state) = app_handle.try_state::<Arc<agents::AgentRegistry>>() else {
+        return;
+    };
+    let registry = registry_state.inner().clone();
+
+    tauri::async_runtime::block_on(async move {
+        // Snapshot the launched-by-aitc subset under the read lock, then drop
+        // it before calling terminate_process so the terminate path can
+        // re-enter the registry freely if it ever needs to.
+        let launched: Vec<(String, u32)> = {
+            let agents = registry.agents_read().await;
+            agents
+                .iter()
+                .filter_map(|(id, managed)| {
+                    if managed.launched_by_aitc {
+                        managed.info.pid.map(|pid| (id.clone(), pid))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+
+        if launched.is_empty() {
+            return;
+        }
+        tracing::info!(
+            count = launched.len(),
+            "terminating AITC-launched agents on shutdown"
+        );
+        for (id, pid) in launched {
+            if let Err(e) = agents::launcher::terminate_process(pid).await {
+                tracing::warn!(
+                    agent_id = %id,
+                    pid,
+                    error = %e,
+                    "shutdown terminate failed"
+                );
+            }
+        }
+    });
 }
