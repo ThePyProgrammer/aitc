@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 Phase: 05
 Plan: Not started
 Status: Ready to execute
-Last activity: 2026-04-11
+Last activity: 2026-04-15 - Completed quick task 260415-gke: Modal Change-Repo dialog
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -93,6 +93,7 @@ None yet.
 | ID | Description | Date | Commits |
 |----|-------------|------|---------|
 | 260414-k8p | Cross-OS CI (Linux/Windows/macOS + Arch container) | 2026-04-14 | e29775b, 0346d38, d8678f9 |
+| 260415-gke | Modal Change-Repo dialog (replace inline confirm) | 2026-04-15 | ab94b96, c273caa |
 
 ## Session Continuity
 
