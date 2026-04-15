@@ -154,7 +154,10 @@ export function RadarView() {
     <div ref={containerRef} className="flex h-[calc(100vh-56px)] bg-surface relative">
       <RadarCanvas onHoveredAgentChange={handleHoveredAgentChange} />
       <RadarManifest />
-      <RadarMinimap />
+      <RadarMinimap
+        canvasWidth={containerRect?.width ?? 800}
+        canvasHeight={containerRect?.height ?? 600}
+      />
 
       {/* Agent tooltip overlay */}
       {hoveredAgent && (

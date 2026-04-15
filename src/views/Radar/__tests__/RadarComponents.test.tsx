@@ -186,18 +186,23 @@ describe('RadarMinimap', () => {
     mockRadarState.graphNodes = [
       { id: 'src/index.ts', dirKey: 'src', dirDepth: 1 },
     ];
-    const { getByTestId } = render(<RadarMinimap />);
+    const { getByTestId } = render(
+      <RadarMinimap canvasWidth={800} canvasHeight={600} />,
+    );
     const container = getByTestId('radar-minimap');
     expect(container.style.width).toBe('160px');
     expect(container.style.height).toBe('120px');
   });
 
-  it('shows viewport indicator rectangle when viewport is set', () => {
+  it('renders a canvas element (Plan 06: viewport indicator moved to canvas stroke)', () => {
     mockRadarState.graphNodes = [
       { id: 'src/index.ts', dirKey: 'src', dirDepth: 1 },
     ];
     mockRadarState.viewport = { zoom: 2, panX: 100, panY: 50 };
-    const { getByTestId } = render(<RadarMinimap />);
-    expect(getByTestId('minimap-viewport-indicator')).toBeInTheDocument();
+    const { getByTestId } = render(
+      <RadarMinimap canvasWidth={800} canvasHeight={600} />,
+    );
+    const container = getByTestId('radar-minimap');
+    expect(container.querySelector('canvas')).not.toBeNull();
   });
 });
