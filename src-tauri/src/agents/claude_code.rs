@@ -57,10 +57,21 @@ impl AgentAdapter for ClaudeCodeAdapter {
         "claude".to_string()
     }
 
-    async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
+    async fn launch(&self, cwd: PathBuf, intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
+        // `claude --print` is non-interactive: it expects a prompt as a
+        // positional argument (or on stdin) and exits once the response is
+        // streamed. Without one the process exits immediately, which used to
+        // flip the agent to `error` right after launch. Require an intent so
+        // the failure surfaces at launch time instead.
+        let prompt = intent.ok_or_else(|| {
+            "Claude Code launches require an INTENT_LABEL. The intent is \
+             forwarded to `claude --print` as the prompt; without it the \
+             CLI exits immediately with no work to do."
+                .to_string()
+        })?;
         launcher::launch_detached(
             "claude",
-            &["--print", "--output-format", "stream-json"],
+            &["--print", "--output-format", "stream-json", &prompt],
             &cwd,
             None,
             9417, // Default port; caller should override via env

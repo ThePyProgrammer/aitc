@@ -76,9 +76,17 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
     ? joinRepoSubdir(activeRepo, subdir)
     : subdir.trim();
 
+  const intentRequired = selectedType === 'claude-code';
+
   const handleLaunch = async () => {
     if (!activeRepo && !resolvedCwd) {
       setError('Working directory is required');
+      return;
+    }
+    if (intentRequired && !intent.trim()) {
+      setError(
+        'Claude Code launches in --print mode -- fill in INTENT_LABEL with the task prompt.',
+      );
       return;
     }
     setError(null);
@@ -226,12 +234,25 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
             {/* Intent */}
             <div className="px-6 pb-4">
               <label className="font-headline text-[10px] font-bold uppercase tracking-widest text-on-surface-variant block mb-2">
-                INTENT_LABEL <span className="text-on-surface-variant/40">(optional)</span>
+                INTENT_LABEL{' '}
+                <span
+                  className={
+                    intentRequired
+                      ? 'text-primary/80'
+                      : 'text-on-surface-variant/40'
+                  }
+                >
+                  {intentRequired ? '(required)' : '(optional)'}
+                </span>
               </label>
               <textarea
                 value={intent}
                 onChange={(e) => setIntent(e.target.value)}
-                placeholder="Describe the agent's task..."
+                placeholder={
+                  intentRequired
+                    ? 'Prompt passed to `claude --print` as the task...'
+                    : "Describe the agent's task..."
+                }
                 rows={4}
                 className="w-full bg-surface-container-lowest border border-outline/10 px-3 py-2 font-mono text-xs text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40 resize-y min-h-[80px]"
               />
