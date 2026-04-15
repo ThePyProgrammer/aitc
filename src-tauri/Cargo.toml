@@ -33,6 +33,7 @@ notify-debouncer-full = "0.7"
 sysinfo = "0.38"
 ignore = "0.4"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # Phase 3: Agent Management & Conflict Detection dependencies

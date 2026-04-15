@@ -12,6 +12,19 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Install a tracing subscriber so `tracing::info!`/`warn!`/`error!` calls
+    // in this crate actually reach the dev console. Honour RUST_LOG when set
+    // (e.g. RUST_LOG=aitc_lib=debug), defaulting to `info` otherwise. The
+    // try_init() avoids panicking in test/binary contexts that may have
+    // already initialized a subscriber.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_writer(std::io::stderr)
+        .try_init();
+
     repo_session::capture_launch_cwd();
 
     // Build the agent registry with built-in adapters
