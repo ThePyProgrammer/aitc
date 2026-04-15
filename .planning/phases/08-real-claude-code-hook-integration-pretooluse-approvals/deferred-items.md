@@ -24,6 +24,24 @@ Items discovered while executing Phase 8 that are outside this phase's scope.
 - **Scope:** Pre-existing (63 errors on base commit `fb5d5a9`, reduced to 59 after Plan 08-01 which adds zero errors).
 - **Owner:** Phase 7 — Plan 07-05 introduced the `forceCluster` module; fixing the d3-force typings is out of scope for Phase 8.
 
+## Plan 08-02 (2026-04-15)
+
+### 4. Pre-existing `conflict::engine` test failures
+
+- **Symptom:** `cargo test --lib` reports 2 failing tests:
+  - `conflict::engine::tests::test_conflict_detected_different_pids_within_window`
+  - `conflict::engine::tests::test_custom_window_duration`
+- **Root cause:** Tests assert `left == right` with `left: 0, right: 1` at `src/conflict/engine.rs:415`. The engine's window-tracking logic does not detect conflicts in the narrow window cases.
+- **Scope:** Pre-existing on the worktree base commit `925cff3`. Reproduced with `git stash` isolating Plan 08-02 changes — failures persist on unmodified base. Not introduced by Plan 08-02.
+- **Owner:** Phase 3 — `conflict::engine` is Phase 3 territory; Phase 8 does not touch this module.
+
+### 5. `create_approval_request_persists_tool_fields` unit test replaced by map-row coverage
+
+- **Symptom:** Plan 08-02 Task 1 specifies a unit test calling `create_approval_request_internal` directly to assert DB round-trip of `tool_name` / `tool_input_json` / `session_id`.
+- **Root cause:** `create_approval_request_internal` takes a `&tauri::AppHandle`, which requires a Tauri MockRuntime fixture that is not available in this codebase (no MockRuntime plumbing exists anywhere in `src-tauri/src`).
+- **Workaround used in Plan 08-02:** Added two `map_approval_row` unit tests (`map_approval_row_populates_phase8_fields`, `map_approval_row_defaults_phase8_fields_to_none`) that exercise the SELECT direction of the round-trip on an in-memory pool. The INSERT direction is exercised by the integration tests in Task 2 (`hook_gates_edit_and_blocks_until_approved`) and Task 3 (`hook_approve_resolves_handler`), which go through `create_approval_request_internal` against a real AppHandle via `tauri::test::mock_app`.
+- **Owner:** Phase 8 Plan 02 — documented here for traceability; acceptance criteria in the plan ("tool_name/tool_input_json/session_id round-trip through DB") is met by the integration smokes even though the specific unit-test name differs.
+
 ### 3. Non-root `[profile.release]` in `aitc-hook/Cargo.toml` ignored
 
 - **Symptom:** `cargo check --workspace` emits:

@@ -5,20 +5,37 @@
 //!   - Chat: send_chat_message, list_chat_messages, update_message_delivery_status
 //!   - Protected paths: list, add, remove
 
+// Phase 8: WaiterRegistry is wired into approve/deny/approve_with_edits in
+// Task 3 of this plan; the imports land here so the types are visible across
+// the whole module.
+#[allow(unused_imports)]
+use crate::agents::hook_waiters::{HookDecision, WaiterRegistry};
 use crate::comms::types::{ApprovalRequest, ChatMessage, ProtectedPath};
 use sqlx::{Pool, Row, Sqlite};
+#[allow(unused_imports)]
+use std::sync::Arc;
 use tauri::Emitter;
 
 /// Dispatch a native OS notification for an approval request.
+///
+/// Plan 08-02 added the optional `request_id` argument so Plan 08-05 can
+/// deep-link a click-to-focus deeplink on the notification body (see 08-CONTEXT
+/// D-23). Carried inline in the body text until the UI wires up a native
+/// notification action handler.
 fn dispatch_approval_notification(
     app_handle: &tauri::AppHandle,
     agent_id: &str,
     file_path: Option<&str>,
+    request_id: Option<i64>,
 ) {
     use tauri_plugin_notification::NotificationExt;
+    let suffix = match request_id {
+        Some(id) => format!(" [#{id}]"),
+        None => String::new(),
+    };
     let body = match file_path {
-        Some(fp) => format!("{agent_id} requests access to {fp}"),
-        None => format!("{agent_id} requests approval"),
+        Some(fp) => format!("{agent_id} requests access to {fp}{suffix}"),
+        None => format!("{agent_id} requests approval{suffix}"),
     };
     app_handle
         .notification()
@@ -46,6 +63,11 @@ fn map_approval_row(row: &sqlx::sqlite::SqliteRow) -> ApprovalRequest {
         edited_content: row.get("edited_content"),
         created_at: row.get("created_at"),
         resolved_at: row.get("resolved_at"),
+        // Phase 8: PreToolUse hook context. Optional columns — write_access
+        // rows (from the Phase 4 protected-path trigger) never set these.
+        tool_name: row.try_get("tool_name").ok().flatten(),
+        tool_input_json: row.try_get("tool_input_json").ok().flatten(),
+        session_id: row.try_get("session_id").ok().flatten(),
     }
 }
 
@@ -74,38 +96,52 @@ fn map_protected_path_row(row: &sqlx::sqlite::SqliteRow) -> ProtectedPath {
 // ---------------------------------------------------------------------------
 
 /// Create an approval request without going through Tauri State wrappers.
-/// Used by the protected path trigger (D-07) and delegated-to by the Tauri command.
+/// Used by the protected path trigger (D-07, write_access rows) and by the
+/// Phase 8 `/hook` handler (pretool_use rows).
+///
+/// Phase 8 extension: `tool_name`, `tool_input_json`, `session_id` carry
+/// Claude PreToolUse context for pretool_use rows. All three are `None` for
+/// the Phase 4 protected-path trigger path.
+#[allow(clippy::too_many_arguments)]
 pub async fn create_approval_request_internal(
     agent_id: &str,
     request_type: &str,
     file_path: Option<&str>,
     diff_content: Option<&str>,
     urgency: &str,
+    tool_name: Option<&str>,
+    tool_input_json: Option<&str>,
+    session_id: Option<&str>,
     pool: &Pool<Sqlite>,
     app_handle: &tauri::AppHandle,
 ) -> Result<ApprovalRequest, String> {
     let row = sqlx::query(
-        "INSERT INTO approval_requests (agent_id, request_type, file_path, diff_content, urgency) \
-         VALUES (?, ?, ?, ?, ?) \
+        "INSERT INTO approval_requests \
+         (agent_id, request_type, file_path, diff_content, urgency, tool_name, tool_input_json, session_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
          RETURNING id, agent_id, request_type, file_path, diff_content, status, urgency, \
-                   response_note, edited_content, created_at, resolved_at",
+                   response_note, edited_content, created_at, resolved_at, \
+                   tool_name, tool_input_json, session_id",
     )
     .bind(agent_id)
     .bind(request_type)
     .bind(file_path)
     .bind(diff_content)
     .bind(urgency)
+    .bind(tool_name)
+    .bind(tool_input_json)
+    .bind(session_id)
     .fetch_one(pool)
     .await
     .map_err(|e| format!("insert approval_request failed: {e}"))?;
 
     let req = map_approval_row(&row);
 
-    // Emit Tauri event for real-time frontend push (Pattern 4 from research)
+    // Emit Tauri event for real-time frontend push (Pattern 4 from research).
     let _ = app_handle.emit("approval-request-created", &req);
 
-    // OS notification
-    dispatch_approval_notification(app_handle, agent_id, file_path);
+    // OS notification — Plan 08-05 reads request_id for click-to-focus deeplink.
+    dispatch_approval_notification(app_handle, agent_id, file_path, Some(req.id));
 
     Ok(req)
 }
@@ -368,4 +404,97 @@ pub async fn remove_protected_path(
         .map_err(|e| format!("remove_protected_path failed: {e}"))?;
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    /// Spin up an in-memory SQLite pool with the approval_requests schema
+    /// used by Phase 4 + Phase 8 (including the 005 migration columns).
+    pub async fn make_pool_with_approval_schema() -> Pool<Sqlite> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE approval_requests ( \
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                agent_id TEXT, \
+                request_type TEXT NOT NULL, \
+                file_path TEXT, \
+                diff_content TEXT, \
+                status TEXT NOT NULL DEFAULT 'pending', \
+                urgency TEXT DEFAULT 'medium', \
+                response_note TEXT, \
+                edited_content TEXT, \
+                created_at TEXT NOT NULL DEFAULT (datetime('now')), \
+                resolved_at TEXT, \
+                tool_name TEXT, \
+                tool_input_json TEXT, \
+                session_id TEXT \
+             )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn map_approval_row_populates_phase8_fields() {
+        let pool = make_pool_with_approval_schema().await;
+        sqlx::query(
+            "INSERT INTO approval_requests \
+             (agent_id, request_type, urgency, tool_name, tool_input_json, session_id) \
+             VALUES ('K-1', 'pretool_use', 'high', 'Edit', \
+                     '{\"file_path\":\"/x.ts\"}', 's1')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let row = sqlx::query("SELECT * FROM approval_requests WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let req = map_approval_row(&row);
+
+        assert_eq!(req.agent_id, "K-1");
+        assert_eq!(req.request_type, "pretool_use");
+        assert_eq!(req.tool_name.as_deref(), Some("Edit"));
+        assert_eq!(
+            req.tool_input_json.as_deref(),
+            Some("{\"file_path\":\"/x.ts\"}")
+        );
+        assert_eq!(req.session_id.as_deref(), Some("s1"));
+    }
+
+    #[tokio::test]
+    async fn map_approval_row_defaults_phase8_fields_to_none() {
+        let pool = make_pool_with_approval_schema().await;
+        // write_access row from Phase 4 — no tool_name/tool_input_json/session_id.
+        sqlx::query(
+            "INSERT INTO approval_requests \
+             (agent_id, request_type, urgency, file_path) \
+             VALUES ('K-2', 'write_access', 'medium', '/x/.env')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let row = sqlx::query("SELECT * FROM approval_requests WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let req = map_approval_row(&row);
+        assert_eq!(req.tool_name, None);
+        assert_eq!(req.tool_input_json, None);
+        assert_eq!(req.session_id, None);
+    }
 }

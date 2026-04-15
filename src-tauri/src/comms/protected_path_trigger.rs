@@ -122,12 +122,17 @@ pub async fn check_protected_paths(
             "protected path write detected, creating synthetic approval request"
         );
 
+        // write_access rows never carry Claude PreToolUse fields (those are
+        // reserved for pretool_use rows created by the /hook handler).
         if let Err(e) = create_approval_request_internal(
             &agent_id,
             "write_access",
             Some(&file_path_str),
             None,
             "medium",
+            None,
+            None,
+            None,
             pool,
             app_handle,
         )

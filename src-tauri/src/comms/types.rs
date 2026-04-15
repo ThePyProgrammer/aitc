@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 /// An approval request from an agent (enriched with Phase 4 fields).
+///
+/// Phase 8 extension: `tool_name`, `tool_input_json`, `session_id` carry the
+/// Claude Code PreToolUse context for pretool_use rows. These are `Option`
+/// because write_access rows (Phase 4 protected-path trigger) don't have them.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalRequest {
@@ -15,6 +19,9 @@ pub struct ApprovalRequest {
     pub edited_content: Option<String>,
     pub created_at: String,
     pub resolved_at: Option<String>,
+    pub tool_name: Option<String>,
+    pub tool_input_json: Option<String>,
+    pub session_id: Option<String>,
 }
 
 /// A chat message between user and agent.
