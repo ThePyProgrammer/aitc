@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Clock,
   MessageSquare,
+  Package,
   Radar,
   Building2,
   Rocket,
@@ -16,6 +17,7 @@ import { PendingCountBadge } from '../ui/PendingCountBadge';
 const navItems = [
   { to: '/radar', label: 'RADAR', icon: Radar },
   { to: '/tower', label: 'TOWER', icon: Building2 },
+  { to: '/arsenal', label: 'ARSENAL', icon: Package },
   { to: '/comms', label: 'COMMS', icon: MessageSquare },
   { to: '/conflicts', label: 'CONFLICTS', icon: AlertTriangle },
   { to: '/history', label: 'HISTORY', icon: Clock },
