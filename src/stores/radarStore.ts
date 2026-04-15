@@ -21,6 +21,11 @@ import { computeContentionScore } from '../lib/contention';
 import type { ConflictAlert } from './conflictStore';
 import { usePipelineStore } from './pipelineStore';
 import type { DependencyEdgeDto, EdgeKind } from '../bindings';
+import {
+  cullExpiredTrails,
+  MAX_TRAILS_PER_AGENT,
+  TRAIL_TOTAL_LIFESPAN_MS,
+} from '../views/Radar/CometTrail';
 
 // Phase 7 graph state (D-01..D-03, D-11).
 export interface GraphNode {
@@ -94,6 +99,8 @@ interface RadarStore {
   commitSettledPositions: (positions: Map<string, { x: number; y: number }>) => void;
   pinNode: (id: string, x: number, y: number) => void;
   unpinNode: (id: string) => void;
+  pushTrail: (t: ActiveTrail) => void;
+  pruneTrails: (now?: number) => void;
   setViewport: (v: Partial<Viewport>) => void;
   selectAgent: (id: string | null) => void;
   toggleManifest: () => void;
@@ -196,6 +203,44 @@ export const useRadarStore = create<RadarStore>((set) => ({
         ),
       };
     });
+  },
+
+  /**
+   * D-18: append a trail, evicting this agent's oldest (by startTs) when it
+   * is already at MAX_TRAILS_PER_AGENT. Other agents' trails are untouched —
+   * the cap is strictly per-agent.
+   */
+  pushTrail: (t) => {
+    set((s) => {
+      const ofAgent = s.activeTrails.filter((x) => x.agentId === t.agentId);
+      if (ofAgent.length >= MAX_TRAILS_PER_AGENT) {
+        const oldest = ofAgent.reduce(
+          (a, b) => (a.startTs <= b.startTs ? a : b),
+          ofAgent[0],
+        );
+        return {
+          activeTrails: s.activeTrails
+            .filter((x) => x.id !== oldest.id)
+            .concat(t),
+        };
+      }
+      return { activeTrails: s.activeTrails.concat(t) };
+    });
+  },
+
+  /**
+   * D-16/D-18: drop trails older than 10s and enforce per-agent FIFO cap.
+   * Called from the RadarCanvas rAF loop — cheap (scan + single filter).
+   */
+  pruneTrails: (now = Date.now()) => {
+    set((s) => ({
+      activeTrails: cullExpiredTrails(
+        s.activeTrails,
+        now,
+        MAX_TRAILS_PER_AGENT,
+        TRAIL_TOTAL_LIFESPAN_MS,
+      ),
+    }));
   },
 
   setViewport: (v) =>
