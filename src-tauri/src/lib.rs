@@ -155,12 +155,42 @@ pub fn run() {
                 });
             app.manage(pool.clone());
 
-            // Start the self-registration server (HIST-01: needs pool for ensure_open_session)
+            // Phase 8: WaiterRegistry is shared between the axum /hook
+            // handler (Extension) and the Tauri comms commands (State).
+            let waiters: Arc<agents::hook_waiters::WaiterRegistry> =
+                agents::hook_waiters::WaiterRegistry::new_arc();
+            app.manage(waiters.clone());
+
+            // Start the self-registration + /hook server (HIST-01: needs
+            // pool for ensure_open_session; Phase 8: needs waiters + app
+            // handle for hook_handler).
             let registry_clone = agent_registry.clone();
             let pool_for_server = pool.clone();
+            let waiters_for_server = waiters.clone();
+            let app_for_server = app.handle().clone();
+            let app_for_port = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                match agents::self_register::start_registration_server(registry_clone, pool_for_server, 9417).await {
-                    Ok(port) => tracing::info!(port, "AITC registration server started"),
+                match agents::self_register::start_registration_server(
+                    registry_clone,
+                    pool_for_server,
+                    waiters_for_server,
+                    app_for_server,
+                    9417,
+                )
+                .await
+                {
+                    Ok(port) => {
+                        tracing::info!(port, "AITC registration server started");
+                        // Phase 8 D-06: write ~/.aitc/port so the sidecar
+                        // can discover us without AITC_PORT env. PortFileGuard
+                        // is stashed on managed state so Drop fires on exit.
+                        match pipeline::port_file::write_port(port) {
+                            Ok(guard) => {
+                                app_for_port.manage(std::sync::Mutex::new(Some(guard)));
+                            }
+                            Err(e) => tracing::warn!(error = %e, "port_file write failed"),
+                        }
+                    }
                     Err(e) => tracing::warn!(error = %e, "Failed to start registration server"),
                 }
             });

@@ -8,6 +8,7 @@
 //!   - get_agent_logs(agent_id) -> Vec<String>
 
 use crate::agents::adapter::{AgentInfo, AgentState, LaunchOptions};
+use crate::agents::hook_waiters::{HookDecision, WaiterRegistry};
 use crate::agents::launcher;
 use crate::agents::registry::AgentRegistry;
 use crate::pipeline::pipeline_state::PipelineState;
@@ -119,11 +120,19 @@ pub async fn launch_agent(
 ///
 /// T-03-06 mitigation: Only terminates processes tracked in the registry.
 /// Will not kill arbitrary PIDs.
+///
+/// Phase 8 D-10 force-deny: signals every pending hook waiter for this
+/// agent with `HookDecision::Deny("agent terminated by user")` BEFORE the
+/// OS kill. This prevents the EPIPE race where the sidecar dies mid-read
+/// and Claude hangs waiting for a response that will never come. Also
+/// clears the agent's always-allow set and session bindings so a
+/// reconnection doesn't resurrect stale state.
 #[tauri::command]
 #[specta::specta]
 pub async fn terminate_agent(
     agent_id: String,
     registry: tauri::State<'_, Arc<AgentRegistry>>,
+    waiters: tauri::State<'_, Arc<WaiterRegistry>>,
 ) -> Result<(), String> {
     let info = registry
         .get_agent(&agent_id)
@@ -133,6 +142,16 @@ pub async fn terminate_agent(
     let pid = info
         .pid
         .ok_or_else(|| format!("Agent '{agent_id}' has no PID"))?;
+
+    // D-10: force-deny BEFORE the OS kill so the sidecar gets a decision.
+    waiters
+        .signal_for_agent(
+            &agent_id,
+            HookDecision::Deny("agent terminated by user".into()),
+        )
+        .await;
+    waiters.clear_always_allow_for_agent(&agent_id).await;
+    waiters.clear_session_bindings_for_agent(&agent_id).await;
 
     // Terminate the process
     launcher::terminate_process(pid).await?;
