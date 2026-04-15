@@ -53,7 +53,7 @@ interface CommsStore {
   fetchRequests: () => Promise<void>;
   selectRequest: (id: number | null) => void;
   approveRequest: (id: number, opts?: { alwaysAllowForSession?: boolean }) => Promise<void>;
-  denyRequest: (id: number) => Promise<void>;
+  denyRequest: (id: number, opts?: { reason?: string }) => Promise<void>;
   askMoreInfo: (id: number, question: string) => Promise<void>;
   approveWithEdits: (
     id: number,
@@ -93,24 +93,40 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
     set({ selectedRequestId: id });
   },
 
-  approveRequest: async (id, _opts) => {
-    // Plan 05 wires `_opts.alwaysAllowForSession` into the invoke payload.
-    // Plan 01 only extends the signature so downstream callers type-check.
+  approveRequest: async (id, opts) => {
+    // Phase 8 Plan 05: wire `alwaysAllowForSession` through to Plan 02 backend
+    // command signature. Backend is source of truth (waiter-registry HashSet);
+    // the frontend sessionAlwaysAllow Map is an optimistic mirror for UX.
     try {
-      await invoke('approve_request', { id });
-      set((s) => ({
-        requests: s.requests.map((r) =>
+      await invoke('approve_request', {
+        id,
+        alwaysAllowForSession: opts?.alwaysAllowForSession ?? false,
+      });
+      set((s) => {
+        const nextRequests = s.requests.map((r) =>
           r.id === id ? { ...r, status: 'approved' as const } : r
-        ),
-      }));
+        );
+        if (opts?.alwaysAllowForSession) {
+          const req = s.requests.find((r) => r.id === id);
+          if (req && req.toolName) {
+            const m = new Map(s.sessionAlwaysAllow);
+            const existing = m.get(req.agentId);
+            const tools = new Set(existing ?? []);
+            tools.add(req.toolName);
+            m.set(req.agentId, tools);
+            return { requests: nextRequests, sessionAlwaysAllow: m };
+          }
+        }
+        return { requests: nextRequests };
+      });
     } catch (e) {
       set({ error: String(e) });
     }
   },
 
-  denyRequest: async (id) => {
+  denyRequest: async (id, opts) => {
     try {
-      await invoke('deny_request', { id });
+      await invoke('deny_request', { id, reason: opts?.reason ?? null });
       set((s) => ({
         requests: s.requests.map((r) =>
           r.id === id ? { ...r, status: 'denied' as const } : r
@@ -134,15 +150,30 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
     }
   },
 
-  approveWithEdits: async (id, editedContent, _opts) => {
-    // Plan 05 wires `_opts.alwaysAllowForSession` into the invoke payload.
+  approveWithEdits: async (id, editedContent, opts) => {
     try {
-      await invoke('approve_with_edits', { id, editedContent });
-      set((s) => ({
-        requests: s.requests.map((r) =>
+      await invoke('approve_with_edits', {
+        id,
+        editedContent,
+        alwaysAllowForSession: opts?.alwaysAllowForSession ?? false,
+      });
+      set((s) => {
+        const nextRequests = s.requests.map((r) =>
           r.id === id ? { ...r, status: 'approved' as const, editedContent } : r
-        ),
-      }));
+        );
+        if (opts?.alwaysAllowForSession) {
+          const req = s.requests.find((r) => r.id === id);
+          if (req && req.toolName) {
+            const m = new Map(s.sessionAlwaysAllow);
+            const existing = m.get(req.agentId);
+            const tools = new Set(existing ?? []);
+            tools.add(req.toolName);
+            m.set(req.agentId, tools);
+            return { requests: nextRequests, sessionAlwaysAllow: m };
+          }
+        }
+        return { requests: nextRequests };
+      });
     } catch (e) {
       set({ error: String(e) });
     }

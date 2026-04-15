@@ -8,15 +8,21 @@ export function RequestQueue() {
   const pendingCount = useCommsStore((s) => s.pendingCount());
   const parentRef = useRef<HTMLDivElement>(null);
 
-  // Only show pending requests in the queue, sorted newest first
-  const pendingRequests = requests
-    .filter((r) => r.status === 'pending')
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  // Phase 8 Plan 05: queue shows pending rows first (newest first), then
+  // abandoned rows (newest first) — abandoned rows remain visible but
+  // non-interactive until fetchRequests drops them.
+  const displayRequests = requests
+    .filter((r) => r.status === 'pending' || r.status === 'abandoned')
+    .sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'pending' ? -1 : 1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
 
   const virtualizer = useVirtualizer({
-    count: pendingRequests.length,
+    count: displayRequests.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 72,
+    // Phase 8 Plan 05: bumped from 72 → 96 to fit the new preview-line row (D-14).
+    estimateSize: () => 96,
     overscan: 5,
   });
 
@@ -36,7 +42,7 @@ export function RequestQueue() {
 
       {/* Scrollable request list */}
       <div ref={parentRef} className="flex-1 overflow-auto">
-        {pendingRequests.length === 0 ? (
+        {displayRequests.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 px-4">
             <div
               className="h-5 w-[2px] bg-secondary"
@@ -69,7 +75,7 @@ export function RequestQueue() {
                   transform: `translateY(${virtualItem.start}px)`,
                 }}
               >
-                <ApprovalRequestCard request={pendingRequests[virtualItem.index]} />
+                <ApprovalRequestCard request={displayRequests[virtualItem.index]} />
               </div>
             ))}
           </div>
