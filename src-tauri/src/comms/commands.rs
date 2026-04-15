@@ -22,8 +22,8 @@ use tauri::Emitter;
 /// deep-link a click-to-focus deeplink on the notification body (see 08-CONTEXT
 /// D-23). Carried inline in the body text until the UI wires up a native
 /// notification action handler.
-fn dispatch_approval_notification(
-    app_handle: &tauri::AppHandle,
+fn dispatch_approval_notification<R: tauri::Runtime>(
+    app_handle: &tauri::AppHandle<R>,
     agent_id: &str,
     file_path: Option<&str>,
     request_id: Option<i64>,
@@ -37,13 +37,23 @@ fn dispatch_approval_notification(
         Some(fp) => format!("{agent_id} requests access to {fp}{suffix}"),
         None => format!("{agent_id} requests approval{suffix}"),
     };
-    app_handle
-        .notification()
-        .builder()
-        .title("APPROVAL_REQUIRED")
-        .body(&body)
-        .show()
-        .unwrap_or_else(|e| tracing::warn!("approval notification send failed: {e}"));
+    // The notification plugin panics on .notification() when not registered
+    // (e.g. tauri::test::mock_app). Catch it so hook_handler integration
+    // tests don't blow up; in production the plugin is always registered in
+    // lib.rs run().
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        app_handle
+            .notification()
+            .builder()
+            .title("APPROVAL_REQUIRED")
+            .body(&body)
+            .show()
+    }));
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => tracing::warn!("approval notification send failed: {e}"),
+        Err(_) => tracing::debug!("notification plugin unavailable (likely test runtime)"),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +113,7 @@ fn map_protected_path_row(row: &sqlx::sqlite::SqliteRow) -> ProtectedPath {
 /// Claude PreToolUse context for pretool_use rows. All three are `None` for
 /// the Phase 4 protected-path trigger path.
 #[allow(clippy::too_many_arguments)]
-pub async fn create_approval_request_internal(
+pub async fn create_approval_request_internal<R: tauri::Runtime>(
     agent_id: &str,
     request_type: &str,
     file_path: Option<&str>,
@@ -113,7 +123,7 @@ pub async fn create_approval_request_internal(
     tool_input_json: Option<&str>,
     session_id: Option<&str>,
     pool: &Pool<Sqlite>,
-    app_handle: &tauri::AppHandle,
+    app_handle: &tauri::AppHandle<R>,
 ) -> Result<ApprovalRequest, String> {
     let row = sqlx::query(
         "INSERT INTO approval_requests \

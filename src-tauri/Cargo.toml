@@ -70,3 +70,10 @@ tauri-plugin-shell = "2"
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"
+# Phase 8: integration smokes POST to a locally-bound /hook server.
+# default-features = false strips OpenSSL + native-tls (not needed for
+# 127.0.0.1 HTTP); json feature lets us call .json()/.json(&body).
+reqwest = { version = "0.12", features = ["json"], default-features = false }
+# Phase 8: tauri::test::mock_app() for an AppHandle usable from
+# create_approval_request_internal without spinning up the Tauri runtime.
+tauri = { version = "2", features = ["tray-icon", "test"] }
