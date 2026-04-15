@@ -158,6 +158,17 @@ export function buildFileTree(entries: TreeIndexEntry[]): FileTreeNode {
  * Returns a flat array of TreemapRect with coordinates relative to
  * the given width/height container.
  */
+// Visible breathing room between adjacent sibling rects. Each rect is inset
+// by SIBLING_GAP / 2 on every edge, so two neighbors end up SIBLING_GAP
+// world-units apart. Kept small so deeper levels don't crush content; at
+// zoom=1 this is 2 screen px, at zoom=5 it becomes 10 px, which is still
+// readable. Sub-pixel culling in drawTreemap clamps tiny rects away.
+const SIBLING_GAP = 2;
+// Padding inside a directory before laying out its children (on top of
+// the sibling inset). Leaves space for the directory label banner.
+const DIR_PAD = 2;
+const DIR_LABEL_HEIGHT = 12;
+
 export function computeTreemapLayout(
   root: FileTreeNode,
   width: number,
@@ -181,14 +192,23 @@ export function computeTreemapLayout(
     }));
 
     const rects = squarify(inputData, container);
+    const half = SIBLING_GAP / 2;
 
     for (const rect of rects) {
       const childNode = (rect as unknown as { _node: FileTreeNode })._node;
+      // Inset the raw squarify rect to create visible separation between
+      // adjacent siblings. Clamp so tiny cells stay non-degenerate — the
+      // sub-pixel cull in drawTreemap discards anything under 1 screen px.
+      const ix0 = rect.x0 + half;
+      const iy0 = rect.y0 + half;
+      const ix1 = Math.max(rect.x1 - half, ix0 + 1);
+      const iy1 = Math.max(rect.y1 - half, iy0 + 1);
+
       const tmRect: TreemapRect = {
-        x0: rect.x0,
-        y0: rect.y0,
-        x1: rect.x1,
-        y1: rect.y1,
+        x0: ix0,
+        y0: iy0,
+        x1: ix1,
+        y1: iy1,
         path: childNode.path,
         name: childNode.name,
         depth,
@@ -197,15 +217,15 @@ export function computeTreemapLayout(
       };
       result.push(tmRect);
 
-      // Recurse into directories
+      // Recurse into directories. Use the inset rect as the basis so
+      // nested content stays within the visible parent bounds (otherwise
+      // children would overlap the sibling gap).
       if (childNode.isDir && childNode.children.length > 0) {
-        // Pad slightly for nested directories
-        const pad = 2;
         const innerContainer = {
-          x0: rect.x0 + pad,
-          y0: rect.y0 + pad + 12, // extra space for directory label
-          x1: Math.max(rect.x1 - pad, rect.x0 + pad + 1),
-          y1: Math.max(rect.y1 - pad, rect.y0 + pad + 13),
+          x0: ix0 + DIR_PAD,
+          y0: iy0 + DIR_PAD + DIR_LABEL_HEIGHT,
+          x1: Math.max(ix1 - DIR_PAD, ix0 + DIR_PAD + 1),
+          y1: Math.max(iy1 - DIR_PAD, iy0 + DIR_PAD + DIR_LABEL_HEIGHT + 1),
         };
         if (innerContainer.x1 > innerContainer.x0 && innerContainer.y1 > innerContainer.y0) {
           layoutChildren(childNode, innerContainer, depth + 1);
