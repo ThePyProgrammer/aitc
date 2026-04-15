@@ -111,6 +111,43 @@ describe('buildFileTree', () => {
     expect(tree.children[0].size).toBe(42);
     expect(tree.size).toBe(42);
   });
+
+  it('collapses single-child directory chains starting at root', () => {
+    // Regression guard: when every file lives under the same chain of
+    // wrapper directories (absolute path prefix, or a nearly-empty monorepo
+    // subtree), buildFileTree must flatten the chain so the treemap doesn't
+    // waste canvas real estate on empty boxes.
+    const tree = buildFileTree([
+      { path: 'packages/only-app/src/main.ts', size: 100, isDir: false, depth: 3 },
+      { path: 'packages/only-app/src/app.ts', size: 200, isDir: false, depth: 3 },
+    ]);
+    // Expected collapse: root -> packages -> only-app -> src becomes root=src
+    expect(tree.name).toBe('src');
+    expect(tree.isDir).toBe(true);
+    expect(tree.size).toBe(300);
+    expect(tree.children).toHaveLength(2);
+    expect(tree.children.map((c) => c.name).sort()).toEqual(['app.ts', 'main.ts']);
+  });
+
+  it('stops collapsing at the first branching directory', () => {
+    const tree = buildFileTree([
+      { path: 'repo/src/main.ts', size: 100, isDir: false, depth: 2 },
+      { path: 'repo/lib/utils.ts', size: 50, isDir: false, depth: 2 },
+    ]);
+    // root -> repo has 2 children (src, lib) — collapse stops at `repo`.
+    expect(tree.name).toBe('repo');
+    expect(tree.children.map((c) => c.name).sort()).toEqual(['lib', 'src']);
+  });
+
+  it('does not collapse past a file leaf', () => {
+    // Guard against infinite-loop edge case: single child that is a file.
+    const tree = buildFileTree([
+      { path: 'readme.md', size: 42, isDir: false, depth: 1 },
+    ]);
+    expect(tree.name).toBe('root');
+    expect(tree.children).toHaveLength(1);
+    expect(tree.children[0].isDir).toBe(false);
+  });
 });
 
 describe('installRadarPipelineBridge', () => {

@@ -130,6 +130,26 @@ export function buildFileTree(entries: TreeIndexEntry[]): FileTreeNode {
   }
   computeSize(root);
 
+  // Collapse single-child directory chains from the root so the treemap
+  // doesn't waste real estate on empty wrapper boxes. Hits two cases:
+  //   (a) Leading "" segment from a path beginning with "/" (defensive —
+  //       the backend now strips repo_root, but this stays a no-op safety
+  //       net if a future caller passes absolute paths).
+  //   (b) Monorepo subtrees where every file lives under one intermediate
+  //       directory (e.g. `packages/only-app/src/...`), collapsing them
+  //       into a single visible root.
+  // Stop at the first directory with >1 child, or at a file leaf. The
+  // collapsed root inherits the deepest wrapper's children so the visible
+  // layout starts at actual branching structure. Size stays correct
+  // because computeSize already ran.
+  while (root.isDir && root.children.length === 1 && root.children[0].isDir) {
+    const only = root.children[0];
+    root.children = only.children;
+    root.name = only.name || root.name;
+    root.path = only.path;
+    root.size = only.size;
+  }
+
   return root;
 }
 
