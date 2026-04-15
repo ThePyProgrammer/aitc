@@ -3,28 +3,40 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Resource, ResourceEventBatch } from '../../bindings';
 import { useClaudeResourcesStore } from '../../stores/claudeResourcesStore';
 
-// Capture registered channel instances so tests can trigger onmessage.
-const registeredChannels: FakeChannel[] = [];
-
-class FakeChannel {
-  onmessage: ((batch: ResourceEventBatch) => void) | null = null;
-  constructor() {
-    registeredChannels.push(this);
+// vi.mock is hoisted; we reach the fakes via the mocked module after mocking.
+vi.mock('@tauri-apps/api/core', () => {
+  const channels: unknown[] = [];
+  class FakeChannel {
+    onmessage: ((batch: ResourceEventBatch) => void) | null = null;
+    constructor() {
+      channels.push(this);
+    }
+    trigger(batch: ResourceEventBatch) {
+      this.onmessage?.(batch);
+    }
   }
-  trigger(batch: ResourceEventBatch) {
-    this.onmessage?.(batch);
-  }
-}
+  const invoke = vi.fn();
+  return {
+    Channel: FakeChannel,
+    invoke,
+    __registeredChannels: channels,
+    __invokeMock: invoke,
+  };
+});
 
-const invokeMock = vi.fn();
-
-vi.mock('@tauri-apps/api/core', () => ({
-  Channel: FakeChannel,
-  invoke: (cmd: string, args?: unknown) => invokeMock(cmd, args),
-}));
-
-// Import the hook after mocking so it picks up the fakes.
+import * as tauriCore from '@tauri-apps/api/core';
 import { useClaudeResourcesChannel } from '../../hooks/useClaudeResourcesChannel';
+
+// Pull the fakes out through the mocked module (avoids hoist-order issues).
+const registeredChannels = (tauriCore as unknown as {
+  __registeredChannels: Array<{
+    onmessage: ((batch: ResourceEventBatch) => void) | null;
+    trigger: (batch: ResourceEventBatch) => void;
+  }>;
+}).__registeredChannels;
+const invokeMock = (tauriCore as unknown as { __invokeMock: ReturnType<typeof vi.fn> })
+  .__invokeMock;
+const FakeChannelCtor = tauriCore.Channel as unknown as new () => unknown;
 
 describe('useClaudeResourcesChannel', () => {
   beforeEach(() => {
@@ -61,7 +73,7 @@ describe('useClaudeResourcesChannel', () => {
     const [cmd, args] = invokeMock.mock.calls[0];
     expect(cmd).toBe('startClaudeResourcesWatch');
     expect((args as { cwd: string }).cwd).toBe('/tmp/repo');
-    expect((args as { channel: unknown }).channel).toBeInstanceOf(FakeChannel);
+    expect((args as { channel: unknown }).channel).toBeInstanceOf(FakeChannelCtor);
     expect(useClaudeResourcesStore.getState().resourcesById[seed[0].id]).toEqual(seed[0]);
     expect(useClaudeResourcesStore.getState().loaded).toBe(true);
   });
@@ -114,7 +126,7 @@ describe('useClaudeResourcesChannel', () => {
       await result.current.stop();
     });
 
-    expect(invokeMock).toHaveBeenLastCalledWith('stopClaudeResourcesWatch', undefined);
+    expect(invokeMock).toHaveBeenLastCalledWith('stopClaudeResourcesWatch');
     const s = useClaudeResourcesStore.getState();
     expect(s.resourcesById).toEqual({});
     expect(s.loaded).toBe(false);
