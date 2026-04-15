@@ -124,41 +124,90 @@ pub async fn terminate_process(pid: u32) -> Result<(), String> {
     }
 }
 
-/// Spawn a background task that reads stdout from a child process line-by-line
-/// and appends each line to the agent's stdout ring buffer in the registry.
+/// Append a line (tagged or not) to the agent's ring buffer with ring-buffer
+/// eviction. Held as a small helper so stdout and stderr readers can share it.
+async fn push_log_line(registry: &AgentRegistry, agent_id: &str, line: String) {
+    let mut agents = registry.agents_write().await;
+    if let Some(agent) = agents.get_mut(agent_id) {
+        if let Some(buf) = &mut agent.stdout_buffer {
+            if buf.len() >= MAX_STDOUT_LINES {
+                buf.pop_front();
+            }
+            buf.push_back(line);
+        }
+    }
+}
+
+/// Spawn a background task that reads stdout AND stderr from a child process
+/// line-by-line and appends each line to the agent's ring buffer. stderr lines
+/// are prefixed with `[stderr]` so they're still distinguishable.
 ///
-/// When the child exits (stdout EOF), updates agent state to `Idle` (exit 0)
-/// or `Error` (non-zero exit).
+/// When the child exits, updates agent state to `Idle` (exit 0) or `Error`
+/// (non-zero / signalled) and logs the final status via `tracing::warn!` when
+/// non-zero so the dev console surfaces the failure cause.
 pub fn spawn_stdout_reader(
     mut child: tokio::process::Child,
     agent_id: String,
     registry: Arc<AgentRegistry>,
 ) -> tokio::task::JoinHandle<()> {
     let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
 
     tokio::spawn(async move {
+        // Drain stderr in parallel with stdout. Previously stderr was piped
+        // but never read, so claude's actual error messages vanished and the
+        // agent just flipped to Error with no context.
+        let stderr_task = stderr.map(|stderr| {
+            let registry = registry.clone();
+            let agent_id = agent_id.clone();
+            tokio::spawn(async move {
+                let reader = tokio::io::BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    push_log_line(&registry, &agent_id, format!("[stderr] {line}")).await;
+                }
+            })
+        });
+
         if let Some(stdout) = stdout {
             let reader = tokio::io::BufReader::new(stdout);
             let mut lines = reader.lines();
-
             while let Ok(Some(line)) = lines.next_line().await {
-                let mut agents = registry.agents_write().await;
-                if let Some(agent) = agents.get_mut(&agent_id) {
-                    if let Some(buf) = &mut agent.stdout_buffer {
-                        if buf.len() >= MAX_STDOUT_LINES {
-                            buf.pop_front();
-                        }
-                        buf.push_back(line);
-                    }
-                }
+                push_log_line(&registry, &agent_id, line).await;
             }
         }
 
+        // Wait for stderr drain to finish so we don't race the exit message.
+        if let Some(handle) = stderr_task {
+            let _ = handle.await;
+        }
+
         // Child exited -- determine state from exit code
-        let new_state = match child.wait().await {
-            Ok(status) if status.success() => AgentState::Idle,
-            _ => AgentState::Error,
+        let (new_state, exit_summary) = match child.wait().await {
+            Ok(status) if status.success() => (AgentState::Idle, "exit=0".to_string()),
+            Ok(status) => {
+                let code = status
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signalled".to_string());
+                (AgentState::Error, format!("exit={code}"))
+            }
+            Err(e) => (AgentState::Error, format!("wait failed: {e}")),
         };
+
+        if new_state == AgentState::Error {
+            tracing::warn!(
+                agent_id = %agent_id,
+                status = %exit_summary,
+                "agent child process exited non-zero"
+            );
+            push_log_line(
+                &registry,
+                &agent_id,
+                format!("[aitc] child exited with {exit_summary}"),
+            )
+            .await;
+        }
 
         registry.update_state(&agent_id, new_state).await;
     })
