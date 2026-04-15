@@ -54,6 +54,10 @@ impl AgentAdapter for CodexAdapter {
         vec!["codex".to_string()]
     }
 
+    fn launch_binary(&self) -> String {
+        "codex".to_string()
+    }
+
     async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
         launcher::launch_detached(
             "codex",

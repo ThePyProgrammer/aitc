@@ -33,6 +33,7 @@ pub fn run() {
             repo_session::persist_last_repo,
             repo_session::get_last_repo,
             agents::commands::list_agents,
+            agents::commands::list_available_agent_types,
             agents::commands::launch_agent,
             agents::commands::terminate_agent,
             agents::commands::update_agent_intent,

@@ -125,6 +125,10 @@ impl AgentAdapter for GenericAdapter {
         self.config.process_names.clone()
     }
 
+    fn launch_binary(&self) -> String {
+        self.config.launch_command.clone()
+    }
+
     async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
         let args: Vec<&str> = self.config.launch_args.iter().map(|s| s.as_str()).collect();
         launcher::launch_detached(

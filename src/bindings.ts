@@ -32,6 +32,12 @@ async listWorktrees(repoRoot: string) : Promise<Result<Worktree[], string>> {
 /**
  * Get the file tree index from the active watch for the Phase 4 radar spatial map.
  * Returns an empty vec if no watch is active.
+ * 
+ * Paths are serialized as repo-relative with forward-slash separators. Storing
+ * absolute paths on the frontend created an O(depth) chain of single-child
+ * directory wrappers (`/`, `home`, `prannayag`, …) before any real content,
+ * which visually crushed the treemap into a corner. The repo root itself is
+ * emitted as `""` so the frontend root aggregate stays intact.
  */
 async getTreeIndex() : Promise<Result<TreeIndexEntry[], string>> {
     try {
@@ -79,6 +85,20 @@ async getLastRepo() : Promise<Result<string | null, string>> {
 async listAgents() : Promise<Result<AgentInfo[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_agents") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List adapter types whose launch binary resolves on PATH.
+ * 
+ * Used by the Deploy dialog to hide agent types that aren't installed,
+ * so users can't select launches that are guaranteed to fail.
+ */
+async listAvailableAgentTypes() : Promise<Result<string[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_available_agent_types") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

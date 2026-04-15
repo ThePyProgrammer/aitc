@@ -71,6 +71,11 @@ pub trait AgentAdapter: Send + Sync {
     /// Matching is lowercased substring, consistent with the Phase 2 allowlist.
     fn process_patterns(&self) -> Vec<String>;
 
+    /// The executable name this adapter would spawn via `launch_detached`.
+    /// Used for PATH availability checks so the UI can hide agent types
+    /// whose CLI isn't installed on the host.
+    fn launch_binary(&self) -> String;
+
     /// Launch a new agent session in the given working directory.
     /// Returns `(pid, child)` on success. The caller is responsible for spawning
     /// a stdout reader task from the child handle.

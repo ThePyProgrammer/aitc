@@ -22,6 +22,18 @@ pub async fn list_agents(
     Ok(registry.all_agents().await)
 }
 
+/// List adapter types whose launch binary resolves on PATH.
+///
+/// Used by the Deploy dialog to hide agent types that aren't installed,
+/// so users can't select launches that are guaranteed to fail.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_available_agent_types(
+    registry: tauri::State<'_, Arc<AgentRegistry>>,
+) -> Result<Vec<String>, String> {
+    Ok(registry.available_adapter_types())
+}
+
 /// Launch a new agent of the given type in the specified working directory.
 ///
 /// T-03-05 mitigations:

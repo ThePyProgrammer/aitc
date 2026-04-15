@@ -53,6 +53,10 @@ impl AgentAdapter for ClaudeCodeAdapter {
         vec!["claude".to_string(), "claude-code".to_string()]
     }
 
+    fn launch_binary(&self) -> String {
+        "claude".to_string()
+    }
+
     async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
         launcher::launch_detached(
             "claude",

@@ -46,6 +46,10 @@ impl AgentAdapter for OpenCodeAdapter {
         vec!["opencode".to_string()]
     }
 
+    fn launch_binary(&self) -> String {
+        "opencode".to_string()
+    }
+
     async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
         launcher::launch_detached(
             "opencode",

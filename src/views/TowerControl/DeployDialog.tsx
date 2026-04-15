@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { useAgentStore } from '../../stores/agentStore';
+import { commands } from '../../bindings';
 
 interface DeployDialogProps {
   open: boolean;
@@ -22,7 +23,37 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
   const [intent, setIntent] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLaunching, setIsLaunching] = useState(false);
+  const [availableTypes, setAvailableTypes] = useState<string[] | null>(null);
   const launchAgent = useAgentStore((s) => s.launchAgent);
+
+  // Refresh the installed-CLI list each time the dialog opens so PATH changes
+  // (e.g. installing `codex` without restarting AITC) are picked up.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    commands.listAvailableAgentTypes().then((res) => {
+      if (cancelled) return;
+      if (res.status === 'ok') {
+        setAvailableTypes(res.data);
+        if (!res.data.includes(selectedType) && res.data.length > 0) {
+          setSelectedType(res.data[0]);
+        }
+      } else {
+        // If the probe fails, fall back to showing everything so we don't
+        // strand the user.
+        setAvailableTypes(null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // selectedType intentionally excluded -- we only want to reconcile on open
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const visibleAgentTypes = availableTypes
+    ? agentTypes.filter((t) => availableTypes.includes(t.id))
+    : agentTypes;
 
   const handleLaunch = async () => {
     if (!cwd.trim()) {
@@ -84,7 +115,15 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
                 AGENT_TYPE
               </label>
               <div className="flex flex-col gap-1">
-                {agentTypes.map((type) => (
+                {visibleAgentTypes.length === 0 && (
+                  <div className="px-4 py-3 bg-surface-container border-l-2 border-error/40">
+                    <span className="font-mono text-xs text-on-surface-variant">
+                      No agent CLIs detected on PATH. Install at least one of
+                      claude, codex, or opencode to deploy.
+                    </span>
+                  </div>
+                )}
+                {visibleAgentTypes.map((type) => (
                   <button
                     key={type.id}
                     onClick={() => setSelectedType(type.id)}
@@ -143,7 +182,11 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
               <Button variant="ghost" onClick={onClose}>
                 ABORT
               </Button>
-              <Button variant="primary" onClick={handleLaunch} disabled={isLaunching}>
+              <Button
+                variant="primary"
+                onClick={handleLaunch}
+                disabled={isLaunching || visibleAgentTypes.length === 0}
+              >
                 {isLaunching ? 'LAUNCHING...' : 'LAUNCH_AGENT'}
               </Button>
             </div>

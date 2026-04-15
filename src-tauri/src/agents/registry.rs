@@ -189,6 +189,17 @@ impl AgentRegistry {
             .cloned()
     }
 
+    /// Adapter types whose launch binary resolves on the current PATH.
+    /// Used by the UI to hide agent types whose CLI isn't installed so the
+    /// user can't pick a launch that is guaranteed to fail.
+    pub fn available_adapter_types(&self) -> Vec<String> {
+        self.adapters
+            .iter()
+            .filter(|a| binary_on_path(&a.launch_binary()))
+            .map(|a| a.adapter_type().to_string())
+            .collect()
+    }
+
     /// Find the first adapter whose process_patterns match the given process name.
     /// Matching is lowercased substring, consistent with ProcessSnapshot logic.
     /// Used for process-scan detection, NOT for explicit launch-by-type.
@@ -209,6 +220,46 @@ impl Default for AgentRegistry {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Check whether `name` resolves to an executable on the current `PATH`.
+///
+/// Absolute paths are checked directly. On Windows, extensions from `PATHEXT`
+/// (with sensible fallbacks) are tried in addition to the bare name.
+fn binary_on_path(name: &str) -> bool {
+    let path_buf = std::path::Path::new(name);
+    if path_buf.is_absolute() {
+        return path_buf.is_file();
+    }
+
+    let exe_candidates: Vec<String> = if cfg!(windows) {
+        let pathext = std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".to_string());
+        let mut out = vec![name.to_string()];
+        for ext in pathext.split(';').filter(|e| !e.is_empty()) {
+            // Avoid double-extension if user already passed one in
+            if name.to_ascii_lowercase().ends_with(&ext.to_ascii_lowercase()) {
+                continue;
+            }
+            out.push(format!("{name}{ext}"));
+        }
+        out
+    } else {
+        vec![name.to_string()]
+    };
+
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    for dir in std::env::split_paths(&paths) {
+        for candidate in &exe_candidates {
+            let full = dir.join(candidate);
+            if full.is_file() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -240,6 +291,9 @@ mod tests {
         }
         fn process_patterns(&self) -> Vec<String> {
             self.patterns.clone()
+        }
+        fn launch_binary(&self) -> String {
+            self.name.clone()
         }
         async fn launch(&self, _cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
             Err("test adapter".to_string())
