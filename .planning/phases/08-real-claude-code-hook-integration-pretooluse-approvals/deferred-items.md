@@ -42,6 +42,26 @@ Items discovered while executing Phase 8 that are outside this phase's scope.
 - **Workaround used in Plan 08-02:** Added two `map_approval_row` unit tests (`map_approval_row_populates_phase8_fields`, `map_approval_row_defaults_phase8_fields_to_none`) that exercise the SELECT direction of the round-trip on an in-memory pool. The INSERT direction is exercised by the integration tests in Task 2 (`hook_gates_edit_and_blocks_until_approved`) and Task 3 (`hook_approve_resolves_handler`), which go through `create_approval_request_internal` against a real AppHandle via `tauri::test::mock_app`.
 - **Owner:** Phase 8 Plan 02 — documented here for traceability; acceptance criteria in the plan ("tool_name/tool_input_json/session_id round-trip through DB") is met by the integration smokes even though the specific unit-test name differs.
 
+## Plan 08-05 (2026-04-15)
+
+### 6. Pre-existing `agentStore.test.ts` failure — `launch_agent` now takes `options`
+
+- **Symptom:** `pnpm test src/stores/__tests__/agentStore.test.ts` reports 1 failing test:
+  - `agentStore > launchAgent calls invoke launch_agent and appends to agents`
+- **Root cause:** Test asserts `invoke('launch_agent', {agentType, cwd, intent})` but production code now passes `{agentType, cwd, intent, options: null}`. The Phase 9 agent-launch extension added the `options` field but didn't update this test.
+- **Scope:** Pre-existing on the worktree base commit `41c1f497`. Reproduced with `git stash` isolating Plan 08-05 changes — failure persists on unmodified base. Not introduced by Plan 08-05.
+- **Owner:** Phase 9 — agent launch with options is Phase 9 territory; Phase 8 Plan 05 does not touch `agentStore`.
+
+### 7. Pre-existing `src/bindings.ts` tsc errors
+
+- **Symptom:** `npx tsc --noEmit` reports 3 errors in `src/bindings.ts`:
+  - `error TS6133: 'TSend' is declared but its value is never read.`
+  - `error TS2440: Import declaration conflicts with local declaration of 'TAURI_CHANNEL'.`
+  - `error TS6133: '__makeEvents__' is declared but its value is never read.`
+- **Root cause:** tauri-specta-generated file; duplicate TAURI_CHANNEL import and unused generic.
+- **Scope:** Pre-existing on the worktree base commit `41c1f497`. Plan 08-05 adds ZERO new tsc errors.
+- **Owner:** Phase 9 Plan 1 / infrastructure — tauri-specta regeneration config should dedupe the TAURI_CHANNEL import; unrelated to Phase 8 Plan 05.
+
 ### 3. Non-root `[profile.release]` in `aitc-hook/Cargo.toml` ignored
 
 - **Symptom:** `cargo check --workspace` emits:

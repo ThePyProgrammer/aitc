@@ -6,7 +6,7 @@ import { ChatThread } from './ChatThread';
 import { ChatInput } from './ChatInput';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { UrgencyBadge } from '../../components/ui/UrgencyBadge';
-import { ToolBadge } from '../../components/ui/ToolBadge';
+import { ToolBadge, toolLabelFor } from '../../components/ui/ToolBadge';
 import { ToolPreview } from './ToolPreview';
 
 export function RequestDetail() {
@@ -115,6 +115,9 @@ export function RequestDetail() {
           requestId={selectedRequest.id}
           hasEdits={edits.size > 0}
           editedContent={buildEditedContent()}
+          requestType={selectedRequest.requestType}
+          toolBadgeLabel={toolLabelFor(selectedRequest.toolName)}
+          agentId={selectedRequest.agentId}
         />
       </div>
 
