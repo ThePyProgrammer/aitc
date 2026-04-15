@@ -18,6 +18,8 @@ pub mod scan;
 pub mod write_fence;
 // Modules introduced by Plan 03:
 pub mod claude_md;
+pub mod commands;
+pub mod pipeline_state;
 
 #[cfg(test)]
 pub mod fixtures;
