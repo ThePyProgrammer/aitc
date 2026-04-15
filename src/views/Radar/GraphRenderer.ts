@@ -1,0 +1,365 @@
+// D-12, D-13, D-19, VIZN-01.
+// Pure render functions for the graph radar. Called by RadarCanvas's rAF loop.
+// All sizes are world-space pixels; divide by zoom for visual constancy.
+//
+// Color and sizing values copied verbatim from 07-UI-SPEC.md §Color and §Sizing.
+// The render z-order in RadarCanvas walks these functions in sequence per
+// 07-UI-SPEC §Component Inventory (steps 2-7 in this plan; 8-13 land in Plans
+// 05 and 06).
+
+import { polygonHull, polygonCentroid } from 'd3-polygon';
+import type { GraphNode, GraphEdge, Viewport } from '../../stores/radarStore';
+
+// ───── Color tokens (Command Horizon, from UI-SPEC §Color) ─────
+export const COLORS = {
+  surfaceContainer: '#1a1919',
+  surfaceContainerHigh: '#201f1f',
+  surfaceContainerHighest: '#262626',
+  outline: '#777575',
+  outlineVariant: '#494847',
+  onSurface: '#ffffff',
+  onSurfaceVariant: '#adaaaa',
+  primary: '#8eff71',
+  secondary: '#00cffc',
+  error: '#ff7351',
+} as const;
+
+// ───── Sizing tokens (UI-SPEC §Sizing, world-space) ─────
+export const NODE_RADIUS_DEFAULT = 5;
+export const NODE_RADIUS_HOVERED = 6;
+export const NODE_RADIUS_SELECTED = 6;
+export const NODE_HIT_RADIUS = 8;
+export const ARROW_LENGTH = 5;       // world-space; divided by zoom in canvas calls
+export const ARROW_BASE_WIDTH = 3;
+export const ARROW_INSET = 5;         // distance from node center where arrow apex sits
+export const FOLDER_HULL_FILL_ALPHA = 0.05;
+export const FOLDER_HULL_STROKE_ALPHA = 0.4;
+export const VIEWPORT_CULL_PADDING = 100;
+export const PINNED_BADGE_SIZE = 5;
+
+// ───── Heat-map color blend (D-19, UI-SPEC §Color heat-map ramp) ─────
+/**
+ * Interpolate from surface-container (#1a1919) → error (#ff7351) along a
+ * contention score in [0, 1]. Scores outside the range are clamped.
+ */
+export function heatColor(score: number): string {
+  const clamped = Math.max(0, Math.min(1, score));
+  // surface-container #1a1919 → error #ff7351
+  const r = Math.round(0x1a + (0xff - 0x1a) * clamped);
+  const g = Math.round(0x19 + (0x73 - 0x19) * clamped);
+  const b = Math.round(0x19 + (0x51 - 0x19) * clamped);
+  const hex = (n: number) => n.toString(16).padStart(2, '0');
+  return `#${hex(r)}${hex(g)}${hex(b)}`;
+}
+
+// ───── Viewport cull helper (UI-SPEC §Sizing progressive detail) ─────
+/**
+ * True when the given world-space point projects inside the canvas rectangle
+ * extended by `padding` pixels on every side (default 100 per UI-SPEC).
+ * Used by drawNodes / drawEdges / drawArrowHeads to skip off-screen geometry
+ * at 5k+ node counts (D-23 target).
+ */
+export function isInViewport(
+  point: { x: number; y: number },
+  viewport: Viewport,
+  canvasWidth: number,
+  canvasHeight: number,
+  padding: number = VIEWPORT_CULL_PADDING,
+): boolean {
+  const sx = point.x * viewport.zoom + viewport.panX;
+  const sy = point.y * viewport.zoom + viewport.panY;
+  return (
+    sx >= -padding &&
+    sx <= canvasWidth + padding &&
+    sy >= -padding &&
+    sy <= canvasHeight + padding
+  );
+}
+
+// ───── Single-child directory chain collapse (commit a8fe89b ported to hull labels) ─────
+/**
+ * Produce a condensed label for a dirKey whose leading segments are all
+ * single-child wrappers (no siblings, no own files). Walks from the root
+ * down and strips segments until:
+ *   - an ancestor has > 1 child, OR
+ *   - an ancestor has its own file directly under it.
+ * Returns the remaining segments joined with `/`. Preserves commit a8fe89b
+ * behaviour at hull-label granularity.
+ */
+export function collapseSingleChildChain(
+  dirKey: string,
+  allDirKeysWithFiles: Set<string>,
+  parentChildMap: Map<string, Set<string>>,
+): string {
+  const parts = dirKey.split('/');
+  // Only strip strict ancestors (not the immediate parent directory of the
+  // leaf) so we always keep at least one visible segment beyond the collapse
+  // boundary. For `src/views/Radar` with src → views → Radar single-child
+  // chain the expected label is `views/Radar`, not `Radar`.
+  let collapseStart = 0;
+  for (let i = 0; i < parts.length - 2; i++) {
+    const ancestor = parts.slice(0, i + 1).join('/');
+    const children = parentChildMap.get(ancestor);
+    const hasOwnFiles = allDirKeysWithFiles.has(ancestor);
+    if (!children || children.size > 1 || hasOwnFiles) {
+      collapseStart = i;
+      break;
+    }
+    // Ancestor is a single-child wrapper — continue stripping past it.
+    collapseStart = i + 1;
+  }
+  return parts.slice(collapseStart).join('/');
+}
+
+// ───── Progressive detail (D-12, UI-SPEC) ─────
+/**
+ * Folder hulls respect three zoom tiers:
+ *   zoom < 0.6        → only depth-0 hulls (coarse overview)
+ *   0.6 ≤ zoom < 2    → depth ≤ 2 (mid fidelity)
+ *   zoom ≥ 2          → all depths (full fidelity)
+ */
+export function shouldRenderHullAtZoom(dirDepth: number, zoom: number): boolean {
+  if (zoom < 0.6) return dirDepth === 0;
+  if (zoom < 2) return dirDepth <= 2;
+  return true;
+}
+
+// ───── drawFolderHulls (UI-SPEC §Component Inventory z-order steps 2-3) ─────
+/**
+ * Groups nodes by dirKey and for each group renders either:
+ *   - a convex hull (≥3 points) via d3-polygon, or
+ *   - a circle fallback centered on the centroid (<3 points).
+ * Then places an UPPERCASE label at the centroid with progressive detail
+ * (top-level = 12px bold 60%, nested = 10px regular 40%) per UI-SPEC §Color.
+ */
+export function drawFolderHulls(
+  ctx: CanvasRenderingContext2D,
+  nodes: GraphNode[],
+  zoom: number,
+  parentChildMap: Map<string, Set<string>>,
+  dirsWithOwnFiles: Set<string>,
+): void {
+  const byDir = new Map<string, GraphNode[]>();
+  for (const n of nodes) {
+    if (n.x === undefined || n.y === undefined) continue;
+    if (n.dirKey === '') continue;
+    const arr = byDir.get(n.dirKey) ?? [];
+    arr.push(n);
+    byDir.set(n.dirKey, arr);
+  }
+
+  const lineW = 1 / zoom;
+  for (const [dirKey, members] of byDir) {
+    if (!shouldRenderHullAtZoom(members[0].dirDepth, zoom)) continue;
+    ctx.strokeStyle = `rgba(73, 72, 71, ${FOLDER_HULL_STROKE_ALPHA})`;
+    ctx.fillStyle = `rgba(73, 72, 71, ${FOLDER_HULL_FILL_ALPHA})`;
+    ctx.lineWidth = lineW;
+
+    let cx: number;
+    let cy: number;
+    if (members.length >= 3) {
+      const pts = members.map((n) => [n.x!, n.y!] as [number, number]);
+      const hull = polygonHull(pts);
+      if (!hull) continue;
+      ctx.beginPath();
+      hull.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      const centroid = polygonCentroid(hull);
+      cx = centroid[0];
+      cy = centroid[1];
+    } else {
+      cx = members.reduce((s, n) => s + (n.x ?? 0), 0) / members.length;
+      cy = members.reduce((s, n) => s + (n.y ?? 0), 0) / members.length;
+      const r = 20 / zoom;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Label (collapsed-chain) — top-level depth 0/1 = 12px/zoom 60% opacity,
+    // depth ≥2 = 10px/zoom 40% opacity.
+    const label = collapseSingleChildChain(dirKey, dirsWithOwnFiles, parentChildMap);
+    const isTop = members[0].dirDepth <= 1;
+    const fontSize = (isTop ? 12 : 10) / zoom;
+    const alpha = isTop ? 0.6 : 0.4;
+    ctx.font = `${isTop ? 'bold ' : ''}${fontSize}px "Space Grotesk", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(173, 170, 170, ${alpha})`;
+    ctx.fillText(label.toUpperCase(), cx, cy - 6 / zoom);
+  }
+}
+
+// ───── drawEdges (UI-SPEC z-order step 4) ─────
+/**
+ * Uniform 1/zoom stroke per D-13. Edges whose both endpoints fall outside
+ * the padded viewport rectangle are skipped.
+ */
+export function drawEdges(
+  ctx: CanvasRenderingContext2D,
+  edges: GraphEdge[],
+  positions: Map<string, { x: number; y: number }>,
+  zoom: number,
+  viewport: Viewport,
+  canvasWidth: number,
+  canvasHeight: number,
+): void {
+  ctx.strokeStyle = 'rgba(73, 72, 71, 0.55)';
+  ctx.lineWidth = 1 / zoom;
+  for (const e of edges) {
+    const sId =
+      typeof e.source === 'string' ? e.source : (e.source as { id: string }).id;
+    const tId =
+      typeof e.target === 'string' ? e.target : (e.target as { id: string }).id;
+    const a = positions.get(sId);
+    const b = positions.get(tId);
+    if (!a || !b) continue;
+    if (
+      !isInViewport(a, viewport, canvasWidth, canvasHeight) &&
+      !isInViewport(b, viewport, canvasWidth, canvasHeight)
+    ) {
+      continue;
+    }
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+}
+
+// ───── drawArrowHeads (UI-SPEC z-order step 5) ─────
+/**
+ * Triangle apex 5px (world) inset from the target node center, base 3px
+ * wide. Culled at zoom < 0.6 (progressive detail) and skipped for edges
+ * whose target is outside the padded viewport.
+ */
+export function drawArrowHeads(
+  ctx: CanvasRenderingContext2D,
+  edges: GraphEdge[],
+  positions: Map<string, { x: number; y: number }>,
+  zoom: number,
+  viewport: Viewport,
+  canvasWidth: number,
+  canvasHeight: number,
+): void {
+  if (zoom < 0.6) return;
+  ctx.fillStyle = 'rgba(73, 72, 71, 0.7)';
+  const len = ARROW_LENGTH / zoom;
+  const half = ARROW_BASE_WIDTH / zoom / 2;
+  const inset = ARROW_INSET / zoom;
+  for (const e of edges) {
+    const sId =
+      typeof e.source === 'string' ? e.source : (e.source as { id: string }).id;
+    const tId =
+      typeof e.target === 'string' ? e.target : (e.target as { id: string }).id;
+    const a = positions.get(sId);
+    const b = positions.get(tId);
+    if (!a || !b) continue;
+    if (!isInViewport(b, viewport, canvasWidth, canvasHeight)) continue;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < inset) continue;
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const apexX = b.x - nx * inset;
+    const apexY = b.y - ny * inset;
+    const baseCx = apexX - nx * len;
+    const baseCy = apexY - ny * len;
+    const px = -ny;
+    const py = nx;
+    ctx.beginPath();
+    ctx.moveTo(apexX, apexY);
+    ctx.lineTo(baseCx + px * half, baseCy + py * half);
+    ctx.lineTo(baseCx - px * half, baseCy - py * half);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+// ───── drawNodes (UI-SPEC z-order step 6) ─────
+/**
+ * Fills each node at world (x, y) with default surface-container fill (or
+ * heatColor(score) when heatMapEnabled). Hovered nodes grow 5→6 world px.
+ * Pinned nodes get a 5px (world) secondary-color lock badge offset +6,+6.
+ * Viewport-culled via isInViewport.
+ */
+export function drawNodes(
+  ctx: CanvasRenderingContext2D,
+  nodes: GraphNode[],
+  contentionScores: Map<string, number>,
+  heatMapEnabled: boolean,
+  hoveredId: string | null,
+  pinnedIds: Set<string>,
+  zoom: number,
+  viewport: Viewport,
+  canvasWidth: number,
+  canvasHeight: number,
+): void {
+  ctx.lineWidth = 1 / zoom;
+  for (const n of nodes) {
+    if (n.x === undefined || n.y === undefined) continue;
+    if (!isInViewport({ x: n.x, y: n.y }, viewport, canvasWidth, canvasHeight)) continue;
+
+    const score = contentionScores.get(n.id) ?? 0;
+    const fillBase =
+      heatMapEnabled && score > 0
+        ? heatColor(score)
+        : hoveredId === n.id
+          ? COLORS.surfaceContainerHigh
+          : COLORS.surfaceContainer;
+    ctx.fillStyle = fillBase;
+    ctx.strokeStyle =
+      heatMapEnabled && score > 0
+        ? `rgba(255, 115, 81, ${score * 0.8})`
+        : `rgba(73, 72, 71, 0.6)`;
+
+    const r = hoveredId === n.id ? NODE_RADIUS_HOVERED : NODE_RADIUS_DEFAULT;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Pinned-node lock badge — UI-SPEC §Color: secondary #00cffc, 5px / zoom
+    // square (zero-radius) drawn offset +6, +6 from node center.
+    if (pinnedIds.has(n.id)) {
+      ctx.fillStyle = COLORS.secondary;
+      const sz = PINNED_BADGE_SIZE / zoom;
+      ctx.fillRect(n.x + 6 / zoom, n.y + 6 / zoom, sz, sz);
+    }
+  }
+}
+
+// ───── drawSelectedNode (UI-SPEC z-order steps 7-8) ─────
+/**
+ * Ambient glow (40px / zoom radial gradient, 15% → 0 alpha in agent palette
+ * color) + 1px white outer stroke at 80% opacity on the selected agent's
+ * current-position node. No-op if node is undefined so Plans 05/06 can wire
+ * agent-position tracking without causing visual regressions here.
+ */
+export function drawSelectedNode(
+  ctx: CanvasRenderingContext2D,
+  node: GraphNode | undefined,
+  agentColor: string,
+  zoom: number,
+): void {
+  if (!node || node.x === undefined || node.y === undefined) return;
+  // Outer halo (ambient glow per UI-SPEC: 40px / zoom radial gradient at
+  // 10-15% opacity)
+  const haloR = 40 / zoom;
+  const grad = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, haloR);
+  grad.addColorStop(0, `${agentColor}26`); // ~15% alpha
+  grad.addColorStop(1, `${agentColor}00`);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(node.x, node.y, haloR, 0, Math.PI * 2);
+  ctx.fill();
+  // 1px white outer stroke at 80%
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+  ctx.lineWidth = 1 / zoom;
+  ctx.beginPath();
+  ctx.arc(node.x, node.y, NODE_RADIUS_SELECTED + 1 / zoom, 0, Math.PI * 2);
+  ctx.stroke();
+}
