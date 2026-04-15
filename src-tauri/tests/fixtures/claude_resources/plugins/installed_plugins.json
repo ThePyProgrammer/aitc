@@ -1,0 +1,10 @@
+{
+  "rapid@pragnition-plugins": {
+    "version": "1.2.3",
+    "scope": "user",
+    "installPath": "/home/u/.claude/plugins/cache/rapid",
+    "installedAt": "2026-04-01T12:00:00Z",
+    "lastUpdated": "2026-04-10T12:00:00Z",
+    "gitCommitSha": "abc123def456"
+  }
+}

@@ -526,6 +526,14 @@ export type ApprovalRequest = { id: number; agentId: string; requestType: string
  */
 export type Attribution = { kind: "pid"; value: number } | { kind: "ambiguous"; value: number[] } | { kind: "unattributed" }
 /**
+ * D-01: four UI categories (Skills, Agents, Plugins, Configuration). The
+ * "Configuration" UI tab bundles Hook + Command + Settings + Mcp; the
+ * backend keeps them as distinct enum variants so the parser, store, and
+ * detail panel can render them with the right metadata. ClaudeMd is its
+ * own category — surfaced under Configuration in the rail.
+ */
+export type Category = "skill" | "agent" | "plugin" | "hook" | "command" | "settings" | "mcp" | "claudeMd"
+/**
  * A chat message between user and agent.
  */
 export type ChatMessage = { id: number; agentId: string; direction: string; content: string; deliveryStatus: string; approvalRequestId: number | null; createdAt: string }
@@ -638,6 +646,40 @@ export type ProtectedPath = { id: number; globPattern: string; createdAt: string
  * A persisted conflict resolution record.
  */
 export type ResolutionRecord = { id: number; conflictEventId: number | null; filePath: string; agentAId: string; agentBId: string; resolutionType: string; hunkResolutions: string; notificationStatus: string; resolvedAt: string }
+/**
+ * A discovered Claude resource. Identity is `id` (stable across rescans);
+ * `path` is informational and may change if the file moves.
+ */
+export type Resource = { id: ResourceId; category: Category; scope: Scope; name: string; description: string | null; path: string; metadata: ResourceMetadata }
+/**
+ * Channel-emitted event variants. `Added`/`Changed` carry the parsed
+ * `Resource`; `Removed` carries only the id; `ExternalEdit` exists per
+ * D-15 so the frontend can decide between silent refresh and the
+ * "file changed on disk" banner when an editor is mounted on `path`.
+ */
+export type ResourceEvent = { kind: "added"; resource: Resource } | { kind: "removed"; id: ResourceId } | { kind: "changed"; resource: Resource } | { kind: "externalEdit"; path: string; mtimeMs: number }
+/**
+ * Batched event envelope mirrors `pipeline::events::FileEventBatch` so the
+ * frontend ring-buffer pattern from Phase 2 carries over unchanged.
+ */
+export type ResourceEventBatch = { events: ResourceEvent[]; batchId: number; droppedBatches: number }
+/**
+ * Opaque stable identifier for a Resource — composed as
+ * `"{scope}::{category}::{name}"` per RESEARCH.md Pattern 2 so the
+ * frontend can treat it as an opaque key without parsing.
+ */
+export type ResourceId = string
+/**
+ * Per-category metadata payload. Tagged enum (`kind` discriminator) so the
+ * frontend can switch on `metadata.kind` and render the right detail panel.
+ */
+export type ResourceMetadata = { kind: "skill"; tools: string[] | null; allowedTools: string[] | null } | { kind: "agent"; tools: string[] | null; model: string | null } | { kind: "plugin"; version: string; marketplace: string | null; installPath: string | null; installedAt: string | null; lastUpdated: string | null; gitCommitSha: string | null } | { kind: "hook"; event: string | null; matcher: string | null } | { kind: "command"; argumentHint: string | null; allowedTools: string[] | null } | { kind: "settings"; hooksCount: number; mcpServersCount: number } | { kind: "mcp"; command: string; args: string[]; envMasked: boolean } | { kind: "claudeMd"; editable: boolean; byteSize: number }
+/**
+ * D-02: scope tabs Global | Project | Combined. `Combined` is a UI-only
+ * concept derived from the union of Global + Project — backend only emits
+ * the two physical scopes.
+ */
+export type Scope = "global" | "project"
 /**
  * A file record within a session.
  */

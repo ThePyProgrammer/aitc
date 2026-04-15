@@ -1,0 +1,15 @@
+{
+  "permissions": { "allow": ["Read"], "deny": [] },
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [ { "type": "command", "command": "./hooks/sample-hook.sh" } ] }
+    ]
+  },
+  "mcpServers": {
+    "example-server": {
+      "command": "node",
+      "args": ["server.js"],
+      "env": { "API_TOKEN": "sk-test-abc123", "LOG_LEVEL": "debug" }
+    }
+  }
+}

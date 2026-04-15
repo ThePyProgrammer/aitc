@@ -102,7 +102,14 @@ pub fn run() {
         .typ::<conflict::resolution::ResolutionRecord>()
         .typ::<conflict::resolution::SessionRecord>()
         .typ::<conflict::resolution::SessionFileRecord>()
-        .typ::<conflict::resolution::ApprovalHistoryRecord>();
+        .typ::<conflict::resolution::ApprovalHistoryRecord>()
+        .typ::<claude_resources::events::ResourceEvent>()
+        .typ::<claude_resources::events::ResourceEventBatch>()
+        .typ::<claude_resources::events::Resource>()
+        .typ::<claude_resources::events::ResourceId>()
+        .typ::<claude_resources::events::Category>()
+        .typ::<claude_resources::events::Scope>()
+        .typ::<claude_resources::events::ResourceMetadata>();
 
     #[cfg(debug_assertions)]
     specta_builder
