@@ -40,12 +40,16 @@ describe('UndoToast', () => {
     expect(onUndo).toHaveBeenCalledTimes(1);
   });
 
-  it('auto-dismisses after 10 seconds by calling onDismiss', () => {
+  it('auto-dismisses after 10 seconds by calling onDismiss', async () => {
     const onDismiss = vi.fn();
     render(<UndoToast filename="a.md" onUndo={vi.fn()} onDismiss={onDismiss} />);
-    act(() => {
-      vi.advanceTimersByTime(10_100);
-    });
+    // Advance in 1s increments so each setTimeout fires and React re-renders
+    // between ticks (the countdown chains per-render setTimeout calls).
+    for (let i = 0; i < 11; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+    }
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
