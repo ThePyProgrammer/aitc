@@ -75,6 +75,85 @@ pub async fn set_pretool_gated_tools(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Passive hook consent (Phase 8 D-04) — dedup of per-repo consent prompts.
+//
+// Each repo the passive-bridge sees a Claude process in gets a single row:
+//   key   = "passive_hook_consent:{repo_cwd}"
+//   value ∈ { "accepted", "declined" }
+//
+// Accepted repos are re-scanned at startup so stale sidecar paths auto-heal
+// (Pitfall 6). Declined repos are remembered forever — we never re-prompt.
+// The initial emit writes "declined" as a dedup sentinel so the event fires
+// at-most-once per (cwd, AITC session); the frontend accept command flips
+// the row to "accepted" (and runs the install).
+// ---------------------------------------------------------------------------
+
+/// Returns all `(repo_cwd, decision)` entries where decision ∈ {"accepted",
+/// "declined"}. Used at startup to re-run install in accepted repos.
+pub async fn get_passive_hook_consent_repos(
+    pool: &Pool<Sqlite>,
+) -> Result<Vec<(String, String)>, String> {
+    ensure_schema(pool).await?;
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key, value FROM app_settings WHERE key LIKE 'passive_hook_consent:%'",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("select passive_hook_consent: {e}"))?;
+    Ok(rows
+        .into_iter()
+        .map(|(k, v)| {
+            (
+                k.trim_start_matches("passive_hook_consent:").to_string(),
+                v,
+            )
+        })
+        .collect())
+}
+
+/// Fast existence check — the passive-bridge reads this every tick per
+/// candidate to decide whether to emit a new consent prompt.
+pub async fn has_passive_hook_consent_entry(
+    pool: &Pool<Sqlite>,
+    repo_cwd: &str,
+) -> Result<bool, String> {
+    ensure_schema(pool).await?;
+    let key = format!("passive_hook_consent:{repo_cwd}");
+    let r: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM app_settings WHERE key = ?")
+            .bind(&key)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| format!("check passive_hook_consent: {e}"))?;
+    Ok(r.is_some())
+}
+
+/// Upsert the decision for a repo. `decision` must be "accepted" or
+/// "declined"; any other value is rejected to keep the column a closed
+/// enumeration the startup scanner can rely on.
+pub async fn record_passive_hook_consent(
+    pool: &Pool<Sqlite>,
+    repo_cwd: &str,
+    decision: &str,
+) -> Result<(), String> {
+    if !matches!(decision, "accepted" | "declined") {
+        return Err(format!("invalid decision: {decision}"));
+    }
+    ensure_schema(pool).await?;
+    let key = format!("passive_hook_consent:{repo_cwd}");
+    sqlx::query(
+        "INSERT INTO app_settings (key, value) VALUES (?, ?) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
+    )
+    .bind(&key)
+    .bind(decision)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("upsert passive_hook_consent: {e}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,5 +197,47 @@ mod tests {
         set_pretool_gated_tools(&p, &["Edit".to_string()]).await.unwrap();
         let v = get_pretool_gated_tools(&p).await.unwrap();
         assert_eq!(v, vec!["Edit"]);
+    }
+
+    // ---------------- Passive hook consent (Phase 8 D-04) ----------------
+
+    #[tokio::test]
+    async fn record_and_retrieve_consent() {
+        let p = pool().await;
+        record_passive_hook_consent(&p, "/a/b", "accepted").await.unwrap();
+        record_passive_hook_consent(&p, "/c/d", "declined").await.unwrap();
+        let mut v = get_passive_hook_consent_repos(&p).await.unwrap();
+        v.sort();
+        assert_eq!(
+            v,
+            vec![
+                ("/a/b".into(), "accepted".into()),
+                ("/c/d".into(), "declined".into()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn has_consent_entry_roundtrip() {
+        let p = pool().await;
+        assert!(!has_passive_hook_consent_entry(&p, "/a/b").await.unwrap());
+        record_passive_hook_consent(&p, "/a/b", "declined").await.unwrap();
+        assert!(has_passive_hook_consent_entry(&p, "/a/b").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn reject_invalid_decision() {
+        let p = pool().await;
+        assert!(record_passive_hook_consent(&p, "/a", "maybe").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn record_overwrites_previous_decision() {
+        // accept-then-decline and vice versa are both valid transitions.
+        let p = pool().await;
+        record_passive_hook_consent(&p, "/a/b", "declined").await.unwrap();
+        record_passive_hook_consent(&p, "/a/b", "accepted").await.unwrap();
+        let v = get_passive_hook_consent_repos(&p).await.unwrap();
+        assert_eq!(v, vec![("/a/b".into(), "accepted".into())]);
     }
 }
