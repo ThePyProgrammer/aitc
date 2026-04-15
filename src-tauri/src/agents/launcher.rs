@@ -207,6 +207,16 @@ pub fn spawn_stdout_reader(
                 format!("[aitc] child exited with {exit_summary}"),
             )
             .await;
+
+            // Mirror the tail of the buffer into the dev console so the actual
+            // failure reason (usually on stderr) surfaces without needing a
+            // log viewer in the UI. 40 lines is enough for a CLI error block
+            // plus stack trace, and cheap at 1000-line buffer caps.
+            let tail = read_stdout_buffer(&registry, &agent_id).await;
+            let tail_start = tail.len().saturating_sub(40);
+            for line in &tail[tail_start..] {
+                tracing::warn!(agent_id = %agent_id, log = %line, "agent log tail");
+            }
         }
 
         registry.update_state(&agent_id, new_state).await;
