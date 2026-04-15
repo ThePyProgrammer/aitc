@@ -15,7 +15,7 @@ pub mod events;
 pub mod parse;
 pub mod routing;
 pub mod scan;
-//   pub mod write_fence;
+pub mod write_fence;
 // Modules introduced by Plan 03:
 //   pub mod commands;
 //   pub mod watcher_routing;
