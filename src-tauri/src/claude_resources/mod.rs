@@ -17,9 +17,7 @@ pub mod routing;
 pub mod scan;
 pub mod write_fence;
 // Modules introduced by Plan 03:
-//   pub mod commands;
-//   pub mod watcher_routing;
-//   pub mod claude_md;
+pub mod claude_md;
 
 #[cfg(test)]
 pub mod fixtures;

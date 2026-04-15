@@ -118,6 +118,86 @@ pub fn is_excluded_subdir(first_component: &str) -> bool {
     )
 }
 
+// ---------------------------------------------------------------------------
+// Plan 03 additions: ScopeKind enum + classify_event helper + allowlist
+// ---------------------------------------------------------------------------
+
+/// Distinguishes an extra root's role for the single-Debouncer fan-out.
+/// `Global` = `~/.claude/`, `Project` = `<cwd>/.claude/`. Used by the
+/// watcher to stamp the correct `Scope` on `ResourceEvent`s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScopeKind {
+    Global,
+    Project,
+}
+
+impl From<ScopeKind> for Scope {
+    fn from(k: ScopeKind) -> Self {
+        match k {
+            ScopeKind::Global => Scope::Global,
+            ScopeKind::Project => Scope::Project,
+        }
+    }
+}
+
+/// The allowlisted subdirs to watch under each extra root. Files outside
+/// these subdirs (plus file-level `settings.json` and `CLAUDE.md` at the
+/// scope root) are NOT watched — Pitfall 1 (inotify allowlist).
+pub const EXTRA_ROOT_ALLOWLIST_SUBDIRS: &[&str] =
+    &["skills", "agents", "commands", "hooks", "plugins"];
+
+/// Decide where a debounced event should route given the repo root and any
+/// extra (`.claude/`) roots.
+///
+/// Ordering invariant (CRITICAL): a path under `<cwd>/.claude/` starts with
+/// both `repo_root` AND the extra root. Extra roots are checked FIRST so
+/// such a path routes to `Resource(Project)` — never `Pipeline`. This is
+/// the D-06 fan-out guarantee.
+///
+/// Returns `None` when the path is outside every known root, or when it
+/// lies under an extra root but targets an excluded subdir (`cache/`,
+/// `session-env/`, etc.) or a non-allowlisted path.
+pub fn classify_event(
+    path: &Path,
+    repo_root: &Path,
+    extra_roots: &[(std::path::PathBuf, ScopeKind)],
+) -> Option<RoutedPath> {
+    // Extra roots take precedence over repo_root.
+    for (root, kind) in extra_roots {
+        if path.starts_with(root) {
+            let suffix = match path.strip_prefix(root) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let first = suffix
+                .components()
+                .next()
+                .and_then(|c| c.as_os_str().to_str());
+            // Exclude list wins over allowlist (defence in depth).
+            if let Some(f) = first {
+                if is_excluded_subdir(f) {
+                    return None;
+                }
+            }
+            let is_allowed_subdir = first
+                .map(|f| EXTRA_ROOT_ALLOWLIST_SUBDIRS.contains(&f))
+                .unwrap_or(false);
+            let is_scope_level_file = matches!(
+                suffix.to_str(),
+                Some("settings.json") | Some("CLAUDE.md")
+            );
+            if is_allowed_subdir || is_scope_level_file {
+                return Some(RoutedPath::Resource((*kind).into()));
+            }
+            return None;
+        }
+    }
+    if path.starts_with(repo_root) {
+        return Some(RoutedPath::Pipeline);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,5 +330,100 @@ mod tests {
         }
         assert!(!is_excluded_subdir("skills"));
         assert!(!is_excluded_subdir("agents"));
+    }
+
+    #[test]
+    fn classify_event_routes_repo_only_events_to_pipeline() {
+        let repo = PathBuf::from("/home/u/repo");
+        let global = PathBuf::from("/home/u/.claude");
+        let extras = vec![(global.clone(), ScopeKind::Global)];
+        assert_eq!(
+            classify_event(&repo.join("src/foo.rs"), &repo, &extras),
+            Some(RoutedPath::Pipeline)
+        );
+    }
+
+    #[test]
+    fn classify_event_routes_extra_root_allowlisted_to_resource() {
+        let repo = PathBuf::from("/home/u/repo");
+        let global = PathBuf::from("/home/u/.claude");
+        let extras = vec![(global.clone(), ScopeKind::Global)];
+        assert_eq!(
+            classify_event(&global.join("skills/x/SKILL.md"), &repo, &extras),
+            Some(RoutedPath::Resource(Scope::Global))
+        );
+        assert_eq!(
+            classify_event(&global.join("settings.json"), &repo, &extras),
+            Some(RoutedPath::Resource(Scope::Global))
+        );
+        assert_eq!(
+            classify_event(&global.join("CLAUDE.md"), &repo, &extras),
+            Some(RoutedPath::Resource(Scope::Global))
+        );
+    }
+
+    #[test]
+    fn classify_event_project_extras_take_precedence_over_repo_root() {
+        // Project extra root lives UNDER the repo root. The ordering
+        // invariant must route the event to Resource(Project), not Pipeline.
+        let repo = PathBuf::from("/home/u/repo");
+        let proj_claude = repo.join(".claude");
+        let extras = vec![(proj_claude.clone(), ScopeKind::Project)];
+        assert_eq!(
+            classify_event(&proj_claude.join("settings.json"), &repo, &extras),
+            Some(RoutedPath::Resource(Scope::Project))
+        );
+        assert_eq!(
+            classify_event(&proj_claude.join("skills/a/SKILL.md"), &repo, &extras),
+            Some(RoutedPath::Resource(Scope::Project))
+        );
+    }
+
+    #[test]
+    fn classify_event_drops_excluded_subdirs_under_extra_root() {
+        let repo = PathBuf::from("/home/u/repo");
+        let global = PathBuf::from("/home/u/.claude");
+        let extras = vec![(global.clone(), ScopeKind::Global)];
+        for d in ["cache", "session-env", "projects", "backups", "downloads"] {
+            assert_eq!(
+                classify_event(&global.join(d).join("x"), &repo, &extras),
+                None,
+                "{d}/ must be dropped"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_event_drops_non_allowlisted_under_extra_root() {
+        let repo = PathBuf::from("/home/u/repo");
+        let global = PathBuf::from("/home/u/.claude");
+        let extras = vec![(global.clone(), ScopeKind::Global)];
+        // A random file at scope root that is NOT CLAUDE.md or settings.json.
+        assert_eq!(
+            classify_event(&global.join("random.txt"), &repo, &extras),
+            None
+        );
+        // A non-allowlisted subdir.
+        assert_eq!(
+            classify_event(&global.join("something-else/file.md"), &repo, &extras),
+            None
+        );
+    }
+
+    #[test]
+    fn classify_event_returns_none_for_path_outside_all_roots() {
+        let repo = PathBuf::from("/home/u/repo");
+        let global = PathBuf::from("/home/u/.claude");
+        let extras = vec![(global.clone(), ScopeKind::Global)];
+        assert_eq!(
+            classify_event(Path::new("/tmp/unrelated"), &repo, &extras),
+            None
+        );
+    }
+
+    #[test]
+    fn scope_kind_converts_to_scope() {
+        assert_eq!(Scope::from(ScopeKind::Global), Scope::Global);
+        assert_eq!(Scope::from(ScopeKind::Project), Scope::Project);
     }
 }
