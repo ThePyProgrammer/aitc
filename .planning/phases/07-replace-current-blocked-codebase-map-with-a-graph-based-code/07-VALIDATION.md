@@ -2,8 +2,8 @@
 phase: 7
 slug: replace-current-blocked-codebase-map-with-a-graph-based-code
 status: draft
-nyquist_compliant: false
-wave_0_complete: false
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-04-15
 ---
 
@@ -41,12 +41,19 @@ This map will be filled by the planner as plans land. The pattern below is requi
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 07-01-XX | 01 | 1 | EMON-01 | unit | `cargo test -p aitc-tauri pipeline::dependency_graph` | ❌ W0 | ⬜ pending |
-| 07-02-XX | 02 | 2 | EMON-01 / VIZN-04 | unit + bench | `cargo test -p aitc-tauri --test dep_graph_bench -- --ignored` | ❌ W0 | ⬜ pending |
-| 07-03-XX | 03 | 2 | VIZN-01 / VIZN-04 | unit | `npm run test -- --run useGraphLayout` | ❌ W0 | ⬜ pending |
-| 07-04-XX | 04 | 3 | VIZN-01 / VIZN-05 | unit + snapshot | `npm run test -- --run RadarCanvas` | ❌ W0 | ⬜ pending |
-| 07-05-XX | 05 | 3 | VIZN-02 | unit | `npm run test -- --run trails` | ❌ W0 | ⬜ pending |
-| 07-06-XX | 06 | 4 | FMON-05 / Phase5 carry-over | unit | `npm run test -- --run HeatMapOverlay` | ✅ exists, extend | ⬜ pending |
+| 07-01-T1 | 01 | 1 | EMON-01 | unit | `cargo test -p aitc_lib pipeline::deps::tests::build_dependency_graph_stub_returns_empty` | ✅ Plan 01 creates | ⬜ pending |
+| 07-01-T2 | 01 | 1 | EMON-01 | unit | `npm test -- --run src/stores/__tests__/radarStore.test.ts` | ✅ exists | ⬜ pending |
+| 07-01-T3 | 01 | 1 | EMON-01 | scaffold | `npm test -- --run src/views/Radar/__tests__/ src/hooks/__tests__/useGraphLayout.test.ts` | ✅ Plan 01 creates 7 files | ⬜ pending |
+| 07-02-T1 | 02 | 2 | EMON-01 | unit (per-language) | `cargo test -p aitc_lib pipeline::deps::extract::tests pipeline::deps::resolve::tests` | ❌ W0 → Plan 01 created stubs; Plan 02 fills | ⬜ pending |
+| 07-02-T2 | 02 | 2 | EMON-01 / VIZN-04 (D-24) | integration + bench | `cargo test -p aitc_lib pipeline::deps::tests && cargo test --test dep_graph_bench -- --ignored bench_dep_graph_10k` | ❌ Plan 02 creates bench file | ⬜ pending |
+| 07-03-T1 | 03 | 2 | VIZN-05 / D-11 | unit (forceCluster + radarStore) | `npm test -- --run src/views/Radar/__tests__/forceCluster.test.ts src/stores/__tests__/radarStore.test.ts` | ✅ Plan 01 scaffolds | ⬜ pending |
+| 07-03-T2 | 03 | 2 | VIZN-01 / VIZN-05 / D-03 | unit (useGraphLayout) | `npm test -- --run src/hooks/__tests__/useGraphLayout.test.ts` | ✅ Plan 01 scaffold | ⬜ pending |
+| 07-04-T1 | 04 | 3 | VIZN-01 / D-12 / D-13 / D-19 | unit (GraphRenderer pure fns) | `npm test -- --run src/views/Radar/__tests__/GraphRenderer.test.ts` | ✅ Plan 01 scaffold | ⬜ pending |
+| 07-04-T2 | 04 | 3 | VIZN-01 / VIZN-04 / D-04 | unit + build | `npm test -- --run src/views/Radar/__tests__/RadarCanvas.test.tsx && npm run build` | ✅ Plan 01 scaffold | ⬜ pending |
+| 07-05-T1 | 05 | 4 | VIZN-02 / D-14..D-18 | unit (CometTrail + radarStore) | `npm test -- --run src/views/Radar/__tests__/CometTrail.test.ts src/stores/__tests__/radarStore.test.ts` | ✅ Plan 01 scaffold | ⬜ pending |
+| 07-05-T2 | 05 | 4 | VIZN-02 / D-17 | unit (RadarCanvas extension) | `npm test -- --run src/views/Radar/__tests__/RadarCanvas.test.tsx` | ✅ Plan 01 scaffold | ⬜ pending |
+| 07-06-T1 | 06 | 5 | FMON-05 / D-19 / D-20 | unit (HeatMapOverlay refactor + RadarMinimap rewrite) | `npm test -- --run src/views/Radar/__tests__/HeatMapOverlay.test.ts src/views/Radar/__tests__/RadarMinimap.test.tsx` | ✅ Plan 01 scaffolds | ⬜ pending |
+| 07-06-T2 | 06 | 5 | D-22 + full-suite | unit + checkpoint:human-verify | `npm test -- --run src/ && cd src-tauri && cargo test -p aitc_lib && cargo test --test dep_graph_bench -- --ignored` | ✅ existing + new | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -94,4 +101,4 @@ Visual regressions and interaction polish are inherently manual.
 - [ ] Layout determinism test uses fixed RNG seed (d3-force settles non-deterministically without one)
 - [ ] `nyquist_compliant: true` set in frontmatter once planner fills the per-task map
 
-**Approval:** pending
+**Approval:** approved (planner — 2026-04-15)

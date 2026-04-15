@@ -143,13 +143,18 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 ### Phase 7: Replace current blocked Codebase Map with a graph based codebase map with better spacing, properly sized nodes and traversal through the graph for agents (with ephemereally highlighted movement between nodes for me to track the agent's trail). The links between code should be stuff like imports/dependencies for now, and the files should have an additional gravitational force based on their proximity in the filesystem.
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Replace the squarified-treemap radar with a force-directed graph: nodes are source files, edges are import/dependency relationships extracted via tree-sitter, filesystem proximity acts as gravity (folder islands), and agents leave 10s fading comet trails travelling along edges in their assigned palette colour. Heat map, minimap, agent manifest, and conflict pulse are preserved on the new graph layout. Treemap is fully removed.
+**Requirements**: VIZN-01 (rewrite), VIZN-02 (rewrite), VIZN-04 (rewrite), VIZN-05 (rewrite), FMON-05 (preserve), EMON-01 (pulled forward from v2)
 **Depends on:** Phase 6
-**Plans:** 0 plans
+**Plans:** 6 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 7 to break down)
+- [ ] 07-01-PLAN.md -- Wave 0: install Rust + JS deps, scaffold deps/ module + fixtures, get_dependency_graph stub command, regenerate bindings, extend radarStore shape, create 7 Wave 0 test files (EMON-01)
+- [ ] 07-02-PLAN.md -- Rust dep extraction: tree-sitter parsers per language, per-language resolution (TS/JS/Rust/Python), rayon parallel orchestrator with edge caps, T-07-A/B/C mitigations, 10k-file <2s benchmark (EMON-01, VIZN-04)
+- [ ] 07-03-PLAN.md -- forceCluster custom d3 force + useGraphLayout settle-then-freeze hook + radarStore refactor (fetchGraph, pin/unpin, commitSettledPositions; treeData removed) (VIZN-01, VIZN-05)
+- [ ] 07-04-PLAN.md -- GraphRenderer pure functions (hulls, edges, arrows, nodes with heat tint) + RadarCanvas rewrite + delete useTreemapLayout + uninstall squarify + performance banners (VIZN-01, VIZN-04, VIZN-05)
+- [ ] 07-05-PLAN.md -- CometTrail lifecycle (interpolate/sample/cull) + agent dot pulse + drag-to-pin + pipeline event subscription wiring (VIZN-02)
+- [ ] 07-06-PLAN.md -- HeatMapOverlay refactor to node tint + RadarMinimap rewrite for graph extents (preserves e62272d shift) + conflict pulse on graph nodes + visual verification checkpoint (FMON-05, VIZN-04)
 
 ### Phase 8: Real Claude Code hook integration (PreToolUse approvals)
 
