@@ -4,7 +4,7 @@
 //! terminate wired via `launcher.rs`. Intent detection uses hooks-based
 //! infrastructure per D-08.
 
-use crate::agents::adapter::{AgentAdapter, AgentState};
+use crate::agents::adapter::{AgentAdapter, AgentState, LaunchOptions};
 use crate::agents::launcher;
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -57,7 +57,12 @@ impl AgentAdapter for ClaudeCodeAdapter {
         "claude".to_string()
     }
 
-    async fn launch(&self, cwd: PathBuf, intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
+    async fn launch(
+        &self,
+        cwd: PathBuf,
+        intent: Option<String>,
+        options: LaunchOptions,
+    ) -> Result<(u32, tokio::process::Child), String> {
         // `claude --print` is non-interactive: it expects a prompt as a
         // positional argument (or on stdin) and exits once the response is
         // streamed. Without one the process exits immediately, which used to
@@ -69,19 +74,34 @@ impl AgentAdapter for ClaudeCodeAdapter {
              CLI exits immediately with no work to do."
                 .to_string()
         })?;
+
         // `--output-format stream-json` is only accepted alongside `--verbose`
         // in non-interactive mode; without it claude exits 1 with
         // "requires --verbose". Adding the flag matches the documented
         // streaming usage.
+        let mut args: Vec<String> = vec![
+            "--print".into(),
+            "--output-format".into(),
+            "stream-json".into(),
+            "--verbose".into(),
+        ];
+
+        // Permission tuning. `dangerously_skip_permissions` wins if both are
+        // set since it's the strictly-looser option -- applying both would be
+        // contradictory.
+        if options.dangerously_skip_permissions {
+            args.push("--dangerously-skip-permissions".into());
+        } else if options.accept_edits {
+            args.push("--permission-mode".into());
+            args.push("acceptEdits".into());
+        }
+
+        args.push(prompt);
+
+        let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
         launcher::launch_detached(
             "claude",
-            &[
-                "--print",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                &prompt,
-            ],
+            &args_ref,
             &cwd,
             None,
             9417, // Default port; caller should override via env

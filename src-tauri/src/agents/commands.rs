@@ -7,7 +7,7 @@
 //!   - update_agent_intent(agent_id, intent) -> ()
 //!   - get_agent_logs(agent_id) -> Vec<String>
 
-use crate::agents::adapter::{AgentInfo, AgentState};
+use crate::agents::adapter::{AgentInfo, AgentState, LaunchOptions};
 use crate::agents::launcher;
 use crate::agents::registry::AgentRegistry;
 use crate::pipeline::pipeline_state::PipelineState;
@@ -46,6 +46,7 @@ pub async fn launch_agent(
     agent_type: String,
     cwd: String,
     intent: Option<String>,
+    options: Option<LaunchOptions>,
     registry: tauri::State<'_, Arc<AgentRegistry>>,
     pipeline: tauri::State<'_, PipelineState>,
 ) -> Result<AgentInfo, String> {
@@ -83,7 +84,13 @@ pub async fn launch_agent(
         })?;
 
     // Launch via the adapter -- returns (pid, child) so we can read stdout
-    let (pid, child) = adapter.launch(cwd_path.clone(), intent.clone()).await?;
+    let (pid, child) = adapter
+        .launch(
+            cwd_path.clone(),
+            intent.clone(),
+            options.unwrap_or_default(),
+        )
+        .await?;
 
     // Generate agent ID
     let agent_id = format!("KAGENT-{:04}", pid % 10000);

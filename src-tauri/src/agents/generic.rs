@@ -4,7 +4,7 @@
 //! launch, state, and intent rules. The `GenericAdapter` parses this config
 //! and implements `AgentAdapter` using the configured patterns.
 
-use crate::agents::adapter::{AgentAdapter, AgentState};
+use crate::agents::adapter::{AgentAdapter, AgentState, LaunchOptions};
 use crate::agents::launcher;
 use async_trait::async_trait;
 use regex::Regex;
@@ -129,7 +129,12 @@ impl AgentAdapter for GenericAdapter {
         self.config.launch_command.clone()
     }
 
-    async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
+    async fn launch(
+        &self,
+        cwd: PathBuf,
+        _intent: Option<String>,
+        _options: LaunchOptions,
+    ) -> Result<(u32, tokio::process::Child), String> {
         let args: Vec<&str> = self.config.launch_args.iter().map(|s| s.as_str()).collect();
         launcher::launch_detached(
             &self.config.launch_command,

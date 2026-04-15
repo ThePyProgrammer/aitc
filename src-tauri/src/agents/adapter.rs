@@ -44,6 +44,20 @@ impl AgentState {
     }
 }
 
+/// Adapter-specific launch tuning. Currently only Claude Code consumes any of
+/// these; other adapters ignore them. Kept as one serializable struct so the
+/// IPC surface stays flat even as new options show up.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchOptions {
+    /// Claude Code: adds `--permission-mode acceptEdits` so file-edit tools
+    /// run without prompting.
+    pub accept_edits: bool,
+    /// Claude Code: adds `--dangerously-skip-permissions` which disables the
+    /// permission prompt entirely. Takes precedence over `accept_edits`.
+    pub dangerously_skip_permissions: bool,
+}
+
 /// Metadata about an agent visible to the frontend and stored in the registry.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -78,11 +92,13 @@ pub trait AgentAdapter: Send + Sync {
 
     /// Launch a new agent session in the given working directory.
     /// Returns `(pid, child)` on success. The caller is responsible for spawning
-    /// a stdout reader task from the child handle.
+    /// a stdout reader task from the child handle. Adapters are free to ignore
+    /// `options` if they don't map to their underlying CLI.
     async fn launch(
         &self,
         cwd: PathBuf,
         intent: Option<String>,
+        options: LaunchOptions,
     ) -> Result<(u32, tokio::process::Child), String>;
 
     /// Poll the current state of an agent by PID.

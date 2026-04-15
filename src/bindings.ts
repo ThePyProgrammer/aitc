@@ -111,9 +111,9 @@ async listAvailableAgentTypes() : Promise<Result<string[], string>> {
  * - Validates cwd exists and is a directory.
  * - Only launches binaries matched by registered adapters (no arbitrary PATH exec).
  */
-async launchAgent(agentType: string, cwd: string, intent: string | null) : Promise<Result<AgentInfo, string>> {
+async launchAgent(agentType: string, cwd: string, intent: string | null, options: LaunchOptions | null) : Promise<Result<AgentInfo, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("launch_agent", { agentType, cwd, intent }) };
+    return { status: "ok", data: await TAURI_INVOKE("launch_agent", { agentType, cwd, intent, options }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -549,6 +549,22 @@ export type FileEventKind = { kind: "create" } | { kind: "modify" } | { kind: "r
  * Resolution choice for a single hunk in the merge UI.
  */
 export type HunkResolution = { hunkIndex: number; choice: string; customContent: string | null }
+/**
+ * Adapter-specific launch tuning. Currently only Claude Code consumes any of
+ * these; other adapters ignore them. Kept as one serializable struct so the
+ * IPC surface stays flat even as new options show up.
+ */
+export type LaunchOptions = { 
+/**
+ * Claude Code: adds `--permission-mode acceptEdits` so file-edit tools
+ * run without prompting.
+ */
+acceptEdits: boolean; 
+/**
+ * Claude Code: adds `--dangerously-skip-permissions` which disables the
+ * permission prompt entirely. Takes precedence over `accept_edits`.
+ */
+dangerouslySkipPermissions: boolean }
 /**
  * Per-state notification preferences.
  * 

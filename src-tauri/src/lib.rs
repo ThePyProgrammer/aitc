@@ -85,6 +85,7 @@ pub fn run() {
         .typ::<pipeline::worktree::Worktree>()
         .typ::<agents::AgentInfo>()
         .typ::<agents::AgentState>()
+        .typ::<agents::adapter::LaunchOptions>()
         .typ::<agents::notifications::NotificationPrefs>()
         .typ::<conflict::ConflictAlert>()
         .typ::<comms::types::ApprovalRequest>()

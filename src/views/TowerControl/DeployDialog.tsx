@@ -37,6 +37,8 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
   // avoids state shuffling when the user toggles watches mid-dialog.
   const [subdir, setSubdir] = useState('');
   const [intent, setIntent] = useState('');
+  const [acceptEdits, setAcceptEdits] = useState(false);
+  const [skipPermissions, setSkipPermissions] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLaunching, setIsLaunching] = useState(false);
   const [availableTypes, setAvailableTypes] = useState<string[] | null>(null);
@@ -92,10 +94,24 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
     setError(null);
     setIsLaunching(true);
     try {
-      await launchAgent(selectedType, resolvedCwd, intent.trim() || undefined);
+      // Only forward permission tuning when the target adapter consumes it.
+      // Codex/OpenCode ignore these fields, but omitting them keeps the
+      // registered Rust logs cleaner for non-claude launches.
+      const options =
+        selectedType === 'claude-code'
+          ? { acceptEdits, dangerouslySkipPermissions: skipPermissions }
+          : undefined;
+      await launchAgent(
+        selectedType,
+        resolvedCwd,
+        intent.trim() || undefined,
+        options,
+      );
       // Success: reset and close
       setSubdir('');
       setIntent('');
+      setAcceptEdits(false);
+      setSkipPermissions(false);
       setSelectedType('claude-code');
       onClose();
     } catch (e) {
@@ -227,6 +243,60 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
                 />
                 <p className="mt-1 font-mono text-[10px] text-on-surface-variant/60">
                   No repo is being monitored. Enter an absolute path.
+                </p>
+              </div>
+            )}
+
+            {/* Permission chips (claude-code only -- other adapters don't
+                expose equivalent flags). Two chips are independent toggles;
+                the backend resolves skip-permissions as the dominant one. */}
+            {selectedType === 'claude-code' && (
+              <div className="px-6 pb-4">
+                <label className="font-headline text-[10px] font-bold uppercase tracking-widest text-on-surface-variant block mb-2">
+                  PERMISSIONS
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAcceptEdits((v) => !v)}
+                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border transition-colors duration-150 ${
+                      acceptEdits
+                        ? 'bg-primary/10 border-primary text-primary'
+                        : 'bg-surface-container border-outline/20 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+                    }`}
+                    title="Passes --permission-mode acceptEdits to claude"
+                  >
+                    <span className="font-mono text-[11px]">
+                      {acceptEdits ? '[x]' : '[ ]'}
+                    </span>
+                    <span className="font-mono text-xs font-bold tracking-wide">
+                      Accept edits
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSkipPermissions((v) => !v)}
+                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border transition-colors duration-150 ${
+                      skipPermissions
+                        ? 'bg-error/10 border-error text-error'
+                        : 'bg-surface-container border-outline/20 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+                    }`}
+                    title="Passes --dangerously-skip-permissions to claude"
+                  >
+                    <span className="font-mono text-[11px]">
+                      {skipPermissions ? '[x]' : '[ ]'}
+                    </span>
+                    <span className="font-mono text-xs font-bold tracking-wide">
+                      Skip permissions
+                    </span>
+                  </button>
+                </div>
+                <p className="mt-2 font-mono text-[10px] text-on-surface-variant/60">
+                  {skipPermissions
+                    ? 'Skip permissions wins -- claude bypasses all permission checks.'
+                    : acceptEdits
+                      ? 'Edits auto-approve; other tool uses still prompt.'
+                      : 'Claude will stall in --print mode if a tool prompts for permission. Pick one.'}
                 </p>
               </div>
             )}
