@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 7 context gathered
-last_updated: "2026-04-15T03:11:46.943Z"
+stopped_at: Phase 7 UI-SPEC approved
+last_updated: "2026-04-15T03:36:02.255Z"
 last_activity: 2026-04-11
 progress:
   total_phases: 7
@@ -75,6 +75,7 @@ Recent decisions affecting current work:
 ### Roadmap Evolution
 
 - Phase 7 added: Replace current blocked Codebase Map with a graph based codebase map with better spacing, properly sized nodes and traversal through the graph for agents (with ephemereally highlighted movement between nodes for me to track the agent's trail). The links between code should be stuff like imports/dependencies for now, and the files should have an additional gravitational force based on their proximity in the filesystem.
+- Phase 8 added: Real Claude Code hook integration (PreToolUse approvals) -- builds /hook endpoint, ships hooks config, blocks Claude on approval rows; replaces the --accept-edits / --dangerously-skip-permissions chip workaround.
 
 ### Pending Todos
 
@@ -95,6 +96,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T03:11:46.932Z
-Stopped at: Phase 7 context gathered
-Resume file: .planning/phases/07-replace-current-blocked-codebase-map-with-a-graph-based-code/07-CONTEXT.md
+Last session: 2026-04-15T03:36:02.244Z
+Stopped at: Phase 7 UI-SPEC approved
+Resume file: .planning/phases/07-replace-current-blocked-codebase-map-with-a-graph-based-code/07-UI-SPEC.md

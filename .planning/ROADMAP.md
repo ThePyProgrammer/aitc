@@ -140,3 +140,35 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 4. Core UI Views | 0/5 | Planning complete | - |
 | 5. Conflict Resolution + History | 0/5 | Planning complete | - |
 | 6. Pipeline Activation + Integration Wiring | 0/5 | Planning complete | - |
+
+### Phase 7: Replace current blocked Codebase Map with a graph based codebase map with better spacing, properly sized nodes and traversal through the graph for agents (with ephemereally highlighted movement between nodes for me to track the agent's trail). The links between code should be stuff like imports/dependencies for now, and the files should have an additional gravitational force based on their proximity in the filesystem.
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 6
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 7 to break down)
+
+### Phase 8: Real Claude Code hook integration (PreToolUse approvals)
+
+**Goal:** Every Claude Code permission prompt surfaces in the AITC Requests page and the agent blocks on the user's approve/deny until resolved. Replaces the current `--accept-edits` / `--dangerously-skip-permissions` chip workaround so users can run Claude Code safely without pre-authorising every tool.
+
+**Scope:**
+- New `/hook` endpoint on the self-register HTTP server that accepts PreToolUse events.
+- Protocol: agent posts tool call context (tool name, inputs, file path, diff preview), AITC responds with `{decision: approve|deny, reason?}` after the user resolves the approval row.
+- Ship a Claude Code hook config (e.g. `.claude/hooks/aitc-pretooluse.sh` or JSON settings) that launched agents install into their cwd and that posts PreToolUse events to AITC's `/hook`.
+- Block Claude's tool call by holding the HTTP response until the user clicks approve/deny in the Requests page.
+- DB migration: extend `approval_requests` with `tool_name`, `tool_input_json`, and a new `request_type = "pretool_use"`. Existing `write_access` rows stay unchanged.
+- Frontend: per-tool context on ApprovalRequestCard (tool name badge, collapsible tool input preview). Deep-link the OS notification to the specific request.
+- Timeout + failure handling: if AITC is unreachable or the user doesn't respond within N seconds, the hook falls back to a deny (fail safe).
+
+**Out of scope:** PostToolUse hooks, Codex/OpenCode adapters (no hook surface yet), multi-user auth on the `/hook` endpoint.
+
+**Requirements:** Carries forward the Phase 4 comms hub request flow; no new milestone requirements.
+**Depends on:** Phase 7. (Also builds on the existing Phase 3 self-register server and Phase 4 approval UI.)
+**Plans:** TBD (run /gsd-plan-phase 8 to break down)
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 8 to break down)
