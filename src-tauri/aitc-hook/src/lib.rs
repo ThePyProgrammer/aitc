@@ -2,8 +2,8 @@
 //! server port, POST to `/hook`, translate an AITC decision into the modern
 //! Claude Code `hookSpecificOutput` envelope.
 //!
-//! NEVER emits the deprecated top-level `{"decision": ..., "reason": ...}`
-//! form — always uses `hookSpecificOutput.permissionDecision` per the
+//! NEVER emits the deprecated top-level decision/reason form — always
+//! uses `hookSpecificOutput.permissionDecision` per the
 //! 2025-era Anthropic hook contract (Pitfall 1 in 08-RESEARCH.md).
 //!
 //! Downstream plans MUST import these exact names:

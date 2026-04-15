@@ -94,10 +94,12 @@ name = "aitc-hook"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "dirs",
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "ureq",
 ]
 
