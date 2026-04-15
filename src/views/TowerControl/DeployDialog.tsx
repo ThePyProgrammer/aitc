@@ -3,11 +3,24 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { useAgentStore } from '../../stores/agentStore';
+import { useRepoStore } from '../../stores/repoStore';
 import { commands } from '../../bindings';
 
 interface DeployDialogProps {
   open: boolean;
   onClose: () => void;
+}
+
+// Minimal path containment check. Normalizes trailing slashes and enforces
+// that the candidate starts with `root` + a path separator (or equals it),
+// so `/foo/barn` doesn't spuriously match `/foo/bar`. Backend canonicalizes
+// for real before launch -- this is just UX pre-validation.
+function isInsideRepo(candidate: string, root: string): boolean {
+  const strip = (p: string) => p.replace(/[\\/]+$/, '');
+  const c = strip(candidate);
+  const r = strip(root);
+  if (c === r) return true;
+  return c.startsWith(`${r}/`) || c.startsWith(`${r}\\`);
 }
 
 const agentTypes = [
@@ -25,6 +38,21 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
   const [isLaunching, setIsLaunching] = useState(false);
   const [availableTypes, setAvailableTypes] = useState<string[] | null>(null);
   const launchAgent = useAgentStore((s) => s.launchAgent);
+  const activeRepo = useRepoStore((s) => s.activeRepo);
+
+  // Prefill cwd with the currently monitored repo so the default action
+  // matches the common case: deploy an agent against the repo AITC is
+  // already watching. Users can still type a subdirectory. If they leave
+  // the watched repo, the submit handler below blocks before invoking the
+  // backend.
+  useEffect(() => {
+    if (!open) return;
+    if (!cwd && activeRepo) {
+      setCwd(activeRepo);
+    }
+    // cwd intentionally excluded -- only reconcile on open / repo change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, activeRepo]);
 
   // Refresh the installed-CLI list each time the dialog opens so PATH changes
   // (e.g. installing `codex` without restarting AITC) are picked up.
@@ -56,14 +84,24 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
     : agentTypes;
 
   const handleLaunch = async () => {
-    if (!cwd.trim()) {
+    const trimmed = cwd.trim();
+    if (!trimmed) {
       setError('Working directory is required');
+      return;
+    }
+    // Client-side mirror of the backend constraint: cwd must sit inside the
+    // watched repo. Backend re-checks after canonicalization so this isn't
+    // a security boundary, just faster feedback than a round-trip error.
+    if (activeRepo && !isInsideRepo(trimmed, activeRepo)) {
+      setError(
+        `Working directory must be inside the monitored repo (${activeRepo}).`,
+      );
       return;
     }
     setError(null);
     setIsLaunching(true);
     try {
-      await launchAgent(selectedType, cwd.trim(), intent.trim() || undefined);
+      await launchAgent(selectedType, trimmed, intent.trim() || undefined);
       // Success: reset and close
       setCwd('');
       setIntent('');
@@ -151,9 +189,15 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
                 type="text"
                 value={cwd}
                 onChange={(e) => setCwd(e.target.value)}
-                placeholder="/path/to/project"
+                placeholder={activeRepo ?? '/path/to/project'}
                 className="w-full bg-surface-container-lowest border border-outline/10 px-3 py-2 font-mono text-xs text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40"
               />
+              {activeRepo && (
+                <p className="mt-1 font-mono text-[10px] text-on-surface-variant/60">
+                  Must be inside monitored repo:{' '}
+                  <span className="text-on-surface-variant">{activeRepo}</span>
+                </p>
+              )}
             </div>
 
             {/* Intent */}

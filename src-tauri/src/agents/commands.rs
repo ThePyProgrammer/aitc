@@ -10,6 +10,7 @@
 use crate::agents::adapter::{AgentInfo, AgentState};
 use crate::agents::launcher;
 use crate::agents::registry::AgentRegistry;
+use crate::pipeline::pipeline_state::PipelineState;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -46,6 +47,7 @@ pub async fn launch_agent(
     cwd: String,
     intent: Option<String>,
     registry: tauri::State<'_, Arc<AgentRegistry>>,
+    pipeline: tauri::State<'_, PipelineState>,
 ) -> Result<AgentInfo, String> {
     // T-03-05: Validate cwd -- canonicalize to resolve symlinks and `..` components,
     // preventing path traversal attacks.
@@ -54,6 +56,22 @@ pub async fn launch_agent(
         .map_err(|e| format!("cwd is invalid or inaccessible: {e}"))?;
     if !cwd_path.is_dir() {
         return Err(format!("cwd is not a directory: {}", cwd_path.display()));
+    }
+
+    // Constrain launches to the currently watched repo. Anything outside it
+    // would spawn an agent whose edits AITC can't observe -- the whole point
+    // of the tool. If no watch is active we allow the launch (the radar view
+    // already refuses to do useful work without one, so the user will see the
+    // missing context before the agent does damage).
+    if let Some(active) = pipeline.inner.lock().await.as_ref() {
+        if !cwd_path.starts_with(&active.repo_root) {
+            return Err(format!(
+                "cwd {} is outside the watched repo {}. \
+                 Point the agent at the monitored directory or a subdirectory.",
+                cwd_path.display(),
+                active.repo_root.display(),
+            ));
+        }
     }
 
     // T-03-05: Find adapter by exact agent_type -- reject unknown types.
