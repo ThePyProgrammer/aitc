@@ -13,8 +13,8 @@
 pub mod events;
 // Modules introduced by Plan 02:
 pub mod parse;
-//   pub mod scan;
-//   pub mod routing;
+pub mod routing;
+pub mod scan;
 //   pub mod write_fence;
 // Modules introduced by Plan 03:
 //   pub mod commands;
