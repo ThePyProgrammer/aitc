@@ -480,6 +480,38 @@ async listApprovalHistory() : Promise<Result<ApprovalHistoryRecord[], string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async startClaudeResourcesWatch(cwd: string | null, channel: TAURI_CHANNEL<ResourceEventBatch>) : Promise<Result<Resource[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_claude_resources_watch", { cwd, channel }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stopClaudeResourcesWatch() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_claude_resources_watch") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async readClaudeMd(path: string, cwd: string | null) : Promise<Result<ReadClaudeMdResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_claude_md", { path, cwd }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async writeClaudeMd(path: string, content: string, cwd: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("write_claude_md", { path, content, cwd }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -646,6 +678,11 @@ export type ProtectedPath = { id: number; globPattern: string; createdAt: string
  * A persisted conflict resolution record.
  */
 export type ResolutionRecord = { id: number; conflictEventId: number | null; filePath: string; agentAId: string; agentBId: string; resolutionType: string; hunkResolutions: string; notificationStatus: string; resolvedAt: string }
+/**
+ * Return shape for `read_claude_md`: file content + editability flag so
+ * the frontend knows whether to render a read-only preview or an editor.
+ */
+export type ReadClaudeMdResult = { content: string; editable: boolean; path: string }
 /**
  * A discovered Claude resource. Identity is `id` (stable across rescans);
  * `path` is informational and may change if the file moves.

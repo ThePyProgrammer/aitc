@@ -78,6 +78,10 @@ pub fn run() {
             conflict::resolution::record_session_file,
             conflict::resolution::list_sessions,
             conflict::resolution::list_approval_history,
+            claude_resources::commands::start_claude_resources_watch,
+            claude_resources::commands::stop_claude_resources_watch,
+            claude_resources::commands::read_claude_md,
+            claude_resources::commands::write_claude_md,
         ])
         .typ::<pipeline::events::FileEvent>()
         .typ::<pipeline::events::FileEventBatch>()
@@ -109,7 +113,8 @@ pub fn run() {
         .typ::<claude_resources::events::ResourceId>()
         .typ::<claude_resources::events::Category>()
         .typ::<claude_resources::events::Scope>()
-        .typ::<claude_resources::events::ResourceMetadata>();
+        .typ::<claude_resources::events::ResourceMetadata>()
+        .typ::<claude_resources::commands::ReadClaudeMdResult>();
 
     #[cfg(debug_assertions)]
     specta_builder
@@ -130,6 +135,7 @@ pub fn run() {
         .manage(agents::notifications::NotificationState::new())
         .manage(conflict::ConflictState::new(5000))
         .manage(system_load::SystemLoadState::new())
+        .manage(claude_resources::pipeline_state::ClaudeResourcesState::new())
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             // System tray (D-13)

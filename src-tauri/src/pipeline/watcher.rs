@@ -305,48 +305,45 @@ pub fn spawn_watcher_multi(
     let repo_root_c = repo_root.clone();
     let fence_c = fence.clone();
 
-    let task = tokio::task::spawn_blocking(move || loop {
-        match sync_rx.recv() {
-            Ok(res) => {
-                let (mut pipe_batch, mut res_batch) = process_debounce_result_multi(
-                    res,
-                    &repo_root_c,
-                    &extra_roots_tuples,
-                    &extra_roots,
-                    project_root_for_editable.as_deref(),
-                    &fence_c,
-                    &pipeline_batch_id_c,
-                    &resources_batch_id_c,
-                );
+    let task = tokio::task::spawn_blocking(move || {
+        while let Ok(res) = sync_rx.recv() {
+            let (mut pipe_batch, mut res_batch) = process_debounce_result_multi(
+                res,
+                &repo_root_c,
+                &extra_roots_tuples,
+                &extra_roots,
+                project_root_for_editable.as_deref(),
+                &fence_c,
+                &pipeline_batch_id_c,
+                &resources_batch_id_c,
+            );
 
-                if !pipe_batch.events.is_empty() {
-                    pipe_batch.dropped_batches =
-                        pipeline_dropped_c.swap(0, Ordering::Relaxed);
-                    match pipeline_tx.try_send(pipe_batch) {
-                        Ok(()) => {}
-                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                            pipeline_dropped_c.fetch_add(1, Ordering::Relaxed);
-                        }
-                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
+            if !pipe_batch.events.is_empty() {
+                pipe_batch.dropped_batches =
+                    pipeline_dropped_c.swap(0, Ordering::Relaxed);
+                match pipeline_tx.try_send(pipe_batch) {
+                    Ok(()) => {}
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        pipeline_dropped_c.fetch_add(1, Ordering::Relaxed);
                     }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
                 }
-                if !res_batch.events.is_empty() {
-                    res_batch.dropped_batches =
-                        resources_dropped_c.swap(0, Ordering::Relaxed);
-                    match resources_tx.try_send(res_batch) {
-                        Ok(()) => {}
-                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                            resources_dropped_c.fetch_add(1, Ordering::Relaxed);
-                        }
-                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                            // Resources receiver closed — keep pipeline going.
-                        }
-                    }
-                }
-                // GC the fence periodically.
-                fence_c.gc();
             }
-            Err(_) => break, // channel closed — debouncer dropped
+            if !res_batch.events.is_empty() {
+                res_batch.dropped_batches =
+                    resources_dropped_c.swap(0, Ordering::Relaxed);
+                match resources_tx.try_send(res_batch) {
+                    Ok(()) => {}
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        resources_dropped_c.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                        // Resources receiver closed — keep pipeline going.
+                    }
+                }
+            }
+            // GC the fence periodically.
+            fence_c.gc();
         }
     });
 
@@ -443,27 +440,23 @@ fn process_debounce_result_multi(
                     None => continue,
                 };
 
-                match kind {
-                    FileEventKind::Remove => {
-                        // For removes we can't re-parse, so emit by path with a
-                        // best-effort reconstructed ResourceId if classifiable.
-                        if let Some(cat) = category_for_path(&path, scope_root) {
-                            // We don't have enough info to reconstruct the name
-                            // reliably (e.g. SKILL frontmatter name overrides the
-                            // directory name). Emit ExternalEdit instead — the
-                            // store layer in Plan 04 will reconcile via the next
-                            // initial scan. This is a conservative choice that
-                            // preserves the Remove signal without fabricating
-                            // stale IDs.
-                            let _ = cat; // category used for future expansion
-                            resource_events.push(ResourceEvent::ExternalEdit {
-                                path: path.clone(),
-                                mtime_ms: 0,
-                            });
-                        }
-                        continue;
+                if matches!(kind, FileEventKind::Remove) {
+                    // For removes we can't re-parse, so emit by path with a
+                    // best-effort reconstructed ResourceId if classifiable.
+                    if category_for_path(&path, scope_root).is_some() {
+                        // We don't have enough info to reconstruct the name
+                        // reliably (e.g. SKILL frontmatter name overrides the
+                        // directory name). Emit ExternalEdit instead — the
+                        // store layer in Plan 04 will reconcile via the next
+                        // initial scan. This is a conservative choice that
+                        // preserves the Remove signal without fabricating
+                        // stale IDs.
+                        resource_events.push(ResourceEvent::ExternalEdit {
+                            path: path.clone(),
+                            mtime_ms: 0,
+                        });
                     }
-                    _ => {}
+                    continue;
                 }
 
                 // Create/Modify/Rename: re-parse.

@@ -1,18 +1,19 @@
 //! Phase 9 Plan 03 — Tauri command surface for ARSENAL.
 //!
 //! Four commands exposed to the frontend:
-//!   - `start_claude_resources_watch(cwd, channel)` → `Vec<Resource>`
-//!       Spawns (or re-spawns) the single-Debouncer multi-root watcher
-//!       over `~/.claude/` (Global, always) + `<cwd>/.claude/` (Project,
-//!       when it exists). Returns the initial scan.
-//!   - `stop_claude_resources_watch()` → `()`
-//!       Drops the `ActiveResourcesWatch`, aborting all tasks.
-//!   - `read_claude_md(path, cwd)` → `ReadClaudeMdResult`
-//!       Canonicalizes the path + reports whether it's D-13-editable.
-//!   - `write_claude_md(path, content, cwd)` → `()`
-//!       Atomic write via `claude_md::atomic_write`; rejects any path not
-//!       in `editable_paths(project_root)`; records the fence after
-//!       success so the watcher doesn't echo back a phantom Changed.
+//!
+//! - `start_claude_resources_watch(cwd, channel)` → `Vec<Resource>`
+//!   Spawns (or re-spawns) the single-Debouncer multi-root watcher over
+//!   `~/.claude/` (Global, always) + `<cwd>/.claude/` (Project, when it
+//!   exists). Returns the initial scan.
+//! - `stop_claude_resources_watch()` → `()`
+//!   Drops the `ActiveResourcesWatch`, aborting all tasks.
+//! - `read_claude_md(path, cwd)` → `ReadClaudeMdResult`
+//!   Canonicalizes the path + reports whether it's D-13-editable.
+//! - `write_claude_md(path, content, cwd)` → `()`
+//!   Atomic write via `claude_md::atomic_write`; rejects any path not in
+//!   `editable_paths(project_root)`; records the fence after success so
+//!   the watcher doesn't echo back a phantom Changed.
 //!
 //! Architecture (D-05): a single `Debouncer` is spawned per
 //! `start_claude_resources_watch` call. The pipeline's own `start_watch`
