@@ -10,6 +10,7 @@ use crate::agents::generic::passive_sentinel_adapter;
 use crate::agents::AgentRegistry;
 use crate::pipeline::process_snapshot::ProcessSnapshot;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -24,6 +25,7 @@ pub const BRIDGE_INTERVAL_MS: u64 = 2000;
 pub fn spawn_passive_bridge(
     registry: Arc<AgentRegistry>,
     snapshot: Arc<RwLock<ProcessSnapshot>>,
+    repo_root: PathBuf,
     interval: Duration,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -32,7 +34,7 @@ pub fn spawn_passive_bridge(
         tick.tick().await;
         loop {
             tick.tick().await;
-            if let Err(e) = bridge_tick(&registry, &snapshot).await {
+            if let Err(e) = bridge_tick(&registry, &snapshot, Some(&repo_root)).await {
                 tracing::warn!(error = %e, "passive_bridge tick failed");
             }
         }
@@ -49,13 +51,28 @@ pub fn spawn_passive_bridge(
 pub async fn bridge_tick(
     registry: &AgentRegistry,
     snapshot: &RwLock<ProcessSnapshot>,
+    repo_root: Option<&std::path::Path>,
 ) -> Result<(), String> {
     let candidates = {
         let snap = snapshot.read().await;
         snap.candidates()
     };
-    let mut live_pids: HashSet<u32> = HashSet::with_capacity(candidates.len());
-    for c in &candidates {
+
+    // Scope passive detection to the watched repo. Previously the bridge
+    // upserted every process on the machine matching the allowlist, which
+    // filled the 100-agent registry cap in seconds when the user had many
+    // unrelated claude processes running. Matches the UI's useScopedAgents
+    // rule so the two layers agree on what "in this airspace" means.
+    let in_scope: Vec<_> = candidates
+        .into_iter()
+        .filter(|c| match (repo_root, c.cwd.as_ref()) {
+            (Some(root), Some(cwd)) => cwd.starts_with(root),
+            _ => true, // no root known -> keep the previous behaviour
+        })
+        .collect();
+
+    let mut live_pids: HashSet<u32> = HashSet::with_capacity(in_scope.len());
+    for c in &in_scope {
         live_pids.insert(c.pid);
     }
     // Reap first: drop PASSIVE entries whose PID is no longer live.
@@ -63,7 +80,8 @@ pub async fn bridge_tick(
 
     // Upsert each live candidate as PASSIVE-{pid}, unless a non-passive entry
     // (e.g., KAGENT) already owns the PID (D-07).
-    for c in candidates {
+    let mut capacity_hit = 0usize;
+    for c in in_scope {
         if let Some(existing) = registry.find_agent_by_pid(c.pid).await {
             if !existing.id.starts_with("PASSIVE-") {
                 continue; // KAGENT or launched entry owns this PID; skip.
@@ -96,8 +114,21 @@ pub async fn bridge_tick(
         // adapter when nothing matched, so the registry API still works.
         let adapter = matched.unwrap_or_else(passive_sentinel_adapter);
         if let Err(e) = registry.upsert_agent(id, info, adapter, false).await {
-            tracing::warn!(pid = c.pid, error = %e, "passive upsert failed");
+            // The capacity-exhaustion case floods the log if we emit one line
+            // per skipped candidate (#cap=100, #candidates=500+). Coalesce to
+            // a single tick-level warning below.
+            if e.contains("at capacity") {
+                capacity_hit += 1;
+            } else {
+                tracing::warn!(pid = c.pid, error = %e, "passive upsert failed");
+            }
         }
+    }
+    if capacity_hit > 0 {
+        tracing::warn!(
+            skipped = capacity_hit,
+            "passive_bridge: registry at capacity, agents skipped this tick (tighten allowlist or raise MAX_AGENTS)"
+        );
     }
     Ok(())
 }
@@ -127,7 +158,7 @@ mod tests {
         // Registry with no adapters registered -> fall back to "unknown".
         let reg = Arc::new(AgentRegistry::new());
         let snap = seeded_snapshot(vec![cand(111, "claude-code"), cand(222, "codex")]);
-        bridge_tick(&reg, &snap).await.unwrap();
+        bridge_tick(&reg, &snap, None).await.unwrap();
         let p1 = reg.get_agent("PASSIVE-111").await.expect("PASSIVE-111 missing");
         assert_eq!(p1.agent_type, "unknown");
         assert_eq!(p1.protocol, "passive-scan");
@@ -145,7 +176,7 @@ mod tests {
         let reg = Arc::new(reg);
 
         let snap = seeded_snapshot(vec![cand(111, "claude-code"), cand(222, "codex")]);
-        bridge_tick(&reg, &snap).await.unwrap();
+        bridge_tick(&reg, &snap, None).await.unwrap();
 
         let p1 = reg.get_agent("PASSIVE-111").await.expect("PASSIVE-111 missing");
         assert_eq!(p1.agent_type, "claude-code");
@@ -175,7 +206,7 @@ mod tests {
         .await
         .unwrap();
         let snap = seeded_snapshot(vec![cand(111, "claude-code")]);
-        bridge_tick(&reg, &snap).await.unwrap();
+        bridge_tick(&reg, &snap, None).await.unwrap();
         assert!(
             reg.get_agent("PASSIVE-111").await.is_none(),
             "must NOT create PASSIVE-111 when KAGENT-111 owns pid"
@@ -205,7 +236,7 @@ mod tests {
         .unwrap();
         // Snapshot shows no live candidates -> reap removes PASSIVE-333.
         let snap = seeded_snapshot(vec![]);
-        bridge_tick(&reg, &snap).await.unwrap();
+        bridge_tick(&reg, &snap, None).await.unwrap();
         assert!(reg.get_agent("PASSIVE-333").await.is_none());
     }
 }

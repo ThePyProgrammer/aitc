@@ -29,7 +29,7 @@ async fn end_to_end_pipeline_activation() {
             parent: None,
         }],
     )));
-    bridge_tick(&reg, &snap).await.unwrap();
+    bridge_tick(&reg, &snap, None).await.unwrap();
     assert!(
         reg.get_agent("PASSIVE-7777").await.is_some(),
         "PASSIVE entry must appear after first bridge tick"

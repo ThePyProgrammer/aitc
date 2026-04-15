@@ -129,6 +129,7 @@ pub async fn start_watch(
     let bridge_task = crate::pipeline::passive_bridge::spawn_passive_bridge(
         registry_arc.clone(),
         snapshot.clone(),
+        canonical.clone(),
         Duration::from_millis(crate::pipeline::passive_bridge::BRIDGE_INTERVAL_MS),
     );
 
