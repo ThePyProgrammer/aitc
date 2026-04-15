@@ -305,6 +305,62 @@ pub async fn get_tree_index(
     }
 }
 
+/// Get the dependency graph (in-repo import/use/mod edges) for the active watch.
+/// Returns an empty vec if no watch is active.
+///
+/// Edges use repo-relative forward-slash paths (matching `get_tree_index` convention,
+/// commit `a1b15b6`) so the frontend can join against `radarStore.contentionScores`
+/// keys without a separate normalization layer.
+///
+/// CPU-heavy parsing runs on `tauri::async_runtime::spawn_blocking` so the main
+/// async runtime stays responsive during the <2s build target (D-24).
+#[tauri::command]
+#[specta::specta]
+pub async fn get_dependency_graph(
+    state: tauri::State<'_, PipelineState>,
+) -> Result<Vec<crate::pipeline::deps::DependencyEdgeDto>, String> {
+    use crate::pipeline::deps::{build_dependency_graph, DependencyEdgeDto};
+    let guard = state.inner.lock().await;
+    match guard.as_ref() {
+        Some(active) => {
+            let repo_root = active.repo_root.clone();
+            let files: Vec<std::path::PathBuf> = active
+                .tree_index
+                .iter()
+                .filter(|(_, node)| !node.is_dir)
+                .map(|(path, _)| path.clone())
+                .collect();
+            let repo_root_for_build = repo_root.clone();
+            let edges = tauri::async_runtime::spawn_blocking(move || {
+                build_dependency_graph(&repo_root_for_build, &files)
+            })
+            .await
+            .map_err(|e| format!("spawn_blocking join: {e}"))?;
+            // Convert internal edges (PathBuf) to DTO (repo-relative String).
+            let dto: Vec<DependencyEdgeDto> = edges
+                .into_iter()
+                .filter_map(|e| {
+                    let from = e
+                        .from
+                        .strip_prefix(&repo_root)
+                        .ok()?
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    let to = e
+                        .to
+                        .strip_prefix(&repo_root)
+                        .ok()?
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    Some(DependencyEdgeDto { from, to, kind: e.kind })
+                })
+                .collect();
+            Ok(dto)
+        }
+        None => Ok(Vec::new()),
+    }
+}
+
 /// Persist every attributed file event in `batch` to SQLite (D-09, HIST-01).
 ///
 /// Unattributed / Ambiguous events are silently skipped — per D-09 only

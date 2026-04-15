@@ -9,12 +9,38 @@ import { invoke } from '@tauri-apps/api/core';
 import { computeContentionScore } from '../lib/contention';
 import type { ConflictAlert } from './conflictStore';
 import { usePipelineStore } from './pipelineStore';
+import type { DependencyEdgeDto } from '../bindings';
 
 export interface TreeIndexEntry {
   path: string;
   size: number;
   isDir: boolean;
   depth: number;
+}
+
+// Phase 7 graph state (D-01..D-03, D-11). Slots only — Plans 03+ wire behavior.
+export interface GraphNode {
+  id: string;              // repo-relative path (matches contentionScores keys)
+  dirKey: string;          // repo-relative parent dir path
+  dirDepth: number;        // depth from repo root, for forceCluster (D-11)
+  x?: number;
+  y?: number;
+  fx?: number | null;
+  fy?: number | null;
+}
+
+export interface GraphEdge {
+  source: string;          // node id
+  target: string;          // node id
+  kind: DependencyEdgeDto['kind'];
+}
+
+export interface ActiveTrail {
+  id: string;              // `${agentId}|${fromPath}|${toPath}|${startTs}`
+  agentId: string;
+  fromPath: string;
+  toPath: string;
+  startTs: number;         // ms epoch
 }
 
 export interface Viewport {
@@ -45,6 +71,12 @@ interface RadarStore {
   isManifestOpen: boolean;
   heatMapEnabled: boolean;
   contentionScores: Map<string, number>;
+  // Phase 7 graph state (slots only; Plan 03 wires layout, Plan 05 wires trails).
+  graphNodes: GraphNode[];
+  graphEdges: GraphEdge[];
+  settledAt: number | null;
+  pinnedNodeIds: Set<string>;
+  activeTrails: ActiveTrail[];
   fetchTreeIndex: () => Promise<void>;
   setViewport: (v: Partial<Viewport>) => void;
   selectAgent: (id: string | null) => void;
@@ -61,6 +93,11 @@ export const useRadarStore = create<RadarStore>((set) => ({
   isManifestOpen: true,
   heatMapEnabled: false,
   contentionScores: new Map(),
+  graphNodes: [],
+  graphEdges: [],
+  settledAt: null,
+  pinnedNodeIds: new Set<string>(),
+  activeTrails: [],
 
   fetchTreeIndex: async () => {
     try {
@@ -131,6 +168,11 @@ export const useRadarStore = create<RadarStore>((set) => ({
       isManifestOpen: true,
       heatMapEnabled: false,
       contentionScores: new Map(),
+      graphNodes: [],
+      graphEdges: [],
+      settledAt: null,
+      pinnedNodeIds: new Set<string>(),
+      activeTrails: [],
     }),
 }));
 

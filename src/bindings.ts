@@ -47,6 +47,25 @@ async getTreeIndex() : Promise<Result<TreeIndexEntry[], string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Get the dependency graph (in-repo import/use/mod edges) for the active watch.
+ * Returns an empty vec if no watch is active.
+ * 
+ * Edges use repo-relative forward-slash paths (matching `get_tree_index` convention,
+ * commit `a1b15b6`) so the frontend can join against `radarStore.contentionScores`
+ * keys without a separate normalization layer.
+ * 
+ * CPU-heavy parsing runs on `tauri::async_runtime::spawn_blocking` so the main
+ * async runtime stays responsive during the <2s build target (D-24).
+ */
+async getDependencyGraph() : Promise<Result<DependencyEdgeDto[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_dependency_graph") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getLaunchCwd() : Promise<Result<string | null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_launch_cwd") };
@@ -519,6 +538,19 @@ export type ConflictAlert = { id: string; filePath: string; agentAId: string; ag
  * File versions for a conflict: base (git HEAD), and current disk content.
  */
 export type ConflictFileVersions = { baseContent: string; agentAContent: string; agentBContent: string; filePath: string; agentAId: string; agentBId: string }
+/**
+ * Wire-format for the get_dependency_graph Tauri command (D-05).
+ */
+export type DependencyEdgeDto = { 
+/**
+ * Repo-relative forward-slash path of importing file.
+ */
+from: string; 
+/**
+ * Repo-relative forward-slash path of imported file.
+ */
+to: string; kind: EdgeKind }
+export type EdgeKind = "import" | "reexport" | "typeOnly" | "dynamicImport" | "use" | "modDecl" | "fromImport" | "importStmt"
 /**
  * A single debounced, attributed filesystem event.
  */

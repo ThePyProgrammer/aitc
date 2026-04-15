@@ -41,6 +41,7 @@ pub fn run() {
             pipeline::commands::stop_watch,
             pipeline::commands::list_worktrees,
             pipeline::commands::get_tree_index,
+            pipeline::commands::get_dependency_graph,
             repo_session::get_launch_cwd,
             repo_session::detect_git_root,
             repo_session::persist_last_repo,
@@ -83,6 +84,8 @@ pub fn run() {
         .typ::<pipeline::events::Attribution>()
         .typ::<pipeline::process_snapshot::ProcessInfo>()
         .typ::<pipeline::worktree::Worktree>()
+        .typ::<pipeline::deps::DependencyEdgeDto>()
+        .typ::<pipeline::deps::EdgeKind>()
         .typ::<agents::AgentInfo>()
         .typ::<agents::AgentState>()
         .typ::<agents::adapter::LaunchOptions>()
