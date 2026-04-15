@@ -331,13 +331,21 @@ pub async fn get_dependency_graph(
                 .map(|(path, _)| path.clone())
                 .collect();
             let repo_root_for_build = repo_root.clone();
-            let edges = tauri::async_runtime::spawn_blocking(move || {
+            let result = tauri::async_runtime::spawn_blocking(move || {
                 build_dependency_graph(&repo_root_for_build, &files)
             })
             .await
             .map_err(|e| format!("spawn_blocking join: {e}"))?;
+            if result.degraded {
+                tracing::warn!(
+                    edges = result.edges.len(),
+                    unresolved = result.unresolved_count,
+                    "dep_graph: returning degraded result (edge cap hit)"
+                );
+            }
             // Convert internal edges (PathBuf) to DTO (repo-relative String).
-            let dto: Vec<DependencyEdgeDto> = edges
+            let dto: Vec<DependencyEdgeDto> = result
+                .edges
                 .into_iter()
                 .filter_map(|e| {
                     let from = e

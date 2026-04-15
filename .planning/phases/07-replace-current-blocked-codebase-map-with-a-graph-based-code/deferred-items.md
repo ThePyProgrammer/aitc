@@ -30,3 +30,18 @@
 **Action:** Out of scope for Plan 07-01. Flagged for separate fix (agentStore test expectations out of sync with current implementation, likely drift from a launch_agent signature change).
 
 **Impact on Plan 07-01:** None — 119 other tests pass, 27 new Wave 0 tests skipped (scaffolded for downstream plans).
+
+---
+
+### Pre-existing test failures: `conflict::engine::tests::{test_conflict_detected_different_pids_within_window, test_custom_window_duration}`
+
+**Status:** Pre-existing on base commit e6b55d1. Verified by checking out `src/conflict/engine.rs` from e6b55d1 and running `cargo test --lib conflict::engine::tests` — both failures reproduce.
+
+**Tests:**
+- `src-tauri/src/conflict/engine.rs:206` — `test_conflict_detected_different_pids_within_window`
+- `src-tauri/src/conflict/engine.rs` — `test_custom_window_duration`
+
+**Action:** Out of scope for Plan 07-02 (Scope Boundary: only auto-fix issues directly caused by current task). Not related to dependency graph extraction.
+
+**Impact on Plan 07-02:** None — all 21 `pipeline::deps::*` tests pass; 155 other tests pass; the 10k benchmark passes at 222ms (D-24 <2000ms target).
+
