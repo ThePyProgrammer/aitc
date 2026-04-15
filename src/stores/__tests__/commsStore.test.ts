@@ -112,7 +112,7 @@ describe('commsStore', () => {
 
     await useCommsStore.getState().approveRequest(1);
 
-    expect(mockInvoke).toHaveBeenCalledWith('approve_request', { id: 1 });
+    expect(mockInvoke).toHaveBeenCalledWith('approve_request', { id: 1, alwaysAllowForSession: false });
     const requests = useCommsStore.getState().requests;
     expect(requests.find((r) => r.id === 1)?.status).toBe('approved');
   });
@@ -123,7 +123,7 @@ describe('commsStore', () => {
 
     await useCommsStore.getState().denyRequest(1);
 
-    expect(mockInvoke).toHaveBeenCalledWith('deny_request', { id: 1 });
+    expect(mockInvoke).toHaveBeenCalledWith('deny_request', { id: 1, reason: null });
     const requests = useCommsStore.getState().requests;
     expect(requests.find((r) => r.id === 1)?.status).toBe('denied');
   });
@@ -145,7 +145,11 @@ describe('commsStore', () => {
 
     await useCommsStore.getState().approveWithEdits(1, 'edited content here');
 
-    expect(mockInvoke).toHaveBeenCalledWith('approve_with_edits', { id: 1, editedContent: 'edited content here' });
+    expect(mockInvoke).toHaveBeenCalledWith('approve_with_edits', {
+      id: 1,
+      editedContent: 'edited content here',
+      alwaysAllowForSession: false,
+    });
     const request = useCommsStore.getState().requests.find((r) => r.id === 1);
     expect(request?.status).toBe('approved');
   });
@@ -306,6 +310,118 @@ describe('commsStore pretool_use extension', () => {
       sessionAlwaysAllow: new Map([['KAGENT-9', new Set(['Bash'])]]),
     });
     useCommsStore.getState().reset();
+    expect(useCommsStore.getState().sessionAlwaysAllow.size).toBe(0);
+  });
+});
+
+describe('commsStore Phase 8 Plan 05: alwaysAllowForSession plumbing', () => {
+  const pretoolRequest: ApprovalRequest = {
+    id: 42,
+    agentId: 'KAGENT-9',
+    requestType: 'pretool_use',
+    filePath: '/repo/src/main.rs',
+    diffContent: null,
+    status: 'pending',
+    urgency: 'medium',
+    responseNote: null,
+    editedContent: null,
+    createdAt: '2026-04-15T12:00:00Z',
+    resolvedAt: null,
+    toolName: 'Bash',
+    toolInputJson: { command: 'ls' },
+    sessionId: 'session-abc',
+  };
+
+  beforeEach(() => {
+    useCommsStore.getState().reset();
+    vi.clearAllMocks();
+  });
+
+  it('approveRequest passes alwaysAllowForSession: true to invoke', async () => {
+    useCommsStore.setState({ requests: [pretoolRequest] });
+    mockInvoke.mockResolvedValueOnce(undefined);
+
+    await useCommsStore.getState().approveRequest(42, { alwaysAllowForSession: true });
+
+    expect(mockInvoke).toHaveBeenCalledWith('approve_request', {
+      id: 42,
+      alwaysAllowForSession: true,
+    });
+  });
+
+  it('approveRequest defaults alwaysAllowForSession to false when opts omitted', async () => {
+    useCommsStore.setState({ requests: [pretoolRequest] });
+    mockInvoke.mockResolvedValueOnce(undefined);
+
+    await useCommsStore.getState().approveRequest(42);
+
+    expect(mockInvoke).toHaveBeenCalledWith('approve_request', {
+      id: 42,
+      alwaysAllowForSession: false,
+    });
+  });
+
+  it('approveRequest with alwaysAllowForSession=true adds toolName to sessionAlwaysAllow map', async () => {
+    useCommsStore.setState({ requests: [pretoolRequest] });
+    mockInvoke.mockResolvedValueOnce(undefined);
+
+    await useCommsStore.getState().approveRequest(42, { alwaysAllowForSession: true });
+
+    const m = useCommsStore.getState().sessionAlwaysAllow;
+    expect(m.get('KAGENT-9')?.has('Bash')).toBe(true);
+  });
+
+  it('approveRequest with alwaysAllowForSession=false does NOT mutate sessionAlwaysAllow map', async () => {
+    useCommsStore.setState({ requests: [pretoolRequest] });
+    mockInvoke.mockResolvedValueOnce(undefined);
+
+    await useCommsStore.getState().approveRequest(42, { alwaysAllowForSession: false });
+
+    expect(useCommsStore.getState().sessionAlwaysAllow.size).toBe(0);
+  });
+
+  it('approveWithEdits passes alwaysAllowForSession: true to invoke', async () => {
+    useCommsStore.setState({ requests: [{ ...pretoolRequest, toolName: 'Edit' }] });
+    mockInvoke.mockResolvedValueOnce(undefined);
+
+    await useCommsStore.getState().approveWithEdits(42, 'content', { alwaysAllowForSession: true });
+
+    expect(mockInvoke).toHaveBeenCalledWith('approve_with_edits', {
+      id: 42,
+      editedContent: 'content',
+      alwaysAllowForSession: true,
+    });
+    const m = useCommsStore.getState().sessionAlwaysAllow;
+    expect(m.get('KAGENT-9')?.has('Edit')).toBe(true);
+  });
+
+  it('denyRequest passes null reason by default', async () => {
+    useCommsStore.setState({ requests: [pretoolRequest] });
+    mockInvoke.mockResolvedValueOnce(undefined);
+
+    await useCommsStore.getState().denyRequest(42);
+
+    expect(mockInvoke).toHaveBeenCalledWith('deny_request', { id: 42, reason: null });
+  });
+
+  it('denyRequest with reason passes reason to invoke', async () => {
+    useCommsStore.setState({ requests: [pretoolRequest] });
+    mockInvoke.mockResolvedValueOnce(undefined);
+
+    await useCommsStore.getState().denyRequest(42, { reason: 'looks destructive' });
+
+    expect(mockInvoke).toHaveBeenCalledWith('deny_request', {
+      id: 42,
+      reason: 'looks destructive',
+    });
+  });
+
+  it('denyRequest does NOT mutate sessionAlwaysAllow map', async () => {
+    useCommsStore.setState({ requests: [pretoolRequest] });
+    mockInvoke.mockResolvedValueOnce(undefined);
+
+    await useCommsStore.getState().denyRequest(42, { reason: 'no' });
+
     expect(useCommsStore.getState().sessionAlwaysAllow.size).toBe(0);
   });
 });
