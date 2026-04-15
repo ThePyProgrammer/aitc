@@ -532,34 +532,37 @@ pub fn classify(path: &Path, repo_root: &Path, global_claude: &Path,
 | A6 | All scope changes happen via repo session change (RepoSessionProvider re-mount), so the project `.claude/` watch can be torn down + rebuilt with the project root | Architecture | Low — Phase 6 lock-in; watcher lifecycle is already tied to `activeRepo` |
 | A7 | The phase has zero database writes | Runtime State Inventory | Low — D-12..D-15 only require disk writes for CLAUDE.md content; no audit trail (deferred) |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> All questions below were disposed during planning. Dispositions are binding; the plans (01..05) implement them. The two-watcher alternative for Q1 is documented as a future consideration only — the locked CONTEXT.md decision (D-05) overrides the research recommendation.
 
 1. **One Debouncer or two?**
    - What we know: Both work. Single Debouncer = lower OS thread count, simpler but couples the lifecycles of repo watch + Claude resources watch. Two Debouncers = independent lifecycles (Claude resources keep watching `~/.claude` even when no repo is active).
    - What's unclear: Should ARSENAL work when no repo is open? UI-SPEC implies yes (the Global tab is meaningful without a project).
-   - **Recommendation:** **Two-watcher approach** — extend `spawn_watcher` to take an `extra_roots` param for the project `.claude/` (which co-lives with repo) AND add a separate `start_global_resources_watch` that owns its own Debouncer for `~/.claude/` and survives across repo-session changes. The planner should make a definitive call here in the design wave.
+   - **Recommendation (original research):** Two-watcher approach with a separate `start_global_resources_watch`.
+   - **RESOLVED:** **SINGLE Debouncer per D-05 (user's locked decision).** Plan 03 extends `src-tauri/src/pipeline/watcher.rs` with an `extra_roots: Vec<(PathBuf, ScopeKind)>` parameter so the existing single Debouncer also covers `~/.claude/` and `<cwd>/.claude/`. Path-based fan-out (D-06) routes each FileEvent into either the existing `pipeline` mpsc or the new `claude_resources` mpsc inside the same actor. The research's two-watcher recommendation is **documented as a future consideration** — if global-watch lifecycle across repo-session changes becomes painful in practice, a follow-up phase can split the Debouncer. For v1, D-05 wins unconditionally. inotify-allowlist concern (Pitfall 1) is handled by watching only allowlisted subdirs of each extra root (skills/, agents/, plugins/, hooks/, commands/) + file-level watches for settings.json and CLAUDE.md, implemented via the existing ignore_filter pattern with scope-aware filtering.
 
 2. **Should `start_claude_resources_watch` be a separate Tauri command or fold into `start_watch`?**
    - What we know: `start_watch(repo_root, channel)` already does multiple things; adding `claude_channel` as another arg muddies its signature.
    - What's unclear: Cleaner to have a sibling `start_claude_resources_watch(cwd_or_null, channel)` that the frontend calls separately.
-   - **Recommendation:** **Sibling command.** Better separation of concerns; either watch can fail independently.
+   - **RESOLVED:** **Sibling command** — `start_claude_resources_watch(cwd, channel)` lives next to `start_watch`. Even though D-05 mandates a shared Debouncer at the watcher layer, the IPC command surface stays separate: two Channel<T> endpoints, two commands. The fan-out happens inside the Rust watcher actor, not at the Tauri boundary. This keeps frontend lifecycle management clean (ARSENAL can start its own channel independently of pipeline).
 
 3. **Should we watch `~/.claude/CLAUDE.md` for read-only updates?**
    - What we know: D-13 says global CLAUDE.md is read-only this phase. UI-SPEC shows it gets a `READ-ONLY` banner.
    - What's unclear: If the user externally edits `~/.claude/CLAUDE.md`, should the read-only viewer refresh?
-   - **Recommendation:** Yes — the watcher already covers it via the recursive `~/.claude/` watch; the frontend just refreshes the viewer text. No banner needed because there are no local edits to conflict with.
+   - **RESOLVED:** **Yes.** The extra_roots list includes `~/.claude/CLAUDE.md` as a file-level NonRecursive watch; external edits emit a `Changed` event; the frontend ContentPreview silently re-reads and re-renders. No banner (there are no local edits to conflict with).
 
 4. **Hook script content vs metadata only?**
    - CONTEXT.md says: "hook scripts (path/name only — do not execute or read content as authoritative)."
-   - **Recommendation:** Display path, filename, and the matcher/event from settings.json (which references the hook). Do **not** display script body to avoid implying it's editable.
+   - **RESOLVED:** **Metadata only.** `parse_hook_metadata(path)` does NOT read the script body (enforced by Plan 02 Task 1 test 7). Detail panel surfaces path + filename + (event, matcher) derived from settings.json references.
 
 5. **MCP servers — show password / env values?**
    - settings.json `mcpServers` entries can contain `env` blocks with API keys.
-   - **Recommendation:** Display `command`, `args`, and **mask** any value in `env` whose key matches a regex like `(?i)token|secret|key|password|auth`. Show as `***` with a tooltip "value hidden". Out of scope to add a "reveal" toggle this phase.
+   - **RESOLVED:** **Mask all env values** when any key matches `(?i)token|secret|key|password|auth`. Implementation in `parse_settings` (Plan 02 Task 1) stamps `env_masked: bool` on the ResourceMetadata::Mcp variant; raw env values NEVER cross the IPC boundary. Absence verified by Plan 02 Task 1 test 5 assertion (raw `sk-test-abc123` string must not appear in serialized Resource).
 
 6. **What's the source of `<cwd>` for the project-scope watcher when the user changes repo mid-session?**
    - What we know: `RepoSessionProvider` already handles this for the pipeline watcher (re-registers on `activeRepo` change).
-   - **Recommendation:** Same pattern — `useClaudeResourcesChannel.start(cwd)` re-runs in a `useEffect([activeRepo])`. The Rust side stops the project portion of the watch, replaces it with the new cwd. (Global portion never restarts.)
+   - **RESOLVED:** **Same pattern as pipeline watcher.** `useClaudeResourcesChannel.start(cwd)` re-runs in a `useEffect([activeRepo])` inside ArsenalView (Plan 05 Task 1). With the D-05 single-Debouncer extension, `start_claude_resources_watch` tears down the old WatcherHandle and spawns a fresh one with the new `(repo_root, ~/.claude/, <new_cwd>/.claude/)` root tuple — simpler than hot-swapping a subset of watched paths.
 
 ## Environment Availability
 
