@@ -69,17 +69,32 @@ pub async fn bridge_tick(
                 continue; // KAGENT or launched entry owns this PID; skip.
             }
         }
+
+        // Classify by matching the process name against registered adapter
+        // patterns. ProcessSnapshot already filters to allowlisted names so
+        // there's usually a hit; fall back to "unknown" for anything that
+        // slips through (e.g., future allowlist additions without a matching
+        // adapter).
+        let matched = registry.find_adapter_for_process(&c.name);
+        let agent_type = matched
+            .as_ref()
+            .map(|a| a.adapter_type().to_string())
+            .unwrap_or_else(|| "unknown".into());
+
         let id = format!("PASSIVE-{}", c.pid);
         let info = AgentInfo {
             id: id.clone(),
-            agent_type: "unknown".into(),
+            agent_type,
             protocol: "passive-scan".into(),
             state: AgentState::Running,
             pid: Some(c.pid),
             cwd: c.cwd.clone(),
             intent: None,
         };
-        let adapter = passive_sentinel_adapter();
+        // Prefer the matched adapter so get_state / get_intent polls go to
+        // the right CLI-specific logic. Fall back to the passive sentinel
+        // adapter when nothing matched, so the registry API still works.
+        let adapter = matched.unwrap_or_else(passive_sentinel_adapter);
         if let Err(e) = registry.upsert_agent(id, info, adapter, false).await {
             tracing::warn!(pid = c.pid, error = %e, "passive upsert failed");
         }
@@ -109,6 +124,7 @@ mod tests {
 
     #[tokio::test]
     async fn passive_scan_bridge_upserts_passive_entries_for_live_pids() {
+        // Registry with no adapters registered -> fall back to "unknown".
         let reg = Arc::new(AgentRegistry::new());
         let snap = seeded_snapshot(vec![cand(111, "claude-code"), cand(222, "codex")]);
         bridge_tick(&reg, &snap).await.unwrap();
@@ -117,6 +133,24 @@ mod tests {
         assert_eq!(p1.protocol, "passive-scan");
         assert_eq!(p1.pid, Some(111));
         assert!(reg.get_agent("PASSIVE-222").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn passive_scan_bridge_classifies_by_registered_adapter() {
+        use std::sync::Arc;
+        // Registry with real adapters -> passive entries should be typed.
+        let mut reg = AgentRegistry::new();
+        reg.register_adapter(Arc::new(crate::agents::claude_code::ClaudeCodeAdapter));
+        reg.register_adapter(Arc::new(crate::agents::codex::CodexAdapter));
+        let reg = Arc::new(reg);
+
+        let snap = seeded_snapshot(vec![cand(111, "claude-code"), cand(222, "codex")]);
+        bridge_tick(&reg, &snap).await.unwrap();
+
+        let p1 = reg.get_agent("PASSIVE-111").await.expect("PASSIVE-111 missing");
+        assert_eq!(p1.agent_type, "claude-code");
+        let p2 = reg.get_agent("PASSIVE-222").await.expect("PASSIVE-222 missing");
+        assert_eq!(p2.agent_type, "codex");
     }
 
     #[tokio::test]
