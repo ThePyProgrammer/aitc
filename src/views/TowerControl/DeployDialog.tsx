@@ -11,16 +11,16 @@ interface DeployDialogProps {
   onClose: () => void;
 }
 
-// Minimal path containment check. Normalizes trailing slashes and enforces
-// that the candidate starts with `root` + a path separator (or equals it),
-// so `/foo/barn` doesn't spuriously match `/foo/bar`. Backend canonicalizes
-// for real before launch -- this is just UX pre-validation.
-function isInsideRepo(candidate: string, root: string): boolean {
-  const strip = (p: string) => p.replace(/[\\/]+$/, '');
-  const c = strip(candidate);
-  const r = strip(root);
-  if (c === r) return true;
-  return c.startsWith(`${r}/`) || c.startsWith(`${r}\\`);
+// Join a watched repo root with a user-supplied subdirectory. Strips leading
+// path separators on the subdir so typing `/src` or `src` both resolve to
+// `<repo>/src`. Backend canonicalizes and rejects `..` escapes, so we don't
+// re-implement that here.
+function joinRepoSubdir(root: string, subdir: string): string {
+  const sub = subdir.trim().replace(/^[\\/]+/, '');
+  if (!sub) return root;
+  const rootStripped = root.replace(/[\\/]+$/, '');
+  const sep = rootStripped.includes('\\') && !rootStripped.includes('/') ? '\\' : '/';
+  return `${rootStripped}${sep}${sub}`;
 }
 
 const agentTypes = [
@@ -32,27 +32,16 @@ const agentTypes = [
 
 export function DeployDialog({ open, onClose }: DeployDialogProps) {
   const [selectedType, setSelectedType] = useState<string>('claude-code');
-  const [cwd, setCwd] = useState('');
+  // `subdir` holds a repo-relative path when a watch is active; when no watch
+  // is active it holds a full path (fallback UI). Keeping a single field
+  // avoids state shuffling when the user toggles watches mid-dialog.
+  const [subdir, setSubdir] = useState('');
   const [intent, setIntent] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLaunching, setIsLaunching] = useState(false);
   const [availableTypes, setAvailableTypes] = useState<string[] | null>(null);
   const launchAgent = useAgentStore((s) => s.launchAgent);
   const activeRepo = useRepoStore((s) => s.activeRepo);
-
-  // Prefill cwd with the currently monitored repo so the default action
-  // matches the common case: deploy an agent against the repo AITC is
-  // already watching. Users can still type a subdirectory. If they leave
-  // the watched repo, the submit handler below blocks before invoking the
-  // backend.
-  useEffect(() => {
-    if (!open) return;
-    if (!cwd && activeRepo) {
-      setCwd(activeRepo);
-    }
-    // cwd intentionally excluded -- only reconcile on open / repo change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, activeRepo]);
 
   // Refresh the installed-CLI list each time the dialog opens so PATH changes
   // (e.g. installing `codex` without restarting AITC) are picked up.
@@ -83,27 +72,21 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
     ? agentTypes.filter((t) => availableTypes.includes(t.id))
     : agentTypes;
 
+  const resolvedCwd = activeRepo
+    ? joinRepoSubdir(activeRepo, subdir)
+    : subdir.trim();
+
   const handleLaunch = async () => {
-    const trimmed = cwd.trim();
-    if (!trimmed) {
+    if (!activeRepo && !resolvedCwd) {
       setError('Working directory is required');
-      return;
-    }
-    // Client-side mirror of the backend constraint: cwd must sit inside the
-    // watched repo. Backend re-checks after canonicalization so this isn't
-    // a security boundary, just faster feedback than a round-trip error.
-    if (activeRepo && !isInsideRepo(trimmed, activeRepo)) {
-      setError(
-        `Working directory must be inside the monitored repo (${activeRepo}).`,
-      );
       return;
     }
     setError(null);
     setIsLaunching(true);
     try {
-      await launchAgent(selectedType, trimmed, intent.trim() || undefined);
+      await launchAgent(selectedType, resolvedCwd, intent.trim() || undefined);
       // Success: reset and close
-      setCwd('');
+      setSubdir('');
       setIntent('');
       setSelectedType('claude-code');
       onClose();
@@ -181,24 +164,52 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
             </div>
 
             {/* Working directory */}
-            <div className="px-6 pb-4">
-              <label className="font-headline text-[10px] font-bold uppercase tracking-widest text-on-surface-variant block mb-2">
-                WORKING_DIRECTORY
-              </label>
-              <input
-                type="text"
-                value={cwd}
-                onChange={(e) => setCwd(e.target.value)}
-                placeholder={activeRepo ?? '/path/to/project'}
-                className="w-full bg-surface-container-lowest border border-outline/10 px-3 py-2 font-mono text-xs text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40"
-              />
-              {activeRepo && (
-                <p className="mt-1 font-mono text-[10px] text-on-surface-variant/60">
-                  Must be inside monitored repo:{' '}
-                  <span className="text-on-surface-variant">{activeRepo}</span>
+            {activeRepo ? (
+              <div className="px-6 pb-4">
+                <label className="font-headline text-[10px] font-bold uppercase tracking-widest text-on-surface-variant block mb-2">
+                  MONITORED_REPO
+                </label>
+                <div
+                  className="w-full bg-surface-container-lowest border border-outline/10 px-3 py-2 font-mono text-xs text-on-surface-variant truncate"
+                  title={activeRepo}
+                >
+                  {activeRepo}
+                </div>
+
+                <label className="mt-3 font-headline text-[10px] font-bold uppercase tracking-widest text-on-surface-variant block mb-2">
+                  SUBDIRECTORY <span className="text-on-surface-variant/40">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={subdir}
+                  onChange={(e) => setSubdir(e.target.value)}
+                  placeholder="packages/server"
+                  className="w-full bg-surface-container-lowest border border-outline/10 px-3 py-2 font-mono text-xs text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40"
+                />
+                <p
+                  className="mt-1 font-mono text-[10px] text-on-surface-variant/60 truncate"
+                  title={resolvedCwd}
+                >
+                  cwd: <span className="text-on-surface-variant">{resolvedCwd}</span>
                 </p>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="px-6 pb-4">
+                <label className="font-headline text-[10px] font-bold uppercase tracking-widest text-on-surface-variant block mb-2">
+                  WORKING_DIRECTORY
+                </label>
+                <input
+                  type="text"
+                  value={subdir}
+                  onChange={(e) => setSubdir(e.target.value)}
+                  placeholder="/path/to/project"
+                  className="w-full bg-surface-container-lowest border border-outline/10 px-3 py-2 font-mono text-xs text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40"
+                />
+                <p className="mt-1 font-mono text-[10px] text-on-surface-variant/60">
+                  No repo is being monitored. Enter an absolute path.
+                </p>
+              </div>
+            )}
 
             {/* Intent */}
             <div className="px-6 pb-4">
