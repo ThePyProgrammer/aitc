@@ -33,6 +33,7 @@ import {
 } from '../../stores/radarStore';
 import { usePipelineStore } from '../../stores/pipelineStore';
 import { useAgentStore } from '../../stores/agentStore';
+import { useConflictStore } from '../../stores/conflictStore';
 import { useCanvasZoomPan } from '../../hooks/useCanvasZoomPan';
 import { useGraphLayout } from '../../hooks/useGraphLayout';
 import {
@@ -48,6 +49,72 @@ import { drawCometTrails, drawAgentDots } from './CometTrail';
 // UI-SPEC §Performance states thresholds (D-23).
 const DEGRADED_NODE_THRESHOLD = 5_000;
 const OVERLOAD_NODE_THRESHOLD = 10_000;
+
+// UI-SPEC §Motion + §Sizing conflict pulse (D-22).
+// Single expanding ring that loops while the file is in active conflict.
+const CONFLICT_PULSE_CYCLE_MS = 1600;
+const CONFLICT_PULSE_INNER = 6;       // world-space px @ zoom 1
+const CONFLICT_PULSE_OUTER = 15;
+const CONFLICT_BADGE_SIZE = 4;
+const CONFLICT_BADGE_OFFSET = 6;
+const CONFLICT_COLOR = '#ff7351';     // error token
+
+/**
+ * Z-order step 12 — expanding ring from 1.0× → 2.5× node radius over 1.6s,
+ * opacity 1.0 → 0 with a cubic-bezier(0,0,0.2,1) ease approximation
+ * (`t * (2 - t)`). One stroke per contended node id, using the error token.
+ */
+function drawConflictPulses(
+  ctx: CanvasRenderingContext2D,
+  conflictedPaths: Set<string>,
+  positions: Map<string, { x: number; y: number }>,
+  now: number,
+  zoom: number,
+): void {
+  if (conflictedPaths.size === 0) return;
+  const cyclePhase = (now % CONFLICT_PULSE_CYCLE_MS) / CONFLICT_PULSE_CYCLE_MS;
+  // Cubic-bezier(0,0,0.2,1) approximation for the opacity ramp.
+  const easedOpacity = 1 - cyclePhase * (2 - cyclePhase);
+  const r =
+    (CONFLICT_PULSE_INNER +
+      (CONFLICT_PULSE_OUTER - CONFLICT_PULSE_INNER) * cyclePhase) /
+    zoom;
+  ctx.strokeStyle = CONFLICT_COLOR;
+  ctx.lineWidth = 1 / zoom;
+  for (const path of conflictedPaths) {
+    const p = positions.get(path);
+    if (!p) continue;
+    ctx.globalAlpha = easedOpacity;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+/**
+ * Z-order step 13 — always-on 4px/zoom badge dot, offset +6/-6 world-space
+ * from node center. Rendered regardless of zoom to keep conflicts visible
+ * even at low zoom where the ring is tiny.
+ */
+function drawConflictBadges(
+  ctx: CanvasRenderingContext2D,
+  conflictedPaths: Set<string>,
+  positions: Map<string, { x: number; y: number }>,
+  zoom: number,
+): void {
+  if (conflictedPaths.size === 0) return;
+  ctx.fillStyle = CONFLICT_COLOR;
+  const off = CONFLICT_BADGE_OFFSET / zoom;
+  const size = CONFLICT_BADGE_SIZE / zoom;
+  for (const path of conflictedPaths) {
+    const p = positions.get(path);
+    if (!p) continue;
+    ctx.beginPath();
+    ctx.arc(p.x + off, p.y - off, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
 
 export interface RadarCanvasHandle {
   hoveredAgentId: string | null;
@@ -84,6 +151,19 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const { viewport, handlers, screenToWorld } = useCanvasZoomPan();
   const { quadtreeRef, rewarm } = useGraphLayout();
   const activeTrails = useRadarStore((s) => s.activeTrails);
+
+  // D-22 conflict subscription — reads all alerts, filters to active
+  // (non-dismissed) entries, and memoizes a Set of contended file paths for
+  // the render loop. Matches the existing conflictStore pattern (see
+  // TowerControl.tsx, ConflictBanner.tsx).
+  const conflictAlerts = useConflictStore((s) => s.alerts);
+  const activeConflictPaths = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of conflictAlerts) {
+      if (!a.dismissed) set.add(a.filePath);
+    }
+    return set;
+  }, [conflictAlerts]);
 
   // Snapshot the agents list so we can map PID → agentId when ingesting
   // pipeline events (Attribution.kind === 'pid'). Safe fallback: empty list.
@@ -230,7 +310,21 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     contentionScores,
     activeTrails,
     agentFileVersion,
+    activeConflictPaths,
   ]);
+
+  // Keep the render loop dirty while any conflict pulse is active so the
+  // ring animates even during periods with no other visual state mutation.
+  useEffect(() => {
+    if (activeConflictPaths.size === 0) return;
+    let raf = 0;
+    const tick = () => {
+      dirtyRef.current = true;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [activeConflictPaths]);
 
   // Keep the render loop dirty while trails or agent pulses are animating
   // (heads travel for 400ms, tails fade over 10s, pulses loop every 2s).
@@ -295,6 +389,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     selectedNode,
     selectedAgentId,
     activeTrails,
+    activeConflictPaths,
   });
   useEffect(() => {
     stateRef.current = {
@@ -310,6 +405,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       selectedNode,
       selectedAgentId,
       activeTrails,
+      activeConflictPaths,
     };
   }, [
     graphNodes,
@@ -324,6 +420,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     selectedNode,
     selectedAgentId,
     activeTrails,
+    activeConflictPaths,
   ]);
 
   // Main rAF render loop — single subscription for the lifetime of the view.
@@ -419,7 +516,9 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       );
       drawAgentDots(ctx, dots, now, vp.zoom);
 
-      // Plan 06 will insert steps 12-13: conflict pulses, pinned badges.
+      // Plan 06 z-order steps 12-13: conflict pulse rings + badge dots (D-22).
+      drawConflictPulses(ctx, s.activeConflictPaths, s.positions, now, vp.zoom);
+      drawConflictBadges(ctx, s.activeConflictPaths, s.positions, vp.zoom);
 
       dirtyRef.current = false;
       animFrameRef.current = requestAnimationFrame(render);

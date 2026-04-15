@@ -143,6 +143,24 @@ vi.mock('../../../stores/agentStore', () => {
   };
 });
 
+// Mock conflictStore — Plan 06 reads `alerts` and derives active
+// (non-dismissed) file paths for the pulse render.
+const mockConflictState = {
+  alerts: [] as Array<{
+    id: string;
+    filePath: string;
+    agentAId: string;
+    agentBId: string;
+    dismissed: boolean;
+  }>,
+};
+vi.mock('../../../stores/conflictStore', () => {
+  return {
+    useConflictStore: (selector: (s: typeof mockConflictState) => unknown) =>
+      selector(mockConflictState),
+  };
+});
+
 // Mock radarStore. Plan 03 shape + Plan 05 additions: `activeTrails`,
 // `pushTrail`, `pruneTrails`, `pinNode`, `unpinNode`.
 const mockRadarState = {
@@ -225,6 +243,7 @@ describe('RadarCanvas (graph mode) — Plan 04', () => {
     mockRadarState.activeTrails = [];
     mockPipelineState.events = [];
     mockAgentState.agents = [];
+    mockConflictState.alerts = [];
     mockQuadtreeHit.current = null;
     vi.clearAllMocks();
   });
@@ -415,5 +434,59 @@ describe('RadarCanvas (graph mode) — Plan 04', () => {
     mockRadarState.graphNodes = nodes;
     const { getByText } = render(<RadarCanvas />);
     expect(getByText('INFO_DEGRADED')).toBeTruthy();
+  });
+
+  it('renders conflict pulse ring on contended nodes (D-22)', async () => {
+    mockRadarState.graphNodes = [
+      { id: 'a.ts', dirKey: '', dirDepth: 0, x: 42, y: 17 },
+    ];
+    mockRadarState.settledAt = Date.now();
+    mockConflictState.alerts = [
+      {
+        id: 'c1',
+        filePath: 'a.ts',
+        agentAId: 'agent-001',
+        agentBId: 'agent-002',
+        dismissed: false,
+      },
+    ];
+
+    render(<RadarCanvas />);
+    await new Promise((r) => setTimeout(r, 40));
+
+    // The pulse ring is the only stroke assignment with CONFLICT_COLOR (error
+    // #ff7351) on a non-heat-map node (heatMapEnabled is false in beforeEach).
+    // Assert at least one strokeStyle assignment to #ff7351 occurred AND that
+    // an arc was drawn at the node world position (42, 17).
+    const strokes = shim.lastCtx.current!._assignments.strokeStyle ?? [];
+    expect(strokes.some((s) => s === '#ff7351')).toBe(true);
+    const arcs = shim.lastCtx.current!._calls.filter((c) => c.fn === 'arc');
+    const pulseArc = arcs.find((c) => {
+      const [x, y] = c.args as [number, number, ...unknown[]];
+      return Math.abs(x - 42) < 0.01 && Math.abs(y - 17) < 0.01;
+    });
+    expect(pulseArc).toBeDefined();
+  });
+
+  it('skips conflict pulse for dismissed alerts (D-22)', async () => {
+    mockRadarState.graphNodes = [
+      { id: 'a.ts', dirKey: '', dirDepth: 0, x: 42, y: 17 },
+    ];
+    mockRadarState.settledAt = Date.now();
+    mockConflictState.alerts = [
+      {
+        id: 'c1',
+        filePath: 'a.ts',
+        agentAId: 'agent-001',
+        agentBId: 'agent-002',
+        dismissed: true, // dismissed → no pulse
+      },
+    ];
+
+    render(<RadarCanvas />);
+    await new Promise((r) => setTimeout(r, 40));
+
+    const strokes = shim.lastCtx.current!._assignments.strokeStyle ?? [];
+    expect(strokes.some((s) => s === '#ff7351')).toBe(false);
   });
 });
