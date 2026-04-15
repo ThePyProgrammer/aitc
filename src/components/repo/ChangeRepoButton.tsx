@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { RefreshCw, X } from 'lucide-react';
 import { Button } from '../ui/Button';
@@ -7,7 +7,7 @@ import { useRepoStore } from '../../stores/repoStore';
 /**
  * UI-SPEC: top-bar trigger opens a centered modal (mirrors DeployDialog visual
  * language) so the sticky top bar never expands vertically during the confirm
- * flow. Modal dismisses via backdrop click, X, or "Keep current repo".
+ * flow. Modal dismisses via Escape, backdrop click, X, or "Keep current repo".
  * The primary action delegates to `useRepoStore.changeRepo()` which opens the
  * native folder picker.
  */
@@ -16,6 +16,17 @@ export function ChangeRepoButton() {
   const [switching, setSwitching] = useState(false);
   const changeRepo = useRepoStore((s) => s.changeRepo);
   const activeRepo = useRepoStore((s) => s.activeRepo);
+
+  // Escape key closes the modal. Listener registered only while open so we
+  // don't pollute global keydown during idle time.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open]);
 
   const handleSwitch = async () => {
     if (switching) return;
