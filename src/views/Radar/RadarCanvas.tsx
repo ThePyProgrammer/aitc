@@ -32,6 +32,7 @@ import {
   installRadarPipelineBridge,
 } from '../../stores/radarStore';
 import { usePipelineStore } from '../../stores/pipelineStore';
+import { useAgentStore } from '../../stores/agentStore';
 import { useCanvasZoomPan } from '../../hooks/useCanvasZoomPan';
 import { useGraphLayout } from '../../hooks/useGraphLayout';
 import {
@@ -42,6 +43,7 @@ import {
   drawSelectedNode,
   NODE_HIT_RADIUS,
 } from './GraphRenderer';
+import { drawCometTrails, drawAgentDots } from './CometTrail';
 
 // UI-SPEC §Performance states thresholds (D-23).
 const DEGRADED_NODE_THRESHOLD = 5_000;
@@ -80,7 +82,19 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const contentionScores = useRadarStore((s) => s.contentionScores);
 
   const { viewport, handlers, screenToWorld } = useCanvasZoomPan();
-  const { quadtreeRef } = useGraphLayout();
+  const { quadtreeRef, rewarm } = useGraphLayout();
+  const activeTrails = useRadarStore((s) => s.activeTrails);
+
+  // Snapshot the agents list so we can map PID → agentId when ingesting
+  // pipeline events (Attribution.kind === 'pid'). Safe fallback: empty list.
+  const agents = useAgentStore((s) => s.agents);
+  const pidToAgentId = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const a of agents) {
+      if (a.pid !== null) m.set(a.pid, a.id);
+    }
+    return m;
+  }, [agents]);
 
   // Sync viewport back to store so minimap / debug tools can observe.
   const storeSetViewport = useRadarStore((s) => s.setViewport);
@@ -124,23 +138,82 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     return { parentChildMap: pcm, dirsWithOwnFiles: dwof };
   }, [graphNodes]);
 
-  // Resolve selected node (best-effort — Plan 05 wires agent current-position
-  // tracking; for now we look up the most recent FileEvent for the selected
-  // agent and find the matching graph node, else undefined = no glow).
+  // Per-agent current-file + dot-state refs. Updated by the pipeline
+  // subscription effect below; read by the rAF loop via stateRef.
+  //   - lastAgentFileRef: agentId → most-recent file path (used to detect
+  //     path-changed events and to resolve `selectedNode`).
+  //   - agentDotsRef: agentId → {x, y, lastEventTs} for drawAgentDots.
+  const lastAgentFileRef = useRef<Map<string, string>>(new Map());
+  const agentDotsRef = useRef<
+    Map<string, { x: number; y: number; lastEventTs: number }>
+  >(new Map());
+  // Tick version forces `selectedNode` useMemo to re-evaluate after the
+  // pipeline subscription mutates lastAgentFileRef (ref mutations don't
+  // themselves trigger React re-renders).
+  const [agentFileVersion, setAgentFileVersion] = useState(0);
+
   const pipelineEvents = usePipelineStore((s) => s.events);
+
+  // D-14 trail spawn: for each new pipeline event attributed to a known
+  // agent, update the dot position + spawn a trail when the path changes.
+  // Tracks the highest event timestampMs we've already processed so we
+  // don't double-spawn trails on React-StrictMode double-invoke.
+  const lastProcessedTsRef = useRef<number>(0);
+  useEffect(() => {
+    if (pipelineEvents.length === 0) return;
+    // Pipeline events are newest-first; iterate oldest → newest so trails
+    // spawn in chronological order.
+    let maxTs = lastProcessedTsRef.current;
+    let mutated = false;
+    for (let i = pipelineEvents.length - 1; i >= 0; i--) {
+      const ev = pipelineEvents[i];
+      if (ev.timestampMs <= lastProcessedTsRef.current) continue;
+      if (ev.attribution.kind !== 'pid') continue;
+      const agentId = pidToAgentId.get(ev.attribution.value);
+      if (!agentId) continue;
+
+      const path = ev.path;
+      const prev = lastAgentFileRef.current.get(agentId);
+      // D-17: snap the agent dot to the touched file if we have a position.
+      const node = graphNodes.find((n) => n.id === path);
+      if (node && node.x !== undefined && node.y !== undefined) {
+        agentDotsRef.current.set(agentId, {
+          x: node.x,
+          y: node.y,
+          lastEventTs: Date.now(),
+        });
+        mutated = true;
+      }
+      // D-14: spawn a trail when the touched path changes.
+      if (prev && prev !== path) {
+        useRadarStore.getState().pushTrail({
+          id: `${agentId}|${prev}|${path}|${Date.now()}`,
+          agentId,
+          fromPath: prev,
+          toPath: path,
+          startTs: Date.now(),
+        });
+        mutated = true;
+      }
+      lastAgentFileRef.current.set(agentId, path);
+      if (ev.timestampMs > maxTs) maxTs = ev.timestampMs;
+    }
+    if (maxTs > lastProcessedTsRef.current) {
+      lastProcessedTsRef.current = maxTs;
+    }
+    if (mutated) setAgentFileVersion((v) => v + 1);
+  }, [pipelineEvents, graphNodes, pidToAgentId]);
+
+  // Selected-agent glow: resolve to the graph node matching the agent's
+  // most-recently-touched file, if any. Closes the loop left open in Plan 04.
   const selectedNode = useMemo(() => {
     if (!selectedAgentId) return undefined;
-    // Heuristic: events are ordered newest-first in the pipeline store per
-    // its contract; take the first one attributed to the selected agent.
-    for (const ev of pipelineEvents) {
-      if (ev.attribution.kind === 'pid') {
-        // We don't know the PID here; Plan 05 wires this properly. Fall
-        // through to the generic "find by path equality" loop below.
-        break;
-      }
-    }
-    return undefined;
-  }, [selectedAgentId, pipelineEvents]);
+    const path = lastAgentFileRef.current.get(selectedAgentId);
+    if (!path) return undefined;
+    return graphNodes.find((n) => n.id === path);
+    // agentFileVersion participates so re-lookups happen on pipeline ingest.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAgentId, graphNodes, agentFileVersion]);
 
   // Dirty-flag invalidators.
   useEffect(() => {
@@ -155,7 +228,24 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     pinnedNodeIds,
     heatMapEnabled,
     contentionScores,
+    activeTrails,
+    agentFileVersion,
   ]);
+
+  // Keep the render loop dirty while trails or agent pulses are animating
+  // (heads travel for 400ms, tails fade over 10s, pulses loop every 2s).
+  // Without this the loop would idle after settledAt and skip frames even
+  // though visual state is changing.
+  useEffect(() => {
+    if (activeTrails.length === 0 && agentDotsRef.current.size === 0) return;
+    let raf = 0;
+    const tick = () => {
+      dirtyRef.current = true;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [activeTrails]);
 
   // ResizeObserver → canvasSize.
   useEffect(() => {
@@ -204,6 +294,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     pinnedNodeIds,
     selectedNode,
     selectedAgentId,
+    activeTrails,
   });
   useEffect(() => {
     stateRef.current = {
@@ -218,6 +309,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       pinnedNodeIds,
       selectedNode,
       selectedAgentId,
+      activeTrails,
     };
   }, [
     graphNodes,
@@ -231,6 +323,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     pinnedNodeIds,
     selectedNode,
     selectedAgentId,
+    activeTrails,
   ]);
 
   // Main rAF render loop — single subscription for the lifetime of the view.
@@ -305,8 +398,28 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         );
       }
 
-      // Plans 05/06 will insert steps 8-13 here: comet tails, comet heads,
-      // agent dots, conflict pulses, and conflict/pinned badges.
+      // Plan 05 z-order steps 9-11: comet trails + agent dots.
+      // Use Date.now() so the `now` passed to CometTrail functions is the
+      // same epoch as `trail.startTs` (written with Date.now() above).
+      const now = Date.now();
+      // Prune expired trails from the store each frame (cheap) so memory
+      // stays bounded even in long sessions. D-16 / D-18.
+      useRadarStore.getState().pruneTrails(now);
+      // Step 9-10: gradient tails + glowing heads.
+      drawCometTrails(ctx, s.activeTrails, s.positions, now, vp.zoom);
+      // Step 11: agent dots + pulse rings (D-17). Snapshot the ref's map
+      // into an array for the pure draw function.
+      const dots = Array.from(agentDotsRef.current.entries()).map(
+        ([agentId, st]) => ({
+          agentId,
+          x: st.x,
+          y: st.y,
+          lastEventTs: st.lastEventTs,
+        }),
+      );
+      drawAgentDots(ctx, dots, now, vp.zoom);
+
+      // Plan 06 will insert steps 12-13: conflict pulses, pinned badges.
 
       dirtyRef.current = false;
       animFrameRef.current = requestAnimationFrame(render);
@@ -316,7 +429,17 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     return () => cancelAnimationFrame(animFrameRef.current);
   }, []); // empty deps — one loop for the component lifetime
 
-  // Quadtree-powered hit-test on mouse move (RESEARCH §Pattern 4).
+  // Drag-to-pin state (UI-SPEC §Interaction §Drag-to-pin). When set, the
+  // native-pan handler bails out in the useEffect below so clicks on nodes
+  // don't also pan the viewport.
+  const [dragState, setDragState] = useState<{ nodeId: string } | null>(null);
+  const dragStateRef = useRef<{ nodeId: string } | null>(null);
+  useEffect(() => {
+    dragStateRef.current = dragState;
+  }, [dragState]);
+
+  // Quadtree-powered hit-test on mouse move (RESEARCH §Pattern 4) — plus
+  // node-drag position update when a drag is active.
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       const rect = canvasRef.current?.getBoundingClientRect();
@@ -324,6 +447,17 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
       const world = screenToWorld(sx, sy);
+      if (dragStateRef.current) {
+        // Dragging a node: update its live x/y in the store so the render
+        // loop picks up the new position immediately.
+        const id = dragStateRef.current.nodeId;
+        useRadarStore.setState((s) => ({
+          graphNodes: s.graphNodes.map((n) =>
+            n.id === id ? { ...n, x: world.x, y: world.y } : n,
+          ),
+        }));
+        return;
+      }
       const found = quadtreeRef.current?.find(
         world.x,
         world.y,
@@ -338,24 +472,100 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     [screenToWorld, viewport.zoom, onHoveredAgentChange, quadtreeRef],
   );
 
-  // Attach native wheel/mouse handlers (wheel must be non-passive).
+  // mousedown on a node → enter drag state; shift+mousedown on a pinned node
+  // → unpin. Capturing at the React level (React's onMouseDown) is simpler
+  // than intercepting the useCanvasZoomPan native handler, but we gate the
+  // pan handler via dragStateRef in the effect below.
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (e.button !== 0) return;
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const world = screenToWorld(sx, sy);
+      const found = quadtreeRef.current?.find(
+        world.x,
+        world.y,
+        NODE_HIT_RADIUS / Math.max(viewport.zoom, 0.1),
+      );
+      if (!found) return;
+      if (e.shiftKey) {
+        // Shift+click a pinned node → unpin + rewarm.
+        if (useRadarStore.getState().pinnedNodeIds.has(found.id)) {
+          useRadarStore.getState().unpinNode(found.id);
+          rewarm(0.2);
+        }
+        return;
+      }
+      // Begin drag.
+      setDragState({ nodeId: found.id });
+    },
+    [screenToWorld, viewport.zoom, quadtreeRef, rewarm],
+  );
+
+  const handleMouseUp = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const drag = dragStateRef.current;
+      if (!drag) return;
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) {
+        setDragState(null);
+        return;
+      }
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const world = screenToWorld(sx, sy);
+      // Commit pinned position + rewarm so neighbors settle around the pin.
+      useRadarStore.getState().pinNode(drag.nodeId, world.x, world.y);
+      rewarm(0.3);
+      setDragState(null);
+    },
+    [screenToWorld, rewarm],
+  );
+
+  // Attach native wheel/mouse handlers (wheel must be non-passive). Pan
+  // handlers are gated on dragStateRef so node-drag doesn't also pan the
+  // viewport.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const { onWheel, onMouseDown, onMouseMove, onMouseUp } = handlers;
+    const gatedMouseDown = (e: MouseEvent) => {
+      // Skip pan when a node hit is about to start a drag. We re-check the
+      // quadtree here because handleMouseDown (React synthetic) and the
+      // native pan handler both fire on the same event.
+      if (e.button !== 0) return;
+      const rect = canvas.getBoundingClientRect();
+      const world = screenToWorld(
+        e.clientX - rect.left,
+        e.clientY - rect.top,
+      );
+      const hit = quadtreeRef.current?.find(
+        world.x,
+        world.y,
+        NODE_HIT_RADIUS / Math.max(viewport.zoom, 0.1),
+      );
+      if (hit) return; // node hit → let handleMouseDown start the drag
+      onMouseDown(e);
+    };
+    const gatedMouseMove = (e: MouseEvent) => {
+      if (dragStateRef.current) return;
+      onMouseMove(e);
+    };
     canvas.addEventListener('wheel', onWheel, { passive: false });
-    canvas.addEventListener('mousedown', onMouseDown);
-    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('mousedown', gatedMouseDown);
+    canvas.addEventListener('mousemove', gatedMouseMove);
     canvas.addEventListener('mouseup', onMouseUp);
     window.addEventListener('mouseup', onMouseUp);
     return () => {
       canvas.removeEventListener('wheel', onWheel);
-      canvas.removeEventListener('mousedown', onMouseDown);
-      canvas.removeEventListener('mousemove', onMouseMove);
+      canvas.removeEventListener('mousedown', gatedMouseDown);
+      canvas.removeEventListener('mousemove', gatedMouseMove);
       canvas.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [handlers]);
+  }, [handlers, screenToWorld, viewport.zoom, quadtreeRef]);
 
   // Reset dismissals when node count falls back into NORMAL.
   useEffect(() => {
@@ -423,6 +633,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       <canvas
         ref={canvasRef}
         onMouseMove={handleMouseMove}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
         className="block"
         data-hovered-node={hoveredNodeId}
         role="img"
