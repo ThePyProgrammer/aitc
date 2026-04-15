@@ -6,7 +6,11 @@
 
 import { useRef, useCallback, useMemo } from 'react';
 import { useRadarStore } from '../../stores/radarStore';
-import { buildFileTree, computeTreemapLayout } from '../../hooks/useTreemapLayout';
+import {
+  buildFileTree,
+  computeTreemapLayout,
+  graphNodesToTreeEntries,
+} from '../../hooks/useTreemapLayout';
 
 const MINIMAP_W = 160;
 const MINIMAP_H = 120;
@@ -14,17 +18,20 @@ const MANIFEST_W = 280;
 
 export function RadarMinimap() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const treeData = useRadarStore((s) => s.treeData);
+  // Phase 7 Plan 03: synthesize treemap entries from graphNodes until
+  // Plan 06 rewrites this minimap against the graph bounding box (D-20).
+  const graphNodes = useRadarStore((s) => s.graphNodes);
   const viewport = useRadarStore((s) => s.viewport);
   const setViewport = useRadarStore((s) => s.setViewport);
   const isManifestOpen = useRadarStore((s) => s.isManifestOpen);
 
   // Compute a tiny treemap layout at minimap scale
   const minimapRects = useMemo(() => {
-    if (treeData.length === 0) return [];
-    const tree = buildFileTree(treeData);
+    if (graphNodes.length === 0) return [];
+    const entries = graphNodesToTreeEntries(graphNodes);
+    const tree = buildFileTree(entries);
     return computeTreemapLayout(tree, MINIMAP_W, MINIMAP_H);
-  }, [treeData]);
+  }, [graphNodes]);
 
   // Viewport indicator rectangle (what part of the world is currently visible)
   // The main canvas shows world coordinates transformed by zoom and pan.
@@ -73,7 +80,7 @@ export function RadarMinimap() {
     [scaleX, scaleY, viewport.zoom, setViewport],
   );
 
-  if (treeData.length === 0) return null;
+  if (graphNodes.length === 0) return null;
 
   return (
     <div

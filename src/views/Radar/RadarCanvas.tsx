@@ -13,13 +13,17 @@
 // T-04-13: Lead lines limited to last 10 events per agent. Lines older
 // than 30s fade to 30% opacity. Sub-pixel culling applies.
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useMemo, useRef, useCallback, useState } from 'react';
 import { Flame } from 'lucide-react';
 import { useRadarStore } from '../../stores/radarStore';
 import { getAgentColor } from '../../stores/radarStore';
 import { useScopedAgents } from '../../hooks/useScopedAgents';
 import { usePipelineStore } from '../../stores/pipelineStore';
-import { useTreemapLayout, type TreemapRect } from '../../hooks/useTreemapLayout';
+import {
+  useTreemapLayout,
+  graphNodesToTreeEntries,
+  type TreemapRect,
+} from '../../hooks/useTreemapLayout';
 import { useCanvasZoomPan } from '../../hooks/useCanvasZoomPan';
 import { drawHeatMap } from './HeatMapOverlay';
 import type { FileEvent } from '../../bindings';
@@ -66,14 +70,18 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
 
-  const treeData = useRadarStore((s) => s.treeData);
+  // Phase 7 Plan 03: treemap renderer now sources its input from the
+  // graph node list via `graphNodesToTreeEntries`. Plan 04 replaces this
+  // file wholesale with a graph renderer.
+  const graphNodes = useRadarStore((s) => s.graphNodes);
   const selectedAgentId = useRadarStore((s) => s.selectedAgentId);
   const heatMapEnabled = useRadarStore((s) => s.heatMapEnabled);
   const contentionScores = useRadarStore((s) => s.contentionScores);
   const agents = useScopedAgents();
   const events = usePipelineStore((s) => s.events);
 
-  const layout = useTreemapLayout(treeData, canvasSize.width, canvasSize.height);
+  const treeEntries = useMemo(() => graphNodesToTreeEntries(graphNodes), [graphNodes]);
+  const layout = useTreemapLayout(treeEntries, canvasSize.width, canvasSize.height);
   const { viewport, handlers, screenToWorld } = useCanvasZoomPan();
 
   // Sync viewport to store for persistence

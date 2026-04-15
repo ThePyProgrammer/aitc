@@ -23,7 +23,39 @@ import { useMemo } from 'react';
 //   C) `mod` itself is the function (ES module default-export unwrap)
 // See .planning/debug/resolved/squarify-not-a-function.md for full analysis.
 import * as squarifyMod from 'squarify';
-import type { TreeIndexEntry } from '../stores/radarStore';
+
+/**
+ * Flat tree entry shape returned by the `get_tree_index` Tauri command.
+ * Phase 7 moved this type out of `radarStore.ts` because the store no
+ * longer caches the treemap baseline — the graph view derives its nodes
+ * from the same command but under a different projection. Kept colocated
+ * with `buildFileTree` since treemap code is the sole consumer.
+ */
+export interface TreeIndexEntry {
+  path: string;
+  size: number;
+  isDir: boolean;
+  depth: number;
+}
+
+/**
+ * Phase 7 Plan 03 bridge: synthesize flat `TreeIndexEntry[]` rows from
+ * the store's `GraphNode[]`. The treemap visuals survive on their own
+ * from graph node ids until Plan 04 rewrites RadarCanvas/Minimap/
+ * AgentManifestRow as graph renderers. Each graph node is a file, so
+ * we emit an `isDir: false` row with a placeholder size (graph nodes
+ * carry no size — the treemap uses equal-weighting as a fallback).
+ */
+export function graphNodesToTreeEntries(
+  nodes: ReadonlyArray<{ id: string; dirDepth: number }>,
+): TreeIndexEntry[] {
+  return nodes.map((n) => ({
+    path: n.id,
+    size: 1,
+    isDir: false,
+    depth: n.dirDepth + 1,
+  }));
+}
 
 type SquarifyFn = (
   data: Array<{ value: number } & Record<string, unknown>>,
@@ -240,16 +272,16 @@ export function computeTreemapLayout(
 
 /**
  * React hook: memoized treemap layout computation.
- * Keyed on [treeData, width, height] to prevent recomputation on re-renders.
+ * Keyed on [entries, width, height] to prevent recomputation on re-renders.
  */
 export function useTreemapLayout(
-  treeData: TreeIndexEntry[],
+  entries: TreeIndexEntry[],
   width: number,
   height: number,
 ): TreemapRect[] {
   return useMemo(() => {
-    if (treeData.length === 0 || width <= 0 || height <= 0) return [];
-    const tree = buildFileTree(treeData);
+    if (entries.length === 0 || width <= 0 || height <= 0) return [];
+    const tree = buildFileTree(entries);
     return computeTreemapLayout(tree, width, height);
-  }, [treeData, width, height]);
+  }, [entries, width, height]);
 }

@@ -1,38 +1,42 @@
-// Phase 4 radar Zustand store.
+// Phase 4 + Phase 7 radar Zustand store.
 //
-// VIZN-01: Manages viewport state, tree index data, selected agent, and manifest toggle.
-// Uses periodic tree index refresh via Tauri invoke('get_tree_index').
-// FMON-05: Heat map overlay state with contention score computation.
+// Phase 4 (VIZN-01): viewport state, selected agent, manifest toggle.
+// Phase 5 (FMON-05): heat map overlay + contention scores.
+// Phase 7 (D-01..D-03, D-11, VIZN-01/05): dependency-graph state.
+//   - `graphNodes` / `graphEdges`: settled force-directed layout input.
+//   - `settledAt`: null while in flight; ms epoch after useGraphLayout
+//     commits positions.
+//   - `pinnedNodeIds` + `fx/fy`: user-dragged pins (D-03).
+//   - `activeTrails`: per-agent comet trails (D-14..D-18); Plan 05 wires.
+//
+// Treemap-era state (`treeData` + `fetchTreeIndex`) is gone — Plan 03
+// replaces it with `fetchGraph()` which resolves both the tree index and
+// the dependency graph in parallel and resets `settledAt` to trigger a
+// fresh settle in useGraphLayout. `useTreemapLayout` still owns the
+// `TreeIndexEntry` shape until Plan 06 retires the treemap minimap.
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { computeContentionScore } from '../lib/contention';
 import type { ConflictAlert } from './conflictStore';
 import { usePipelineStore } from './pipelineStore';
-import type { DependencyEdgeDto } from '../bindings';
+import type { DependencyEdgeDto, EdgeKind } from '../bindings';
 
-export interface TreeIndexEntry {
-  path: string;
-  size: number;
-  isDir: boolean;
-  depth: number;
-}
-
-// Phase 7 graph state (D-01..D-03, D-11). Slots only — Plans 03+ wire behavior.
+// Phase 7 graph state (D-01..D-03, D-11).
 export interface GraphNode {
   id: string;              // repo-relative path (matches contentionScores keys)
   dirKey: string;          // repo-relative parent dir path
   dirDepth: number;        // depth from repo root, for forceCluster (D-11)
   x?: number;
   y?: number;
-  fx?: number | null;
-  fy?: number | null;
+  fx?: number | null;      // user-pinned x (D-03)
+  fy?: number | null;      // user-pinned y (D-03)
 }
 
 export interface GraphEdge {
   source: string;          // node id
   target: string;          // node id
-  kind: DependencyEdgeDto['kind'];
+  kind: EdgeKind;
 }
 
 export interface ActiveTrail {
@@ -49,13 +53,13 @@ export interface Viewport {
   panY: number;
 }
 
-// 8-color agent dot palette per UI-SPEC
+// 8-color agent dot palette per UI-SPEC.
 export const AGENT_DOT_PALETTE = [
   '#8eff71', '#00cffc', '#ffd16f', '#ff7351',
   '#c084fc', '#f472b6', '#67e8f9', '#a3e635',
 ];
 
-// Hash agent ID to palette index for session-consistent colors
+// Hash agent ID to palette index for session-consistent colors.
 export function getAgentColor(agentId: string): string {
   let hash = 0;
   for (let i = 0; i < agentId.length; i++) {
@@ -64,20 +68,33 @@ export function getAgentColor(agentId: string): string {
   return AGENT_DOT_PALETTE[Math.abs(hash) % AGENT_DOT_PALETTE.length];
 }
 
+// Minimal shape used by fetchGraph's invocation of `get_tree_index`.
+// (Kept internal — the public `TreeIndexEntry` lives in useTreemapLayout
+//  because the graph store no longer stores the flat entry list.)
+interface TreeIndexEntryRaw {
+  path: string;
+  size: number;
+  isDir: boolean;
+  depth: number;
+}
+
 interface RadarStore {
-  treeData: TreeIndexEntry[];
   viewport: Viewport;
   selectedAgentId: string | null;
   isManifestOpen: boolean;
   heatMapEnabled: boolean;
   contentionScores: Map<string, number>;
-  // Phase 7 graph state (slots only; Plan 03 wires layout, Plan 05 wires trails).
+  // Phase 7 graph state.
   graphNodes: GraphNode[];
   graphEdges: GraphEdge[];
   settledAt: number | null;
   pinnedNodeIds: Set<string>;
   activeTrails: ActiveTrail[];
-  fetchTreeIndex: () => Promise<void>;
+  // Actions.
+  fetchGraph: () => Promise<void>;
+  commitSettledPositions: (positions: Map<string, { x: number; y: number }>) => void;
+  pinNode: (id: string, x: number, y: number) => void;
+  unpinNode: (id: string) => void;
   setViewport: (v: Partial<Viewport>) => void;
   selectAgent: (id: string | null) => void;
   toggleManifest: () => void;
@@ -87,7 +104,6 @@ interface RadarStore {
 }
 
 export const useRadarStore = create<RadarStore>((set) => ({
-  treeData: [],
   viewport: { zoom: 1, panX: 0, panY: 0 },
   selectedAgentId: null,
   isManifestOpen: true,
@@ -99,13 +115,88 @@ export const useRadarStore = create<RadarStore>((set) => ({
   pinnedNodeIds: new Set<string>(),
   activeTrails: [],
 
-  fetchTreeIndex: async () => {
+  /**
+   * D-03 + D-05: fetch tree index + dependency graph in parallel, derive
+   * file-only `GraphNode[]` with dirKey/dirDepth, filter edges to known
+   * node ids, reset settledAt so useGraphLayout runs a fresh settle.
+   *
+   * Best-effort: backend errors (e.g. command not registered, parser
+   * failure) leave the store untouched — matches the old fetchTreeIndex
+   * contract so the UI degrades gracefully on startup.
+   */
+  fetchGraph: async () => {
     try {
-      const data = await invoke<TreeIndexEntry[]>('get_tree_index');
-      set({ treeData: data });
+      const [treeIndex, edges] = await Promise.all([
+        invoke<TreeIndexEntryRaw[]>('get_tree_index'),
+        invoke<DependencyEdgeDto[]>('get_dependency_graph'),
+      ]);
+      const fileEntries = treeIndex.filter((e) => !e.isDir);
+      const knownIds = new Set(fileEntries.map((e) => e.path));
+      const nodes: GraphNode[] = fileEntries.map((e) => {
+        const lastSlash = e.path.lastIndexOf('/');
+        const dirKey = lastSlash >= 0 ? e.path.slice(0, lastSlash) : '';
+        return {
+          id: e.path,
+          dirKey,
+          dirDepth: dirKey === '' ? 0 : dirKey.split('/').length,
+        };
+      });
+      const validEdges: GraphEdge[] = edges
+        .filter((e) => knownIds.has(e.from) && knownIds.has(e.to))
+        .map((e) => ({ source: e.from, target: e.to, kind: e.kind }));
+      set({ graphNodes: nodes, graphEdges: validEdges, settledAt: null });
     } catch {
-      // Backend may not have this command yet; silently ignore
+      // Best-effort: leave existing slots as-is on failure.
     }
+  },
+
+  /**
+   * D-03: write settled x/y back into each matching node, mark
+   * `settledAt = now` so subscribers know the layout is stable.
+   */
+  commitSettledPositions: (positions) => {
+    set((s) => ({
+      graphNodes: s.graphNodes.map((n) => {
+        const p = positions.get(n.id);
+        return p ? { ...n, x: p.x, y: p.y } : n;
+      }),
+      settledAt: Date.now(),
+    }));
+  },
+
+  /**
+   * D-03: pin a node at (x, y). Sets fx/fy (d3-force honors these as
+   * fixed positions) and records the id in pinnedNodeIds so the Canvas
+   * overlay can render a distinct "pinned" marker.
+   */
+  pinNode: (id, x, y) => {
+    set((s) => {
+      const nextPinned = new Set(s.pinnedNodeIds);
+      nextPinned.add(id);
+      return {
+        pinnedNodeIds: nextPinned,
+        graphNodes: s.graphNodes.map((n) =>
+          n.id === id ? { ...n, fx: x, fy: y, x, y } : n,
+        ),
+      };
+    });
+  },
+
+  /**
+   * D-03: release a pinned node — clears fx/fy so d3-force resumes
+   * governing its position on the next rewarm.
+   */
+  unpinNode: (id) => {
+    set((s) => {
+      const nextPinned = new Set(s.pinnedNodeIds);
+      nextPinned.delete(id);
+      return {
+        pinnedNodeIds: nextPinned,
+        graphNodes: s.graphNodes.map((n) =>
+          n.id === id ? { ...n, fx: null, fy: null } : n,
+        ),
+      };
+    });
   },
 
   setViewport: (v) =>
@@ -122,7 +213,7 @@ export const useRadarStore = create<RadarStore>((set) => ({
   updateContentionScores: (conflicts, agentFileEvents) => {
     const fileStats = new Map<string, { conflictCount: number; agentIds: Set<string> }>();
 
-    // Accumulate conflict data
+    // Accumulate conflict data.
     for (const conflict of conflicts) {
       const existing = fileStats.get(conflict.filePath) ?? { conflictCount: 0, agentIds: new Set() };
       existing.conflictCount += 1;
@@ -131,7 +222,7 @@ export const useRadarStore = create<RadarStore>((set) => ({
       fileStats.set(conflict.filePath, existing);
     }
 
-    // Merge in agent file events
+    // Merge in agent file events.
     for (const [agentId, filePaths] of agentFileEvents) {
       for (const filePath of filePaths) {
         const existing = fileStats.get(filePath) ?? { conflictCount: 0, agentIds: new Set() };
@@ -140,7 +231,7 @@ export const useRadarStore = create<RadarStore>((set) => ({
       }
     }
 
-    // Compute normalization ceilings
+    // Compute normalization ceilings.
     let maxConflicts = 0;
     let maxAgents = 0;
     for (const stats of fileStats.values()) {
@@ -148,7 +239,7 @@ export const useRadarStore = create<RadarStore>((set) => ({
       if (stats.agentIds.size > maxAgents) maxAgents = stats.agentIds.size;
     }
 
-    // Compute scores
+    // Compute scores.
     const scores = new Map<string, number>();
     for (const [filePath, stats] of fileStats) {
       const score = computeContentionScore(stats.conflictCount, stats.agentIds.size, maxConflicts, maxAgents);
@@ -162,7 +253,6 @@ export const useRadarStore = create<RadarStore>((set) => ({
 
   reset: () =>
     set({
-      treeData: [],
       viewport: { zoom: 1, panX: 0, panY: 0 },
       selectedAgentId: null,
       isManifestOpen: true,
@@ -179,9 +269,12 @@ export const useRadarStore = create<RadarStore>((set) => ({
 const BRIDGE_DEBOUNCE_MS = 500;
 
 /**
- * D-08: Wire pipelineStore.events → radarStore.fetchTreeIndex (debounced 500ms).
+ * D-08: Wire pipelineStore.events → radarStore.fetchGraph (debounced 500ms).
  * Returns an unsubscribe function. Caller MUST store it in a ref and call
  * on unmount to avoid leaks (06-RESEARCH.md Pitfall 6).
+ *
+ * Phase 7 swap: calls `fetchGraph()` instead of the old `fetchTreeIndex()`
+ * so the dependency graph is refreshed in step with the tree index.
  */
 export function installRadarPipelineBridge(): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -189,8 +282,8 @@ export function installRadarPipelineBridge(): () => void {
     if (state.events === prev.events) return;
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
-      useRadarStore.getState().fetchTreeIndex().catch(() => {
-        /* tree-index refresh is best-effort; errors already logged by fetchTreeIndex */
+      useRadarStore.getState().fetchGraph().catch(() => {
+        /* graph refresh is best-effort; errors already swallowed by fetchGraph */
       });
     }, BRIDGE_DEBOUNCE_MS);
   });

@@ -17,8 +17,12 @@ import { usePipelineStore } from '../stores/pipelineStore';
 import { useConflictStore } from '../stores/conflictStore';
 
 export function RadarView() {
-  const treeData = useRadarStore((s) => s.treeData);
-  const fetchTreeIndex = useRadarStore((s) => s.fetchTreeIndex);
+  // Phase 7 (Plan 03): treeData + fetchTreeIndex were replaced by
+  // graphNodes + fetchGraph. We still read `graphNodes.length` to drive
+  // the AWAITING_SIGNAL empty state until Plan 04 lands the graph-only
+  // RadarCanvas and this component is rewritten.
+  const graphNodes = useRadarStore((s) => s.graphNodes);
+  const fetchGraph = useRadarStore((s) => s.fetchGraph);
   const fetchAgents = useAgentStore((s) => s.fetchAgents);
   const startPolling = useAgentStore((s) => s.startPolling);
   const isWatching = usePipelineStore((s) => s.isWatching);
@@ -33,11 +37,11 @@ export function RadarView() {
   const [containerRect, setContainerRect] = useState<DOMRect | null>(null);
 
   useEffect(() => {
-    fetchTreeIndex();
+    fetchGraph();
     fetchAgents();
     const cleanup = startPolling();
     return cleanup;
-  }, [fetchTreeIndex, fetchAgents, startPolling]);
+  }, [fetchGraph, fetchAgents, startPolling]);
 
   // Periodic contention score updates (every 5s per T-05-14 mitigation)
   useEffect(() => {
@@ -87,7 +91,7 @@ export function RadarView() {
     ? agents.find((a) => a.id === hoveredAgentId) ?? null
     : null;
 
-  const showEmptyState = treeData.length === 0 && !isWatching;
+  const showEmptyState = graphNodes.length === 0 && !isWatching;
 
   if (showEmptyState) {
     return (

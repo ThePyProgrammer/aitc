@@ -8,7 +8,7 @@ import { StatusBadge } from '../../components/ui/StatusBadge';
 import type { AgentInfo } from '../../stores/agentStore';
 import { useRadarStore, getAgentColor } from '../../stores/radarStore';
 import { usePipelineStore } from '../../stores/pipelineStore';
-import { useTreemapLayout } from '../../hooks/useTreemapLayout';
+import { useTreemapLayout, graphNodesToTreeEntries } from '../../hooks/useTreemapLayout';
 
 interface AgentManifestRowProps {
   agent: AgentInfo;
@@ -18,7 +18,9 @@ export function AgentManifestRow({ agent }: AgentManifestRowProps) {
   const selectedAgentId = useRadarStore((s) => s.selectedAgentId);
   const selectAgent = useRadarStore((s) => s.selectAgent);
   const setViewport = useRadarStore((s) => s.setViewport);
-  const treeData = useRadarStore((s) => s.treeData);
+  // Phase 7 Plan 03: derive treemap layout input from graphNodes —
+  // Plan 04 rewrites this row to hit-test against graph node positions.
+  const graphNodes = useRadarStore((s) => s.graphNodes);
   const events = usePipelineStore((s) => s.events);
 
   const isSelected = selectedAgentId === agent.id;
@@ -39,7 +41,8 @@ export function AgentManifestRow({ agent }: AgentManifestRowProps) {
 
   // Treemap layout for finding agent position
   // Use a reasonable default size (will approximate)
-  const layout = useTreemapLayout(treeData, 800, 600);
+  const treeEntries = useMemo(() => graphNodesToTreeEntries(graphNodes), [graphNodes]);
+  const layout = useTreemapLayout(treeEntries, 800, 600);
 
   const handleClick = () => {
     selectAgent(agent.id);
