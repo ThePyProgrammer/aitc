@@ -227,6 +227,86 @@ describe('radarStore', () => {
     expect(useRadarStore.getState().selectedAgentId).toBeNull();
   });
 
+  it('pushTrail appends an ActiveTrail to activeTrails (Plan 05)', () => {
+    const trail = {
+      id: 'a|x|y|1000',
+      agentId: 'a',
+      fromPath: 'x',
+      toPath: 'y',
+      startTs: 1000,
+    };
+    useRadarStore.getState().pushTrail(trail);
+    const s = useRadarStore.getState();
+    expect(s.activeTrails).toHaveLength(1);
+    expect(s.activeTrails[0]).toMatchObject({ id: 'a|x|y|1000', agentId: 'a' });
+  });
+
+  it('pushTrail evicts oldest trail for same agent when at cap of 10 (D-18)', () => {
+    // Seed 10 trails for agent "a" with increasing startTs.
+    const seeded = Array.from({ length: 10 }, (_, i) => ({
+      id: `a|x|y|${1000 + i}`,
+      agentId: 'a',
+      fromPath: 'x',
+      toPath: 'y',
+      startTs: 1000 + i,
+    }));
+    for (const t of seeded) useRadarStore.getState().pushTrail(t);
+    expect(useRadarStore.getState().activeTrails).toHaveLength(10);
+
+    // Push an 11th for agent "a" — oldest (startTs=1000) should be evicted.
+    useRadarStore.getState().pushTrail({
+      id: 'a|x|z|2000',
+      agentId: 'a',
+      fromPath: 'x',
+      toPath: 'z',
+      startTs: 2000,
+    });
+    const s = useRadarStore.getState();
+    expect(s.activeTrails).toHaveLength(10);
+    expect(s.activeTrails.find((t) => t.startTs === 1000)).toBeUndefined();
+    expect(s.activeTrails.find((t) => t.startTs === 2000)).toBeDefined();
+  });
+
+  it('pushTrail cap is per-agent (agent B trails untouched when A evicts)', () => {
+    // Fill agent "a" to cap.
+    for (let i = 0; i < 10; i++) {
+      useRadarStore.getState().pushTrail({
+        id: `a|x|y|${i}`,
+        agentId: 'a',
+        fromPath: 'x',
+        toPath: 'y',
+        startTs: 1000 + i,
+      });
+    }
+    // Push trails for agent "b" — should coexist with all of "a".
+    for (let i = 0; i < 3; i++) {
+      useRadarStore.getState().pushTrail({
+        id: `b|x|y|${i}`,
+        agentId: 'b',
+        fromPath: 'x',
+        toPath: 'y',
+        startTs: 2000 + i,
+      });
+    }
+    const s = useRadarStore.getState();
+    expect(s.activeTrails.filter((t) => t.agentId === 'a')).toHaveLength(10);
+    expect(s.activeTrails.filter((t) => t.agentId === 'b')).toHaveLength(3);
+  });
+
+  it('pruneTrails drops trails older than 10s', () => {
+    const now = 20_000;
+    useRadarStore.setState({
+      activeTrails: [
+        { id: 'a|x|y|old', agentId: 'a', fromPath: 'x', toPath: 'y', startTs: now - 12_000 },
+        { id: 'a|x|y|new', agentId: 'a', fromPath: 'x', toPath: 'y', startTs: now - 1_000 },
+      ],
+    });
+    useRadarStore.getState().pruneTrails(now);
+    const s = useRadarStore.getState();
+    expect(s.activeTrails).toHaveLength(1);
+    expect(s.activeTrails[0].id).toBe('a|x|y|new');
+  });
+
   it('getAgentColor returns consistent color from 8-color palette based on hash of agent ID', () => {
     const color1 = getAgentColor('agent-001');
     const color2 = getAgentColor('agent-001');
