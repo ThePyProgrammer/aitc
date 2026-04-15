@@ -173,7 +173,26 @@ Plans:
 
 **Requirements:** Carries forward the Phase 4 comms hub request flow; no new milestone requirements.
 **Depends on:** Phase 7. (Also builds on the existing Phase 3 self-register server and Phase 4 approval UI.)
-**Plans:** TBD (run /gsd-plan-phase 8 to break down)
+**Plans:** 6 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 8 to break down)
+- [ ] 08-01-PLAN.md -- Wave 0: workspace + sidecar crate scaffold, DB migration 005, hook_waiters/hook_install/port_file module stubs, bundle+capability config, frontend ToolPreview registry stub, test fixtures (foundation)
+- [ ] 08-02-PLAN.md -- Wave 1 backend: /hook axum route with long-held response + AbandonGuard, WaiterRegistry impl, port_file writer, Tauri approve/deny/approve_with_edits signal waiters + terminate force-deny, e2e smokes (COMM-01/02/06, AGNT-03)
+- [ ] 08-03-PLAN.md -- Wave 1 sidecar: aitc-hook binary parses Claude PreToolUse stdin, POSTs /hook, emits modern hookSpecificOutput envelope, fail-safe deny on every error path (COMM-02, COMM-06)
+- [ ] 08-04-PLAN.md -- Wave 2 install: settings.local.json merge-safe writer, claude_code::launch chip-bypass wiring, passive consent event+commands, startup auto-heal, tauri-plugin-shell registration (AGNT-03, COMM-05)
+- [ ] 08-05-PLAN.md -- Wave 2 frontend: ToolBadge, per-tool ToolPreview renderers (Edit/Write/Bash/Notebook/ProtectedPath/Unknown), DontAskAgainCheckbox, PassiveHookConsentDialog, deepLinkNotification, RequestQueue abandoned-row treatment (COMM-01/02/03/05/06)
+- [ ] 08-06-PLAN.md -- Wave 3 e2e: cross-crate integration test driving real aitc-hook binary against real /hook endpoint (allow/allow_with_edits/deny/abandon); manual UAT + visual verification checkpoint against 08-UI-SPEC
+
+### Phase 9: Implement a plugin / skill / tool / hook manager page that scans both ~/.claude/ and cwd/.claude/ via the watcher, this should be for me to track what things claude has access to at any one point and also edit the CLAUDE.md files in cwd/CLAUDE.md and cwd/.claude/CLAUDE.md if need be
+
+**Goal:** Ship the ARSENAL page — a master/detail view under /arsenal that surfaces Skills, Agents, Plugins, and Configuration (Hooks+Commands+Settings+MCP) from both ~/.claude/ (global) and <cwd>/.claude/ (project) via a multi-root extension of the pipeline watcher, and provides an inline textarea editor for <cwd>/CLAUDE.md and <cwd>/.claude/CLAUDE.md with atomic writes + 10-second undo toast + non-blocking external-change banner. Backend parses all formats in Rust (gray_matter + serde_json), frontend mirrors the Phase 2 Channel<T>+Zustand trio. Establishes MasterDetailShell as a reusable layout primitive.
+**Requirements**: (none — phase added mid-milestone; behavioral spec lives in D-01..D-15 of 09-CONTEXT.md)
+**Depends on:** Phase 8
+**Plans:** 5 plans
+
+Plans:
+- [ ] 09-01-PLAN.md -- Wave 0: backend deps (gray_matter, runtime tempfile, dirs), claude_resources module skeleton, ResourceEvent/Resource/Category/Scope types registered via tauri-specta, fixture tree, frontend Arsenal placeholders
+- [ ] 09-02-PLAN.md -- Wave 1: parse.rs (all resource categories + MCP secret masking), scan.rs (allowlist + exclude cache/session-env/projects/backups/downloads), routing.rs (classify + category_for_path), write_fence.rs (TTL suppression)
+- [ ] 09-03-PLAN.md -- Wave 2: claude_md.rs (atomic_write + editable whitelist), watcher_routing.rs (two-Debouncer architecture — persistent global + ephemeral project), commands.rs (start/stop/readClaudeMd/writeClaudeMd with D-13 write gate), state management, bindings regen
+- [ ] 09-04-PLAN.md -- Wave 2: frontend foundations — claudeResourcesStore (with D-03 shadow suppression in selectCombined), useClaudeResourcesChannel hook, MasterDetailShell primitive, ScopeChip/UndoToast/ExternalChangeBanner components
+- [ ] 09-05-PLAN.md -- Wave 3: ArsenalView assembly — Sidebar ARSENAL entry (Lucide Package, after TOWER), /arsenal route, ScopeTabs/CategoryRail/ResourceList/ResourceRow/DetailPanel/FrontmatterTable/ContentPreview/ClaudeMdEditor, save+undo+external-change wiring, 12-step human-verify checkpoint

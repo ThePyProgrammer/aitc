@@ -800,32 +800,31 @@ CREATE INDEX IF NOT EXISTS idx_approval_requests_tool ON approval_requests(tool_
 | A6 | Tauri v2's `app.path().resource_dir()` returns a path that contains `binaries/aitc-hook` (matching `bundle.externalBin: ["binaries/aitc-hook"]`) | Code Examples — Tauri v2 sidecar | Path may be different on macOS app bundles. Plan should `tracing::info!` the resolved path on first install for diagnostic. |
 | A7 | The default Phase 4 `protected_paths` glob engine (likely `glob = "0.3"`) handles the kinds of patterns users will write for D-21 | D-21 | If user writes `**` recursive globs and crate doesn't support them, gating breaks for those paths. Phase 4 already handles this for filesystem-watch path; should reuse same engine here. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does Claude Code expose Claude's PID in the hook subprocess env?**
    - What we know: PreToolUse stdin includes `session_id`, `cwd`, `transcript_path`. PID is not in the documented stdin schema.
    - What's unclear: Whether Claude sets an env var like `CLAUDE_PROCESS_ID` for hook subprocesses.
-   - Recommendation: **Don't depend on it.** Use `session_id` for correlation per Pitfall 7 option 4. If PID is needed for force-deny on terminate (D-10), the WaiterRegistry stores `(session_id → agent_id)` and `terminate_process` looks up the agent_id, then iterates the registry to find session_ids bound to that agent_id, then signals their waiters. Slight indirection but doesn't depend on PID plumbing.
+   - RESOLVED: **Don't depend on it.** Use `session_id` for correlation per Pitfall 7 option 4. If PID is needed for force-deny on terminate (D-10), the WaiterRegistry stores `(session_id → agent_id)` and `terminate_process` looks up the agent_id, then iterates the registry to find session_ids bound to that agent_id, then signals their waiters. Slight indirection but doesn't depend on PID plumbing.
 
 2. **What is the exact response Content-Type Claude Code expects from the long-held `/hook` response?**
    - Sidecar reads it via `ureq::Response::into_json()` so it's JSON, but Claude itself reads from the sidecar's stdout. Claude doesn't see the AITC response directly.
-   - Therefore: **AITC's /hook response is private between AITC and the sidecar.** Use `application/json` and a custom `HookDecision` shape; no Claude-imposed constraint.
-   - Resolution: Already known. No action.
+   - RESOLVED: **AITC's /hook response is private between AITC and the sidecar.** Use `application/json` and a custom `HookDecision` shape; no Claude-imposed constraint. No action required.
 
 3. **Does writing to `cwd/.claude/settings.local.json` trigger Claude Code's hot-reload of its config, or does it require a session restart?**
    - What we know: Claude reads settings on session start. settings.local.json is documented as session-scoped.
    - What's unclear: Whether modifying settings.local.json mid-session reloads it.
-   - Recommendation: Write the file *before* `launch_detached` spawns Claude (D-01 already implies this — install during launch flow, before child spawn). Avoids the question entirely. For passive-detected agents (D-04), the user is told the new install applies to *new* Claude sessions only; the currently running session is unaffected. Document in the consent prompt copy.
+   - RESOLVED: Write the file *before* `launch_detached` spawns Claude (D-01 already implies this — install during launch flow, before child spawn). Avoids the question entirely. For passive-detected agents (D-04), the user is told the new install applies to *new* Claude sessions only; the currently running session is unaffected. Document in the consent prompt copy.
 
 4. **For passive-detected agents: how do we know Claude's `cwd` to install settings.local.json into?**
    - What we know: `bridge_tick` populates `cand.cwd` from `sysinfo`. ProcessSnapshot already attaches cwd to candidates.
    - What's unclear: How reliable cwd attribution is when Claude is launched by a wrapper (e.g., `sh -c "cd /repo && claude"`).
-   - Recommendation: Trust `sysinfo`'s cwd. If it points outside the watched repo or to `/`, skip the consent prompt for that PID and log.
+   - RESOLVED: Trust `sysinfo`'s cwd. If it points outside the watched repo or to `/`, skip the consent prompt for that PID and log.
 
 5. **Does `--dangerously-skip-permissions` actually skip hooks too, or only the built-in permission prompts?**
    - What we know: D-23 says skipping the hook install is the right user-intent semantic if either bypass chip is set.
    - What's unclear: Whether `--dangerously-skip-permissions` would *also* bypass any hook config in settings.local.json. If it does, then installing the hook anyway would be harmless (the bypass wins). If it doesn't, our D-23 behavior is still correct.
-   - Recommendation: Test empirically during Wave 3 e2e. Either way D-23's behavior (skip install when chip set) is the safest.
+   - RESOLVED: Test empirically during Wave 3 e2e. Either way D-23's behavior (skip install when chip set) is the safest and is the behavior planned regardless of Claude's internal semantics.
 
 ## Environment Availability
 

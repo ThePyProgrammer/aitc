@@ -166,7 +166,7 @@ Never decorative. Each new accent usage maps to a tool-identity or state signal.
 | ApprovalRequestCard | Accepts `toolName?: string \| null` and `toolInputJson?: unknown` from the extended ApprovalRequest. Renders ToolBadge to the right of the UrgencyBadge (8px gap) when `toolName` is present. Renders the D-14 single-line preview between file path and timestamp (8px top margin, single line, `overflow-hidden text-ellipsis whitespace-nowrap`). Truncation: ~50 chars for file-content previews, ~60 chars for Bash commands, literal em-dash `—` for Read/LS protected-path rows (preview line exists but carries no content). When `request.status === 'abandoned'`, applies the Abandoned Row chrome from §Color and replaces the timestamp line with the abandoned footer. |
 | RequestDetail | Branches on `requestType`: `write_access` → existing InlineDiff (unchanged); `pretool_use` → renders the `ToolPreview` dispatcher in the same slot, same padding, same siblings (header above, ApprovalActions below, ChatThread + ChatInput still attached). Header row adds ToolBadge between StatusBadge and UrgencyBadge. |
 | ApprovalActions | Renders the new `DontAskAgainCheckbox` below the button row when `requestType === 'pretool_use'`. Checkbox value flows into `approveRequest`/`approveWithEdits` Zustand actions as a new `{ alwaysAllowForSession?: boolean }` options arg. For `write_access` rows the checkbox is never rendered (not applicable). The DENY two-step confirmation, the ASK_FOR_MORE_INFO ghost button, and the 44px button row are unchanged. APPROVE_WITH_EDITS remains visible only for Edit/MultiEdit rows (D-17). |
-| RequestQueue | Shows abandoned rows **inline in the same queue** (no tab split) at their original chronological position, but they sort AFTER pending rows of equal age (pending first, then abandoned, then approved/denied if ever shown). Virtualizer item size unchanged (72px) — abandoned rows fit the same height. Empty-state copy unchanged. |
+| RequestQueue | Shows abandoned rows **inline in the same queue** (no tab split) at their original chronological position, but they sort AFTER pending rows of equal age (pending first, then abandoned, then approved/denied if ever shown). Virtualizer item size grows from 72px → 96px to fit the new D-14 preview line (see §Layout Contracts); abandoned rows reuse the same 96px height. Empty-state copy unchanged. |
 | commsStore | `ApprovalRequest` type gains `toolName: string \| null`, `toolInputJson: unknown \| null`, and `status` union extends with `'abandoned'`. New in-memory Map `sessionAlwaysAllow: Map<string, Set<string>>` keyed by `agentId` → Set of `toolName` values the user muted this session. The Map is populated optimistically on approve-with-checkbox-checked and cleared on AITC reload. The store action signatures update to `approveRequest(id, opts?)` and `approveWithEdits(id, editedContent, opts?)` where `opts.alwaysAllowForSession?: boolean`; backend wiring of the always-allow flag is planner territory (D-22 says per-agent per-tool HashSet lives on the waiter registry). |
 
 ### Reused Components (no changes for this phase)
@@ -183,7 +183,7 @@ Never decorative. Each new accent usage maps to a tool-identity or state signal.
 
 ## Layout Contracts
 
-### ApprovalRequestCard (extended) -- 72px virtualizer estimate stays valid
+### ApprovalRequestCard (extended) -- 96px virtualizer estimate (bumped from 72px)
 
 ```
 +-------------------------------------------------+
