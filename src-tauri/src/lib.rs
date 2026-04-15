@@ -1,5 +1,5 @@
 pub mod agents;
-mod comms;
+pub mod comms;
 mod conflict;
 mod db;
 pub mod pipeline;
@@ -53,6 +53,9 @@ pub fn run() {
             agents::commands::terminate_agent,
             agents::commands::update_agent_intent,
             agents::commands::get_agent_logs,
+            agents::commands::accept_passive_hook_consent,
+            agents::commands::decline_passive_hook_consent,
+            agents::commands::resolve_sidecar_path,
             agents::notifications::get_notification_prefs,
             agents::notifications::update_notification_prefs,
             conflict::commands::list_conflicts,
@@ -130,6 +133,11 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        // Phase 8: required so `ShellExt::sidecar("aitc-hook")` can resolve
+        // the bundled binary's absolute path — both at startup (to set
+        // AITC_SIDECAR_PATH for claude_code::launch) and on-demand
+        // (resolve_sidecar_path Tauri command for the accept flow).
+        .plugin(tauri_plugin_shell::init())
         .manage(pipeline::PipelineState::new())
         .manage(agent_registry.clone())
         .manage(agents::notifications::NotificationState::new())
@@ -140,6 +148,32 @@ pub fn run() {
         .setup(move |app| {
             // System tray (D-13)
             tray::setup_tray(app)?;
+
+            // Phase 8 D-01: resolve the aitc-hook sidecar absolute path ONCE
+            // at startup and stash it on env so claude_code::launch can read
+            // it without threading an AppHandle through the adapter trait.
+            // An empty/missing sidecar disables PreToolUse gating for this
+            // session rather than crashing startup.
+            let sidecar_abs: String = {
+                use tauri_plugin_shell::ShellExt;
+                match app.shell().sidecar("aitc-hook") {
+                    Ok(cmd) => {
+                        let std_cmd: std::process::Command = cmd.into();
+                        std_cmd.get_program().to_string_lossy().to_string()
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "sidecar resolution failed; AITC PreToolUse gating disabled this session"
+                        );
+                        String::new()
+                    }
+                }
+            };
+            if !sidecar_abs.is_empty() {
+                std::env::set_var("AITC_SIDECAR_PATH", &sidecar_abs);
+                tracing::info!(sidecar = %sidecar_abs, "AITC_SIDECAR_PATH set");
+            }
 
             // SQLite database -- initialized synchronously via block_on so the pool
             // is registered as managed state before any Tauri command can fire.
@@ -160,6 +194,29 @@ pub fn run() {
             let waiters: Arc<agents::hook_waiters::WaiterRegistry> =
                 agents::hook_waiters::WaiterRegistry::new_arc();
             app.manage(waiters.clone());
+
+            // Phase 8 Pitfall 6: auto-heal `settings.local.json` AITC entries
+            // in every previously-accepted repo so a sidecar-path upgrade
+            // (e.g., user updated AITC) doesn't leave stale absolute paths
+            // pointing at old install locations. Fire-and-forget; never
+            // blocks startup.
+            if !sidecar_abs.is_empty() {
+                let pool_bg = pool.clone();
+                let sidecar_bg = sidecar_abs.clone();
+                tauri::async_runtime::spawn(async move {
+                    let healed = agents::hook_install::reinstall_accepted_repos_on_startup(
+                        &pool_bg,
+                        &sidecar_bg,
+                    )
+                    .await;
+                    if !healed.is_empty() {
+                        tracing::info!(
+                            repos = ?healed,
+                            "healed AITC hook entries in previously-accepted repos"
+                        );
+                    }
+                });
+            }
 
             // Start the self-registration + /hook server (HIST-01: needs
             // pool for ensure_open_session; Phase 8: needs waiters + app

@@ -98,6 +98,39 @@ impl AgentAdapter for ClaudeCodeAdapter {
 
         args.push(prompt);
 
+        // D-01 + D-23: install settings.local.json hook UNLESS the user
+        // explicitly opted into a bypass chip. A bypass hands full trust to
+        // Claude for that launch, so installing the AITC hook would
+        // contradict the user's intent. We resolve the sidecar's absolute
+        // path from the `AITC_SIDECAR_PATH` env var that `lib.rs` setup()
+        // stashes after `tauri_plugin_shell::sidecar("aitc-hook")`. Missing
+        // env var => skip silently (tests without a Tauri runtime, or a
+        // bundle built without the sidecar); launch continues unhooked.
+        if !options.dangerously_skip_permissions && !options.accept_edits {
+            match std::env::var("AITC_SIDECAR_PATH") {
+                Ok(sidecar_abs) if !sidecar_abs.is_empty() => {
+                    match crate::agents::hook_install::install_aitc_hook(
+                        &cwd,
+                        &sidecar_abs,
+                    ) {
+                        Ok(()) => tracing::info!(
+                            cwd = %cwd.display(),
+                            sidecar = %sidecar_abs,
+                            "AITC PreToolUse hook installed"
+                        ),
+                        Err(e) => tracing::warn!(
+                            cwd = %cwd.display(),
+                            error = %e,
+                            "install_aitc_hook failed; launch continues unhooked"
+                        ),
+                    }
+                }
+                _ => tracing::debug!(
+                    "AITC_SIDECAR_PATH unset; skipping hook install (dev/test path)"
+                ),
+            }
+        }
+
         let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
         launcher::launch_detached(
             "claude",

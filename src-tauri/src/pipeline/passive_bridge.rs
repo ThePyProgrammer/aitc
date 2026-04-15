@@ -9,10 +9,12 @@ use crate::agents::adapter::{AgentInfo, AgentState};
 use crate::agents::generic::passive_sentinel_adapter;
 use crate::agents::AgentRegistry;
 use crate::pipeline::process_snapshot::ProcessSnapshot;
+use sqlx::{Pool, Sqlite};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use tauri::AppHandle;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
@@ -22,11 +24,19 @@ pub const BRIDGE_INTERVAL_MS: u64 = 2000;
 
 /// Spawn the passive-scan bridge task. Returns a JoinHandle the caller
 /// stores in ActiveWatch so it is aborted when the watch stops.
+///
+/// `pool` + `app` are `Option` so the bridge can run in headless test
+/// harnesses that don't wire up SQLite / a Tauri app handle. When both are
+/// `Some`, the bridge emits a `passive-claude-detected` Tauri event on first
+/// sighting of a Claude process in a repo whose consent decision isn't
+/// already recorded (D-04).
 pub fn spawn_passive_bridge(
     registry: Arc<AgentRegistry>,
     snapshot: Arc<RwLock<ProcessSnapshot>>,
     repo_root: PathBuf,
     interval: Duration,
+    pool: Option<Pool<Sqlite>>,
+    app: Option<AppHandle>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(interval);
@@ -34,7 +44,15 @@ pub fn spawn_passive_bridge(
         tick.tick().await;
         loop {
             tick.tick().await;
-            if let Err(e) = bridge_tick(&registry, &snapshot, Some(&repo_root)).await {
+            if let Err(e) = bridge_tick(
+                &registry,
+                &snapshot,
+                Some(&repo_root),
+                pool.as_ref(),
+                app.as_ref(),
+            )
+            .await
+            {
                 tracing::warn!(error = %e, "passive_bridge tick failed");
             }
         }
@@ -48,10 +66,25 @@ pub fn spawn_passive_bridge(
 /// 2. Then upsert each live candidate as `PASSIVE-{pid}`, unless a
 ///    non-PASSIVE entry (KAGENT or launched) already owns the PID (D-07
 ///    Pitfall 4 — key collision avoidance).
+/// Payload for the `passive-claude-detected` Tauri event (D-04).
+///
+/// Serialized camelCase so the TS side reads `{cwd, pid, agentId}` directly
+/// (the tauri-specta binding emitter ignores event payloads, hence the
+/// hand-rolled shape here).
+#[derive(serde::Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PassiveClaudeDetectedPayload {
+    pub cwd: String,
+    pub pid: u32,
+    pub agent_id: String,
+}
+
 pub async fn bridge_tick(
     registry: &AgentRegistry,
     snapshot: &RwLock<ProcessSnapshot>,
     repo_root: Option<&std::path::Path>,
+    pool: Option<&Pool<Sqlite>>,
+    app: Option<&AppHandle>,
 ) -> Result<(), String> {
     let candidates = {
         let snap = snapshot.read().await;
@@ -100,9 +133,13 @@ pub async fn bridge_tick(
             .unwrap_or_else(|| "unknown".into());
 
         let id = format!("PASSIVE-{}", c.pid);
+        // Detect whether we've seen this PID before this tick. A brand-new
+        // PASSIVE entry is the only moment we emit the D-04 consent event.
+        let was_new = registry.get_agent(&id).await.is_none();
+
         let info = AgentInfo {
             id: id.clone(),
-            agent_type,
+            agent_type: agent_type.clone(),
             protocol: "passive-scan".into(),
             state: AgentState::Running,
             pid: Some(c.pid),
@@ -113,7 +150,10 @@ pub async fn bridge_tick(
         // the right CLI-specific logic. Fall back to the passive sentinel
         // adapter when nothing matched, so the registry API still works.
         let adapter = matched.unwrap_or_else(passive_sentinel_adapter);
-        if let Err(e) = registry.upsert_agent(id, info, adapter, false).await {
+        let upsert_result = registry
+            .upsert_agent(id.clone(), info, adapter, false)
+            .await;
+        if let Err(e) = &upsert_result {
             // The capacity-exhaustion case floods the log if we emit one line
             // per skipped candidate (#cap=100, #candidates=500+). Coalesce to
             // a single tick-level warning below.
@@ -121,6 +161,62 @@ pub async fn bridge_tick(
                 capacity_hit += 1;
             } else {
                 tracing::warn!(pid = c.pid, error = %e, "passive upsert failed");
+            }
+        }
+
+        // D-04: offer to install the hook for newly-sighted claude processes.
+        // One-shot per (cwd, AITC session): we short-circuit when
+        // app_settings already has an entry (accepted or declined). The
+        // "declined" sentinel is written immediately after emit so subsequent
+        // ticks skip — the frontend accept command overwrites it to
+        // "accepted" and runs the install.
+        if was_new
+            && upsert_result.is_ok()
+            && agent_type == "claude-code"
+        {
+            if let (Some(pool), Some(cwd)) = (pool, c.cwd.as_ref()) {
+                let cwd_str = cwd.to_string_lossy().to_string();
+                // err-on-the-side-of-no-prompt: if we can't read consent
+                // state, assume an entry exists and skip the emit.
+                let has_entry = crate::comms::app_settings::has_passive_hook_consent_entry(
+                    pool, &cwd_str,
+                )
+                .await
+                .unwrap_or(true);
+                if !has_entry {
+                    // Fire the Tauri event only when an app handle is
+                    // available. Tests drive bridge_tick with `app=None` but
+                    // still want the sentinel written so they can assert the
+                    // dedup behaviour without spinning up a Tauri runtime.
+                    if let Some(app) = app {
+                        let payload = PassiveClaudeDetectedPayload {
+                            cwd: cwd_str.clone(),
+                            pid: c.pid,
+                            agent_id: id.clone(),
+                        };
+                        use tauri::Emitter;
+                        if let Err(e) = app.emit("passive-claude-detected", payload) {
+                            tracing::warn!(
+                                error = %e,
+                                "passive-claude-detected emit failed"
+                            );
+                        }
+                    }
+                    // Write the dedup sentinel so we never re-emit for this
+                    // repo until the user makes a choice (accept flips it
+                    // to "accepted"; decline leaves it as-is).
+                    if let Err(e) = crate::comms::app_settings::record_passive_hook_consent(
+                        pool, &cwd_str, "declined",
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            cwd = %cwd_str,
+                            error = %e,
+                            "failed to write consent dedup sentinel"
+                        );
+                    }
+                }
             }
         }
     }
@@ -158,7 +254,7 @@ mod tests {
         // Registry with no adapters registered -> fall back to "unknown".
         let reg = Arc::new(AgentRegistry::new());
         let snap = seeded_snapshot(vec![cand(111, "claude-code"), cand(222, "codex")]);
-        bridge_tick(&reg, &snap, None).await.unwrap();
+        bridge_tick(&reg, &snap, None, None, None).await.unwrap();
         let p1 = reg.get_agent("PASSIVE-111").await.expect("PASSIVE-111 missing");
         assert_eq!(p1.agent_type, "unknown");
         assert_eq!(p1.protocol, "passive-scan");
@@ -176,7 +272,7 @@ mod tests {
         let reg = Arc::new(reg);
 
         let snap = seeded_snapshot(vec![cand(111, "claude-code"), cand(222, "codex")]);
-        bridge_tick(&reg, &snap, None).await.unwrap();
+        bridge_tick(&reg, &snap, None, None, None).await.unwrap();
 
         let p1 = reg.get_agent("PASSIVE-111").await.expect("PASSIVE-111 missing");
         assert_eq!(p1.agent_type, "claude-code");
@@ -206,12 +302,101 @@ mod tests {
         .await
         .unwrap();
         let snap = seeded_snapshot(vec![cand(111, "claude-code")]);
-        bridge_tick(&reg, &snap, None).await.unwrap();
+        bridge_tick(&reg, &snap, None, None, None).await.unwrap();
         assert!(
             reg.get_agent("PASSIVE-111").await.is_none(),
             "must NOT create PASSIVE-111 when KAGENT-111 owns pid"
         );
         assert!(reg.get_agent("KAGENT-111").await.is_some());
+    }
+
+    // ------------------------------------------------------------------
+    // D-04 event-emission coverage. These drive the new bridge_tick args.
+    // ------------------------------------------------------------------
+
+    async fn consent_pool() -> sqlx::SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::comms::app_settings::ensure_schema(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn passive_bridge_writes_dedup_sentinel_on_first_claude_sighting() {
+        // With a consent pool + no app handle, we still exercise the
+        // dedup-sentinel write path. The emit is a no-op (app=None) but the
+        // sentinel must still land so the next tick doesn't re-attempt.
+        let mut reg = AgentRegistry::new();
+        reg.register_adapter(Arc::new(crate::agents::claude_code::ClaudeCodeAdapter));
+        let reg = Arc::new(reg);
+        let pool = consent_pool().await;
+        let snap = seeded_snapshot(vec![cand(1111, "claude-code")]);
+        // First tick: no entry exists -> sentinel written.
+        bridge_tick(&reg, &snap, None, Some(&pool), None)
+            .await
+            .unwrap();
+        assert!(
+            crate::comms::app_settings::has_passive_hook_consent_entry(
+                &pool,
+                "/tmp/test-cwd",
+            )
+            .await
+            .unwrap(),
+            "sentinel must be written after first sighting"
+        );
+    }
+
+    #[tokio::test]
+    async fn passive_bridge_dedups_after_decision() {
+        // Pre-record accepted; bridge_tick must NOT overwrite it.
+        let mut reg = AgentRegistry::new();
+        reg.register_adapter(Arc::new(crate::agents::claude_code::ClaudeCodeAdapter));
+        let reg = Arc::new(reg);
+        let pool = consent_pool().await;
+        crate::comms::app_settings::record_passive_hook_consent(
+            &pool,
+            "/tmp/test-cwd",
+            "accepted",
+        )
+        .await
+        .unwrap();
+        let snap = seeded_snapshot(vec![cand(2222, "claude-code")]);
+        bridge_tick(&reg, &snap, None, Some(&pool), None)
+            .await
+            .unwrap();
+        let rows = crate::comms::app_settings::get_passive_hook_consent_repos(&pool)
+            .await
+            .unwrap();
+        // Still exactly one row and still "accepted" — no overwrite to
+        // "declined" by the sentinel path.
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, "accepted");
+    }
+
+    #[tokio::test]
+    async fn passive_bridge_skips_emit_for_non_claude_agent_type() {
+        // Codex sightings must never trigger a consent prompt (D-04 is
+        // Claude-specific — only Claude reads settings.local.json).
+        let mut reg = AgentRegistry::new();
+        reg.register_adapter(Arc::new(crate::agents::codex::CodexAdapter));
+        let reg = Arc::new(reg);
+        let pool = consent_pool().await;
+        let snap = seeded_snapshot(vec![cand(3333, "codex")]);
+        bridge_tick(&reg, &snap, None, Some(&pool), None)
+            .await
+            .unwrap();
+        assert!(
+            !crate::comms::app_settings::has_passive_hook_consent_entry(
+                &pool,
+                "/tmp/test-cwd",
+            )
+            .await
+            .unwrap(),
+            "Codex sightings must not trigger D-04 consent dedup"
+        );
     }
 
     #[tokio::test]
@@ -236,7 +421,7 @@ mod tests {
         .unwrap();
         // Snapshot shows no live candidates -> reap removes PASSIVE-333.
         let snap = seeded_snapshot(vec![]);
-        bridge_tick(&reg, &snap, None).await.unwrap();
+        bridge_tick(&reg, &snap, None, None, None).await.unwrap();
         assert!(reg.get_agent("PASSIVE-333").await.is_none());
     }
 }

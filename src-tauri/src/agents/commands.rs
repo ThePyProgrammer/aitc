@@ -12,6 +12,7 @@ use crate::agents::hook_waiters::{HookDecision, WaiterRegistry};
 use crate::agents::launcher;
 use crate::agents::registry::AgentRegistry;
 use crate::pipeline::pipeline_state::PipelineState;
+use sqlx::{Pool, Sqlite};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -190,14 +191,133 @@ pub async fn get_agent_logs(
     Ok(launcher::read_stdout_buffer(&registry, &agent_id).await)
 }
 
+// ---------------------------------------------------------------------------
+// Phase 8 Plan 04: passive-claude-detected consent flow + sidecar resolution.
+// ---------------------------------------------------------------------------
+
+/// Resolve the absolute path of the `aitc-hook` sidecar binary at runtime.
+///
+/// Tauri v2 stages sidecars next to the main executable with the target-triple
+/// suffix stripped, so `ShellExt::sidecar("aitc-hook")` is the canonical way to
+/// resolve the path (dev builds use `target/debug/aitc-hook`; bundled releases
+/// use the staged copy in the app's exec dir).
+#[tauri::command]
+#[specta::specta]
+pub async fn resolve_sidecar_path(app_handle: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_shell::ShellExt;
+    let cmd = app_handle
+        .shell()
+        .sidecar("aitc-hook")
+        .map_err(|e| format!("sidecar lookup: {e}"))?;
+    let std_cmd: std::process::Command = cmd.into();
+    let program = std_cmd.get_program().to_string_lossy().to_string();
+    if program.is_empty() {
+        return Err("sidecar path resolution returned empty".into());
+    }
+    Ok(program)
+}
+
+/// Accept the passive-detected Claude hook consent prompt for `repo_cwd`:
+/// records the decision in `app_settings` AND installs the AITC PreToolUse
+/// hook into `<repo_cwd>/.claude/settings.local.json`.
+#[tauri::command]
+#[specta::specta]
+pub async fn accept_passive_hook_consent(
+    repo_cwd: String,
+    pool: tauri::State<'_, Pool<Sqlite>>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    crate::comms::app_settings::record_passive_hook_consent(pool.inner(), &repo_cwd, "accepted")
+        .await?;
+    let sidecar_abs = resolve_sidecar_path(app_handle.clone()).await?;
+    crate::agents::hook_install::install_aitc_hook(
+        std::path::Path::new(&repo_cwd),
+        &sidecar_abs,
+    )?;
+    Ok(())
+}
+
+/// Decline the passive-detected Claude hook consent prompt for `repo_cwd`:
+/// records the decision so we never re-prompt. Does NOT install the hook.
+#[tauri::command]
+#[specta::specta]
+pub async fn decline_passive_hook_consent(
+    repo_cwd: String,
+    pool: tauri::State<'_, Pool<Sqlite>>,
+) -> Result<(), String> {
+    crate::comms::app_settings::record_passive_hook_consent(pool.inner(), &repo_cwd, "declined")
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use tempfile::TempDir;
 
     #[tokio::test]
     async fn list_agents_returns_empty_for_new_registry() {
         let registry = AgentRegistry::new();
         let all = registry.all_agents().await;
         assert!(all.is_empty());
+    }
+
+    // The accept/decline commands take `tauri::State<'_, Pool<Sqlite>>` which
+    // can't be constructed outside a running Tauri runtime. Tests below
+    // exercise the command bodies' core steps — app_settings upsert +
+    // install — directly so we still cover the side-effects end-to-end.
+
+    async fn fresh_pool() -> Pool<Sqlite> {
+        SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn accept_passive_hook_consent_writes_settings_local() {
+        let pool = fresh_pool().await;
+        let td = TempDir::new().unwrap();
+        let cwd = td.path().to_str().unwrap().to_string();
+
+        // Simulate the command body: record consent, then install with a
+        // fake sidecar path (install doesn't validate the path exists).
+        crate::comms::app_settings::record_passive_hook_consent(&pool, &cwd, "accepted")
+            .await
+            .unwrap();
+        crate::agents::hook_install::install_aitc_hook(
+            td.path(),
+            "/fake/test/sidecar/aitc-hook",
+        )
+        .unwrap();
+
+        assert!(td.path().join(".claude/settings.local.json").exists());
+        assert!(
+            crate::comms::app_settings::has_passive_hook_consent_entry(&pool, &cwd)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn decline_passive_hook_consent_records_only() {
+        let pool = fresh_pool().await;
+        let td = TempDir::new().unwrap();
+        let cwd = td.path().to_str().unwrap().to_string();
+
+        crate::comms::app_settings::record_passive_hook_consent(&pool, &cwd, "declined")
+            .await
+            .unwrap();
+
+        assert!(
+            !td.path().join(".claude/settings.local.json").exists(),
+            "decline must not write settings.local.json"
+        );
+        let rows = crate::comms::app_settings::get_passive_hook_consent_repos(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, "declined");
     }
 }

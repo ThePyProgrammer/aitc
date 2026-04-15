@@ -35,7 +35,7 @@ async fn end_to_end_pipeline_activation() {
             parent: None,
         }],
     )));
-    bridge_tick(&reg, &snap, None).await.unwrap();
+    bridge_tick(&reg, &snap, None, None, None).await.unwrap();
     assert!(
         reg.get_agent("PASSIVE-7777").await.is_some(),
         "PASSIVE entry must appear after first bridge tick"
@@ -465,4 +465,204 @@ async fn always_allow_mutes_subsequent_hook_calls() {
         cnt_after, cnt_before,
         "always-allow fast-path must NOT insert a new row"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8 Plan 04 — passive bridge D-04 event emission + install integration.
+//
+// These smokes avoid a real Tauri runtime (mock_app + direct bridge_tick
+// calls) so they stay fast and deterministic. The AppHandle arg is None —
+// only the sentinel-write path is exercised here; the visible Tauri event
+// fires in an integration environment (Plan 05 frontend test will watch it).
+// ---------------------------------------------------------------------------
+
+use aitc_lib::comms::app_settings as aitc_app_settings;
+use std::path::PathBuf as StdPathBuf;
+
+async fn consent_smoke_pool() -> sqlx::SqlitePool {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    aitc_app_settings::ensure_schema(&pool).await.unwrap();
+    pool
+}
+
+fn claude_cand(pid: u32, cwd: StdPathBuf) -> CandidateProc {
+    CandidateProc {
+        pid,
+        name: "claude-code".into(),
+        cwd,
+        exe: None,
+        parent: None,
+    }
+}
+
+#[tokio::test]
+async fn passive_bridge_emits_event_on_first_sighting() {
+    // Seed the registry with the real ClaudeCodeAdapter so agent_type
+    // classifies as "claude-code". No app handle — we verify via the
+    // dedup sentinel side-effect that the event path would have fired.
+    let mut reg = AgentRegistry::new();
+    reg.register_adapter(Arc::new(aitc_lib::agents::claude_code::ClaudeCodeAdapter));
+    let reg = Arc::new(reg);
+    let pool = consent_smoke_pool().await;
+    let cwd = StdPathBuf::from("/tmp/repoX");
+    let snap = Arc::new(RwLock::new(
+        ProcessSnapshot::from_candidates_for_test(vec![claude_cand(5001, cwd.clone())]),
+    ));
+
+    // First tick: no consent entry exists -> sentinel written.
+    aitc_lib::pipeline::passive_bridge::bridge_tick(&reg, &snap, None, Some(&pool), None)
+        .await
+        .unwrap();
+    assert!(
+        aitc_app_settings::has_passive_hook_consent_entry(&pool, "/tmp/repoX")
+            .await
+            .unwrap(),
+        "first-sighting sentinel must be written"
+    );
+    let rows = aitc_app_settings::get_passive_hook_consent_repos(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].1, "declined");
+}
+
+#[tokio::test]
+async fn passive_bridge_dedups_after_decision() {
+    let mut reg = AgentRegistry::new();
+    reg.register_adapter(Arc::new(aitc_lib::agents::claude_code::ClaudeCodeAdapter));
+    let reg = Arc::new(reg);
+    let pool = consent_smoke_pool().await;
+    // User accepted previously. The bridge must NOT overwrite this with
+    // the dedup sentinel.
+    aitc_app_settings::record_passive_hook_consent(&pool, "/tmp/repoY", "accepted")
+        .await
+        .unwrap();
+    let cwd = StdPathBuf::from("/tmp/repoY");
+    let snap = Arc::new(RwLock::new(
+        ProcessSnapshot::from_candidates_for_test(vec![claude_cand(5002, cwd)]),
+    ));
+    aitc_lib::pipeline::passive_bridge::bridge_tick(&reg, &snap, None, Some(&pool), None)
+        .await
+        .unwrap();
+    let rows = aitc_app_settings::get_passive_hook_consent_repos(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].1, "accepted", "prior decision must survive");
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8 Plan 04 — claude_code::launch hook-install chip-bypass semantics.
+//
+// The real ClaudeCodeAdapter::launch spawns a `claude` binary on PATH and
+// panics CI where that binary doesn't exist. We simulate the gate directly:
+// assert that when AITC_SIDECAR_PATH is set AND chips are unset, the install
+// path writes settings.local.json; when either chip is set, it does not.
+// ---------------------------------------------------------------------------
+
+use aitc_lib::agents::adapter::LaunchOptions;
+
+// Helper: mirrors the exact install gate inside ClaudeCodeAdapter::launch.
+fn simulate_launch_gate(cwd: &std::path::Path, options: &LaunchOptions) {
+    if !options.dangerously_skip_permissions && !options.accept_edits {
+        if let Ok(sidecar_abs) = std::env::var("AITC_SIDECAR_PATH") {
+            if !sidecar_abs.is_empty() {
+                let _ = aitc_lib::agents::hook_install::install_aitc_hook(cwd, &sidecar_abs);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn claude_launch_installs_hook_when_chips_unset() {
+    let td = tempfile::TempDir::new().unwrap();
+    std::env::set_var("AITC_SIDECAR_PATH", "/tmp/fake-aitc-hook");
+    simulate_launch_gate(
+        td.path(),
+        &LaunchOptions {
+            accept_edits: false,
+            dangerously_skip_permissions: false,
+        },
+    );
+    assert!(
+        td.path().join(".claude/settings.local.json").exists(),
+        "hook install must run when no bypass chip is set"
+    );
+    let root: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(td.path().join(".claude/settings.local.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        root["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+        "/tmp/fake-aitc-hook"
+    );
+}
+
+#[tokio::test]
+async fn claude_launch_skips_hook_when_dangerously_skip() {
+    let td = tempfile::TempDir::new().unwrap();
+    std::env::set_var("AITC_SIDECAR_PATH", "/tmp/fake-aitc-hook");
+    simulate_launch_gate(
+        td.path(),
+        &LaunchOptions {
+            accept_edits: false,
+            dangerously_skip_permissions: true,
+        },
+    );
+    assert!(
+        !td.path().join(".claude/settings.local.json").exists(),
+        "D-23 bypass: dangerously_skip_permissions must skip install"
+    );
+}
+
+#[tokio::test]
+async fn claude_launch_skips_hook_when_accept_edits() {
+    let td = tempfile::TempDir::new().unwrap();
+    std::env::set_var("AITC_SIDECAR_PATH", "/tmp/fake-aitc-hook");
+    simulate_launch_gate(
+        td.path(),
+        &LaunchOptions {
+            accept_edits: true,
+            dangerously_skip_permissions: false,
+        },
+    );
+    assert!(
+        !td.path().join(".claude/settings.local.json").exists(),
+        "D-23 bypass: accept_edits must skip install"
+    );
+}
+
+#[tokio::test]
+async fn startup_auto_heal_reinstalls_accepted_repos() {
+    let pool = consent_smoke_pool().await;
+    let td = tempfile::TempDir::new().unwrap();
+    let cwd = td.path().to_str().unwrap().to_string();
+    // Seed an accepted repo with a stale AITC hook command.
+    aitc_lib::agents::hook_install::install_aitc_hook(td.path(), "/old/aitc-hook").unwrap();
+    aitc_app_settings::record_passive_hook_consent(&pool, &cwd, "accepted")
+        .await
+        .unwrap();
+
+    let healed = aitc_lib::agents::hook_install::reinstall_accepted_repos_on_startup(
+        &pool,
+        "/new/aitc-hook",
+    )
+    .await;
+    assert_eq!(healed.len(), 1);
+
+    let root: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(td.path().join(".claude/settings.local.json")).unwrap(),
+    )
+    .unwrap();
+    let arr = root["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(
+        arr.len(),
+        1,
+        "Pitfall 6: stale aitc-hook entry replaced in place, not appended"
+    );
+    assert_eq!(arr[0]["hooks"][0]["command"], "/new/aitc-hook");
 }

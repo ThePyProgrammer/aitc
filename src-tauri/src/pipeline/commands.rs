@@ -126,11 +126,17 @@ pub async fn start_watch(
 
     // AGNT-03: passive PID → AgentRegistry bridge (2s tick). Aborted when
     // ActiveWatch is dropped (Drop impl in pipeline_state.rs).
+    //
+    // Phase 8 D-04: pass pool + app_handle so first-sighting of a Claude
+    // process in a never-seen repo emits `passive-claude-detected` and the
+    // consent dialog opens in the UI.
     let bridge_task = crate::pipeline::passive_bridge::spawn_passive_bridge(
         registry_arc.clone(),
         snapshot.clone(),
         canonical.clone(),
         Duration::from_millis(crate::pipeline::passive_bridge::BRIDGE_INTERVAL_MS),
+        Some(pool_arc.clone()),
+        Some(app_handle.clone()),
     );
 
     // Spawn the attributing stream (Plan 03).
