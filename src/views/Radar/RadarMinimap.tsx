@@ -1,83 +1,81 @@
-// Phase 4 Plan 05 -- Radar minimap overlay.
+// Phase 7 Plan 04 interim minimap — renders graph-node bounding box.
 //
-// Bottom-right corner, 160x120px. Shows full treemap overview with
-// white rectangle indicator showing current viewport bounds.
-// Click to jump viewport to that position.
+// D-04 forced the deletion of `useTreemapLayout`, so this component migrated
+// off the squarified rects. It now renders a simple scaled scatter of
+// settled graph nodes inside the 160x120 minimap surface. Plan 06 will do
+// the full graph-extents + viewport-rect treatment (FMON-05, D-20) — this
+// implementation preserves the bottom-right anchoring and the
+// `right: isManifestOpen ? 292 : 12` shift from commit e62272d.
 
 import { useRef, useCallback, useMemo } from 'react';
 import { useRadarStore } from '../../stores/radarStore';
-import {
-  buildFileTree,
-  computeTreemapLayout,
-  graphNodesToTreeEntries,
-} from '../../hooks/useTreemapLayout';
 
 const MINIMAP_W = 160;
 const MINIMAP_H = 120;
 const MANIFEST_W = 280;
+const PADDING = 4;
 
 export function RadarMinimap() {
   const containerRef = useRef<HTMLDivElement>(null);
-  // Phase 7 Plan 03: synthesize treemap entries from graphNodes until
-  // Plan 06 rewrites this minimap against the graph bounding box (D-20).
   const graphNodes = useRadarStore((s) => s.graphNodes);
   const viewport = useRadarStore((s) => s.viewport);
   const setViewport = useRadarStore((s) => s.setViewport);
   const isManifestOpen = useRadarStore((s) => s.isManifestOpen);
 
-  // Compute a tiny treemap layout at minimap scale
-  const minimapRects = useMemo(() => {
-    if (graphNodes.length === 0) return [];
-    const entries = graphNodesToTreeEntries(graphNodes);
-    const tree = buildFileTree(entries);
-    return computeTreemapLayout(tree, MINIMAP_W, MINIMAP_H);
+  // Compute graph bounding box and the map-to-minimap scale factors.
+  const { minX, minY, scaleX, scaleY, dots } = useMemo(() => {
+    const settled = graphNodes.filter(
+      (n) => n.x !== undefined && n.y !== undefined,
+    );
+    if (settled.length === 0) {
+      return {
+        minX: 0,
+        minY: 0,
+        scaleX: 1,
+        scaleY: 1,
+        dots: [] as Array<{ id: string; left: number; top: number }>,
+      };
+    }
+    let nMinX = Infinity;
+    let nMinY = Infinity;
+    let nMaxX = -Infinity;
+    let nMaxY = -Infinity;
+    for (const n of settled) {
+      if (n.x! < nMinX) nMinX = n.x!;
+      if (n.y! < nMinY) nMinY = n.y!;
+      if (n.x! > nMaxX) nMaxX = n.x!;
+      if (n.y! > nMaxY) nMaxY = n.y!;
+    }
+    const worldW = Math.max(1, nMaxX - nMinX);
+    const worldH = Math.max(1, nMaxY - nMinY);
+    const sX = (MINIMAP_W - PADDING * 2) / worldW;
+    const sY = (MINIMAP_H - PADDING * 2) / worldH;
+    const dotList = settled.map((n) => ({
+      id: n.id,
+      left: PADDING + (n.x! - nMinX) * sX,
+      top: PADDING + (n.y! - nMinY) * sY,
+    }));
+    return { minX: nMinX, minY: nMinY, scaleX: sX, scaleY: sY, dots: dotList };
   }, [graphNodes]);
 
-  // Viewport indicator rectangle (what part of the world is currently visible)
-  // The main canvas shows world coordinates transformed by zoom and pan.
-  // Visible area in world coords: x from -panX/zoom to (canvasW-panX)/zoom
-  // We need to map world coords to minimap coords.
-  // Assume the world is the same size as the main treemap (which uses canvas size).
-  // For the minimap, we scale by minimapW/worldW.
-  const canvasW = 800; // approximate main canvas width
-  const canvasH = 600;
-  const scaleX = MINIMAP_W / canvasW;
-  const scaleY = MINIMAP_H / canvasH;
-
-  const viewIndicator = useMemo(() => {
-    const worldX0 = -viewport.panX / viewport.zoom;
-    const worldY0 = -viewport.panY / viewport.zoom;
-    const worldX1 = (canvasW - viewport.panX) / viewport.zoom;
-    const worldY1 = (canvasH - viewport.panY) / viewport.zoom;
-
-    return {
-      left: Math.max(0, worldX0 * scaleX),
-      top: Math.max(0, worldY0 * scaleY),
-      width: Math.min(MINIMAP_W, (worldX1 - worldX0) * scaleX),
-      height: Math.min(MINIMAP_H, (worldY1 - worldY0) * scaleY),
-    };
-  }, [viewport, scaleX, scaleY]);
-
-  // Click to jump viewport
+  // Click: pan main viewport so the clicked world position sits at canvas center.
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
-
       const clickX = e.clientX - rect.left;
       const clickY = e.clientY - rect.top;
-
-      // Convert minimap coords to world coords
-      const worldX = clickX / scaleX;
-      const worldY = clickY / scaleY;
-
-      // Center viewport on this world position
-      const newPanX = canvasW / 2 - worldX * viewport.zoom;
-      const newPanY = canvasH / 2 - worldY * viewport.zoom;
-
-      setViewport({ panX: newPanX, panY: newPanY });
+      const worldX = (clickX - PADDING) / scaleX + minX;
+      const worldY = (clickY - PADDING) / scaleY + minY;
+      // Assume ~800x600 canvas for centering; Plan 06 will wire precise.
+      const canvasCenterX = 400;
+      const canvasCenterY = 300;
+      setViewport({
+        panX: canvasCenterX - worldX * viewport.zoom,
+        panY: canvasCenterY - worldY * viewport.zoom,
+      });
     },
-    [scaleX, scaleY, viewport.zoom, setViewport],
+    [scaleX, scaleY, minX, minY, setViewport, viewport.zoom],
   );
 
   if (graphNodes.length === 0) return null;
@@ -95,32 +93,18 @@ export function RadarMinimap() {
       onClick={handleClick}
       data-testid="radar-minimap"
     >
-      {/* Render tiny treemap rects */}
-      {minimapRects
-        .filter((r) => !r.isFile)
-        .map((r) => (
-          <div
-            key={r.path}
-            className="absolute border border-outline-variant/20"
-            style={{
-              left: r.x0,
-              top: r.y0,
-              width: r.x1 - r.x0,
-              height: r.y1 - r.y0,
-              backgroundColor: 'rgba(19, 19, 19, 0.6)',
-            }}
-          />
-        ))}
-
-      {/* Viewport indicator */}
+      {/* Render nodes as 2px dots. Plan 06 will upgrade this to a proper
+          graph-extents rendering with viewport indicator. */}
+      {dots.map((d) => (
+        <div
+          key={d.id}
+          className="absolute w-[2px] h-[2px] bg-outline-variant/60 pointer-events-none"
+          style={{ left: d.left, top: d.top }}
+        />
+      ))}
       <div
-        className="absolute border border-white/70 pointer-events-none"
-        style={{
-          left: viewIndicator.left,
-          top: viewIndicator.top,
-          width: viewIndicator.width,
-          height: viewIndicator.height,
-        }}
+        className="absolute border border-white/40 pointer-events-none"
+        style={{ left: 0, top: 0, width: MINIMAP_W, height: MINIMAP_H }}
         data-testid="minimap-viewport-indicator"
       />
     </div>

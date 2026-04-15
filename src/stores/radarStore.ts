@@ -10,10 +10,10 @@
 //   - `activeTrails`: per-agent comet trails (D-14..D-18); Plan 05 wires.
 //
 // Treemap-era state (`treeData` + `fetchTreeIndex`) is gone — Plan 03
-// replaces it with `fetchGraph()` which resolves both the tree index and
+// replaced it with `fetchGraph()` which resolves both the tree index and
 // the dependency graph in parallel and resets `settledAt` to trigger a
-// fresh settle in useGraphLayout. `useTreemapLayout` still owns the
-// `TreeIndexEntry` shape until Plan 06 retires the treemap minimap.
+// fresh settle in useGraphLayout. Plan 04 deleted `useTreemapLayout` and
+// the `squarify` dependency entirely (D-04).
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
@@ -69,8 +69,7 @@ export function getAgentColor(agentId: string): string {
 }
 
 // Minimal shape used by fetchGraph's invocation of `get_tree_index`.
-// (Kept internal — the public `TreeIndexEntry` lives in useTreemapLayout
-//  because the graph store no longer stores the flat entry list.)
+// Kept internal — the graph store no longer exposes a flat entry list.
 interface TreeIndexEntryRaw {
   path: string;
   size: number;

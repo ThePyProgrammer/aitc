@@ -89,13 +89,9 @@ vi.mock('../../../stores/pipelineStore', () => ({
   usePipelineStore: (selector: (s: typeof mockPipelineState) => unknown) => selector(mockPipelineState),
 }));
 
-vi.mock('../../../hooks/useTreemapLayout', () => ({
-  useTreemapLayout: () => [],
-  buildFileTree: () => ({ path: '', name: 'root', size: 0, isDir: true, children: [] }),
-  computeTreemapLayout: () => [],
-  // Phase 7 Plan 03 bridge.
-  graphNodesToTreeEntries: () => [],
-}));
+// Phase 7 Plan 04: `useTreemapLayout` removed (D-04). RadarMinimap and
+// AgentManifestRow now operate on `graphNodes` positions directly, so no
+// treemap mock is required.
 
 const mockAgent1: AgentInfo = {
   id: 'claude-1',
