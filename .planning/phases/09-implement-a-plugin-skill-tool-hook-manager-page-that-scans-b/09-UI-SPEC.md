@@ -1,10 +1,14 @@
 ---
 phase: 9
 slug: implement-a-plugin-skill-tool-hook-manager-page-that-scans-b
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-04-15
+reviewed_at: 2026-04-15
+review_flags:
+  - dimension: typography
+    note: 10px and 11px sizes are 1px apart; consider collapsing to a single small size for cleaner hierarchy. Non-blocking.
 ---
 
 # Phase 9 — UI Design Contract (ARSENAL)
