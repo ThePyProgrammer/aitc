@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 9 UI-SPEC approved
-last_updated: "2026-04-15T05:36:11.416Z"
-last_activity: 2026-04-15 -- Phase 9 planning complete
+stopped_at: Phase 8 Wave 0 complete — scaffold + contract-lock tests
+last_updated: "2026-04-15T07:23:24.298Z"
+last_activity: 2026-04-15 -- Phase 8 execution started
 progress:
   total_phases: 9
   completed_phases: 6
-  total_plans: 39
-  completed_plans: 30
-  percent: 77
+  total_plans: 44
+  completed_plans: 36
+  percent: 82
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-07)
 
 **Core value:** A developer can see exactly what every AI agent is doing across their codebase in real time, prevent destructive conflicts between concurrent agents, and approve/deny agent actions from a single command center.
-**Current focus:** Phase 07 — replace-current-blocked-codebase-map-with-a-graph-based-code
+**Current focus:** Phase 8 — Real Claude Code hook integration (PreToolUse approvals)
 
 ## Current Position
 
-Phase: 07 (replace-current-blocked-codebase-map-with-a-graph-based-code) — EXECUTING
+Phase: 8 (Real Claude Code hook integration (PreToolUse approvals)) — EXECUTING
 Plan: 1 of 6
-Status: Ready to execute
-Last activity: 2026-04-15 -- Phase 9 planning complete
+Status: Executing Phase 8
+Last activity: 2026-04-15 -- Phase 8 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -98,6 +98,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T04:46:01.301Z
-Stopped at: Phase 9 UI-SPEC approved
-Resume file: .planning/phases/09-implement-a-plugin-skill-tool-hook-manager-page-that-scans-b/09-UI-SPEC.md
+Last session: 2026-04-15T07:23:24.293Z
+Stopped at: Phase 8 Wave 0 complete — scaffold + contract-lock tests
+Resume file: .planning/phases/08-real-claude-code-hook-integration-pretooluse-approvals/08-01-SUMMARY.md
