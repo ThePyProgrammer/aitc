@@ -135,32 +135,44 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
               <label className="font-headline text-[10px] font-bold uppercase tracking-widest text-on-surface-variant block mb-2">
                 AGENT_TYPE
               </label>
-              <div className="flex flex-col gap-1">
-                {visibleAgentTypes.length === 0 && (
-                  <div className="px-4 py-3 bg-surface-container border-l-2 border-error/40">
-                    <span className="font-mono text-xs text-on-surface-variant">
-                      No agent CLIs detected on PATH. Install at least one of
-                      claude, codex, or opencode to deploy.
-                    </span>
-                  </div>
-                )}
-                {visibleAgentTypes.map((type) => (
-                  <button
-                    key={type.id}
-                    onClick={() => setSelectedType(type.id)}
-                    className={`flex h-11 items-center px-4 transition-colors duration-150 ${
-                      selectedType === type.id
-                        ? 'bg-surface-container border-l-2 border-primary text-on-surface'
-                        : 'bg-surface-container text-on-surface-variant border-l-2 border-transparent hover:bg-surface-container-high'
-                    }`}
-                  >
-                    <span className="font-mono text-xs font-bold">{type.label}</span>
-                    <span className="ml-auto font-mono text-[10px] text-on-surface-variant">
-                      {type.protocol}
-                    </span>
-                  </button>
-                ))}
-              </div>
+              {visibleAgentTypes.length === 0 ? (
+                <div className="px-4 py-3 bg-surface-container border-l-2 border-error/40">
+                  <span className="font-mono text-xs text-on-surface-variant">
+                    No agent CLIs detected on PATH. Install at least one of
+                    claude, codex, or opencode to deploy.
+                  </span>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {visibleAgentTypes.map((type) => {
+                    const selected = selectedType === type.id;
+                    return (
+                      <button
+                        key={type.id}
+                        onClick={() => setSelectedType(type.id)}
+                        className={`group inline-flex items-center gap-2 px-3 py-1.5 rounded-full border transition-colors duration-150 ${
+                          selected
+                            ? 'bg-primary/10 border-primary text-primary'
+                            : 'bg-surface-container border-outline/20 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+                        }`}
+                      >
+                        <span className="font-mono text-xs font-bold tracking-wide">
+                          {type.label}
+                        </span>
+                        <span
+                          className={`font-mono text-[10px] ${
+                            selected
+                              ? 'text-primary/70'
+                              : 'text-on-surface-variant/60'
+                          }`}
+                        >
+                          {type.protocol}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Working directory */}
@@ -216,12 +228,12 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
               <label className="font-headline text-[10px] font-bold uppercase tracking-widest text-on-surface-variant block mb-2">
                 INTENT_LABEL <span className="text-on-surface-variant/40">(optional)</span>
               </label>
-              <input
-                type="text"
+              <textarea
                 value={intent}
                 onChange={(e) => setIntent(e.target.value)}
                 placeholder="Describe the agent's task..."
-                className="w-full bg-surface-container-lowest border border-outline/10 px-3 py-2 font-mono text-xs text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40"
+                rows={4}
+                className="w-full bg-surface-container-lowest border border-outline/10 px-3 py-2 font-mono text-xs text-on-surface placeholder:text-on-surface-variant/40 outline-none focus:border-primary/40 resize-y min-h-[80px]"
               />
             </div>
 
