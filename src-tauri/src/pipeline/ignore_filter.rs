@@ -1,7 +1,8 @@
 //! Gitignore-respecting walker with hardcoded excludes per D-10 and Pitfall 6.
 //!
 //! Hardcoded excludes (layered on .gitignore): .git, node_modules, target,
-//! build, dist, .next, out
+//! build, dist, .next, out. Also strips binary file extensions that AI agents
+//! cannot meaningfully edit (see HARDCODED_BINARY_EXTENSIONS).
 
 use ignore::{overrides::OverrideBuilder, WalkBuilder};
 use std::path::Path;
@@ -19,9 +20,38 @@ pub const HARDCODED_EXCLUDES: &[&str] = &[
     "out",
 ];
 
+/// Binary file extensions excluded from the walker. AI agents cannot edit
+/// these formats, so surfacing them in the radar, heat map, or session_files
+/// is noise at best and misleading at worst (a large PNG would dominate the
+/// treemap purely on byte size). SVG is intentionally NOT in this list — it's
+/// XML and frequently edited.
+pub const HARDCODED_BINARY_EXTENSIONS: &[&str] = &[
+    // Images
+    "png", "jpg", "jpeg", "gif", "webp", "ico", "bmp", "tiff", "tif", "avif", "heic", "heif",
+    // Video
+    "mp4", "webm", "mov", "avi", "mkv", "m4v", "mpg", "mpeg", "wmv", "flv", "ogv",
+    // Audio
+    "mp3", "wav", "flac", "ogg", "m4a", "aac", "opus",
+    // Fonts
+    "ttf", "otf", "woff", "woff2", "eot",
+    // Archives
+    "zip", "tar", "gz", "tgz", "bz2", "7z", "rar", "xz", "zst",
+    // Binary documents
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+    // Compiled / executable
+    "exe", "dll", "so", "dylib", "class", "jar", "war", "wasm", "pyc", "pyo", "bin", "obj",
+    // Databases
+    "db", "sqlite", "sqlite3",
+    // Disk images
+    "iso", "dmg", "img",
+    // 3D / design binaries
+    "blend", "fbx", "glb", "gltf", "stl", "psd", "ai",
+];
+
 /// Construct a WalkBuilder that:
 /// - respects `.gitignore`, `.ignore`, `.git/info/exclude`, and global gitignore
 /// - additionally excludes HARDCODED_EXCLUDES directories
+/// - additionally excludes HARDCODED_BINARY_EXTENSIONS file types
 /// - skips hidden files by default (matches D-10 intent of repo-relevant files only)
 /// - follows a single-threaded walk (parallel has overhead for <10k files — escalate later if benchmarks need it)
 pub fn build_walker(root: &Path) -> WalkBuilder {
@@ -33,6 +63,26 @@ pub fn build_walker(root: &Path) -> WalkBuilder {
         // to catch both the entry and its descendants.
         let _ = overrides.add(&format!("!**/{}", excluded));
         let _ = overrides.add(&format!("!**/{}/**", excluded));
+    }
+    for ext in HARDCODED_BINARY_EXTENSIONS {
+        // Case-insensitive match via a character class so FOO.PNG is also
+        // excluded on case-sensitive filesystems. `ignore` does not support
+        // `(?i)` flags in override patterns, so expand each letter manually.
+        let pattern = ext
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphabetic() {
+                    format!(
+                        "[{}{}]",
+                        c.to_ascii_lowercase(),
+                        c.to_ascii_uppercase()
+                    )
+                } else {
+                    c.to_string()
+                }
+            })
+            .collect::<String>();
+        let _ = overrides.add(&format!("!**/*.{}", pattern));
     }
     let overrides = overrides.build().expect("override builder failed");
 
@@ -114,6 +164,42 @@ mod tests {
             !paths.iter().any(|p| p.ends_with("app.log")),
             "found app.log: {paths:?}"
         );
+    }
+
+    #[test]
+    fn skips_binary_extensions() {
+        let tmp = make_temp_repo();
+        // Representative extensions across the categories agents can't edit.
+        let binary_files = [
+            "logo.png",
+            "hero.JPG", // case-insensitive match
+            "demo.mp4",
+            "theme.woff2",
+            "archive.zip",
+            "spec.pdf",
+            "native.dll",
+            "cache.sqlite",
+            "asset.blend",
+        ];
+        for name in &binary_files {
+            fs::write(tmp.path().join(name), b"x").unwrap();
+        }
+        // A sibling source file that MUST still appear.
+        fs::write(tmp.path().join("main.rs"), "fn x() {}").unwrap();
+        // SVG is intentionally text-editable and should NOT be filtered.
+        fs::write(tmp.path().join("icon.svg"), "<svg/>").unwrap();
+
+        let paths = collect_paths(tmp.path());
+        for name in &binary_files {
+            assert!(
+                !paths.iter().any(|p| p.ends_with(&name.to_string())),
+                "binary file {} leaked into walk: {:?}",
+                name,
+                paths
+            );
+        }
+        assert!(paths.iter().any(|p| p.ends_with("main.rs")), "source file stripped: {paths:?}");
+        assert!(paths.iter().any(|p| p.ends_with("icon.svg")), "svg should not be filtered: {paths:?}");
     }
 
     #[test]
