@@ -114,10 +114,41 @@ impl ProcessSnapshot {
         self.candidates.clear();
         for (pid, proc) in self.sys.processes() {
             let raw_name = proc.name().to_string_lossy().to_lowercase();
-            let is_agent = self.allowlist.iter().any(|a| raw_name.contains(a));
-            if !is_agent {
-                continue;
-            }
+
+            // Three-tier match: process name, then any cmdline token, then
+            // the exe basename. Needed because npm-installed CLIs often run
+            // as `node /path/to/foo/cli.js`, so `proc.name()` is "node" and
+            // the signal is only in argv or exe path. `matched_token` holds
+            // the allowlist entry that triggered detection so downstream
+            // classification (find_adapter_for_process) finds it.
+            let matched_token = self
+                .allowlist
+                .iter()
+                .find(|a| raw_name.contains(**a))
+                .copied()
+                .or_else(|| {
+                    proc.cmd().iter().find_map(|arg| {
+                        let lower = arg.to_string_lossy().to_lowercase();
+                        self.allowlist
+                            .iter()
+                            .find(|a| lower.contains(**a))
+                            .copied()
+                    })
+                })
+                .or_else(|| {
+                    proc.exe()
+                        .and_then(|p| p.file_name())
+                        .and_then(|n| {
+                            let lower = n.to_string_lossy().to_lowercase();
+                            self.allowlist
+                                .iter()
+                                .find(|a| lower.contains(**a))
+                                .copied()
+                        })
+                });
+
+            let Some(token) = matched_token else { continue };
+
             // Windows: cwd() can return None if PEB read fails (insufficient
             // perms for cross-user processes, or sysinfo falls back to
             // PROCESS_QUERY_LIMITED_INFORMATION). Per D-06, skip those
@@ -125,11 +156,23 @@ impl ProcessSnapshot {
             let Some(cwd_path) = proc.cwd() else {
                 continue;
             };
+
+            // Store the matched token as the candidate name so
+            // find_adapter_for_process classifies "node" shims correctly.
+            // Fall back to raw_name when raw_name itself contains the token
+            // (typical direct launch) so the UI doesn't rewrite "claude" to
+            // the shorter allowlist prefix.
+            let name = if raw_name.contains(token) {
+                raw_name
+            } else {
+                token.to_string()
+            };
+
             self.candidates.insert(
                 pid.as_u32(),
                 CandidateProc {
                     pid: pid.as_u32(),
-                    name: raw_name,
+                    name,
                     cwd: cwd_path.to_path_buf(),
                     exe: proc.exe().map(|p| p.to_path_buf()),
                     parent: proc.parent().map(|p| p.as_u32()),
