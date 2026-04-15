@@ -69,9 +69,19 @@ impl AgentAdapter for ClaudeCodeAdapter {
              CLI exits immediately with no work to do."
                 .to_string()
         })?;
+        // `--output-format stream-json` is only accepted alongside `--verbose`
+        // in non-interactive mode; without it claude exits 1 with
+        // "requires --verbose". Adding the flag matches the documented
+        // streaming usage.
         launcher::launch_detached(
             "claude",
-            &["--print", "--output-format", "stream-json", &prompt],
+            &[
+                "--print",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                &prompt,
+            ],
             &cwd,
             None,
             9417, // Default port; caller should override via env
