@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 7 UI-SPEC approved
-last_updated: "2026-04-15T03:36:02.255Z"
-last_activity: 2026-04-11
+stopped_at: Phase 8 context gathered
+last_updated: "2026-04-15T04:22:10.317Z"
+last_activity: 2026-04-15 -- Phase 07 execution started
 progress:
-  total_phases: 7
+  total_phases: 9
   completed_phases: 6
-  total_plans: 27
+  total_plans: 33
   completed_plans: 27
-  percent: 100
+  percent: 82
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-07)
 
 **Core value:** A developer can see exactly what every AI agent is doing across their codebase in real time, prevent destructive conflicts between concurrent agents, and approve/deny agent actions from a single command center.
-**Current focus:** Phase 05 — Conflict Resolution + History
+**Current focus:** Phase 07 — replace-current-blocked-codebase-map-with-a-graph-based-code
 
 ## Current Position
 
-Phase: 05
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-04-15 - Completed quick task 260415-gke: Modal Change-Repo dialog
+Phase: 07 (replace-current-blocked-codebase-map-with-a-graph-based-code) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 07
+Last activity: 2026-04-15 -- Phase 07 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -76,6 +76,7 @@ Recent decisions affecting current work:
 
 - Phase 7 added: Replace current blocked Codebase Map with a graph based codebase map with better spacing, properly sized nodes and traversal through the graph for agents (with ephemereally highlighted movement between nodes for me to track the agent's trail). The links between code should be stuff like imports/dependencies for now, and the files should have an additional gravitational force based on their proximity in the filesystem.
 - Phase 8 added: Real Claude Code hook integration (PreToolUse approvals) -- builds /hook endpoint, ships hooks config, blocks Claude on approval rows; replaces the --accept-edits / --dangerously-skip-permissions chip workaround.
+- Phase 9 added: Implement a plugin / skill / tool / hook manager page that scans both ~/.claude/ and cwd/.claude/ via the watcher, this should be for me to track what things claude has access to at any one point and also edit the CLAUDE.md files in cwd/CLAUDE.md and cwd/.claude/CLAUDE.md if need be.
 
 ### Pending Todos
 
@@ -97,6 +98,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T03:36:02.244Z
-Stopped at: Phase 7 UI-SPEC approved
-Resume file: .planning/phases/07-replace-current-blocked-codebase-map-with-a-graph-based-code/07-UI-SPEC.md
+Last session: 2026-04-15T04:22:10.310Z
+Stopped at: Phase 8 context gathered
+Resume file: .planning/phases/08-real-claude-code-hook-integration-pretooluse-approvals/08-CONTEXT.md
