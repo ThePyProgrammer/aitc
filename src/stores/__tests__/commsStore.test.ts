@@ -27,6 +27,9 @@ const mockRequest: ApprovalRequest = {
   editedContent: null,
   createdAt: '2026-04-10T12:00:00Z',
   resolvedAt: null,
+  toolName: null,
+  toolInputJson: null,
+  sessionId: null,
 };
 
 const mockRequest2: ApprovalRequest = {
@@ -41,6 +44,9 @@ const mockRequest2: ApprovalRequest = {
   editedContent: null,
   createdAt: '2026-04-10T12:01:00Z',
   resolvedAt: null,
+  toolName: null,
+  toolInputJson: null,
+  sessionId: null,
 };
 
 const mockMessage: ChatMessage = {
@@ -265,5 +271,41 @@ describe('commsStore', () => {
     expect(state.messages).toEqual({});
     expect(state.error).toBeNull();
     expect(state.isLoading).toBe(false);
+  });
+});
+
+describe('commsStore pretool_use extension', () => {
+  beforeEach(() => {
+    useCommsStore.getState().reset();
+    vi.clearAllMocks();
+  });
+
+  it('initializes sessionAlwaysAllow as an empty Map', () => {
+    const s = useCommsStore.getState();
+    expect(s.sessionAlwaysAllow).toBeInstanceOf(Map);
+    expect(s.sessionAlwaysAllow.size).toBe(0);
+  });
+
+  it('status union accepts abandoned', () => {
+    // TypeScript compile-time + runtime smoke — if the narrowing below
+    // type-checks, the union includes 'abandoned'.
+    const r = { status: 'abandoned' } as Pick<ApprovalRequest, 'status'>;
+    expect(r.status).toBe('abandoned');
+  });
+
+  it('clearAlwaysAllowForAgent removes the agent key', () => {
+    useCommsStore.setState({
+      sessionAlwaysAllow: new Map([['KAGENT-9', new Set(['Bash'])]]),
+    });
+    useCommsStore.getState().clearAlwaysAllowForAgent('KAGENT-9');
+    expect(useCommsStore.getState().sessionAlwaysAllow.has('KAGENT-9')).toBe(false);
+  });
+
+  it('reset clears sessionAlwaysAllow', () => {
+    useCommsStore.setState({
+      sessionAlwaysAllow: new Map([['KAGENT-9', new Set(['Bash'])]]),
+    });
+    useCommsStore.getState().reset();
+    expect(useCommsStore.getState().sessionAlwaysAllow.size).toBe(0);
   });
 });

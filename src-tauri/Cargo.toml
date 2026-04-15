@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "aitc-hook"]
+
 [package]
 name = "aitc"
 version = "0.1.0"
@@ -56,9 +59,13 @@ rayon = "=1.12.0"
 
 # Phase 9: ARSENAL (Claude resources manager) dependencies
 gray_matter = "0.2"
-dirs = "5"
+# Phase 8 bumped `dirs` from 5 to 6 (unified with sidecar crate aitc-hook).
+dirs = "6"
 tempfile = "3"
 walkdir = "2"
+
+# Phase 8: PreToolUse hook integration dependencies
+tauri-plugin-shell = "2"
 
 [dev-dependencies]
 tempfile = "3"

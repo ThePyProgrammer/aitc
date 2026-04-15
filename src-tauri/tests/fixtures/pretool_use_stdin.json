@@ -1,0 +1,12 @@
+{
+  "session_id": "sess_abc123",
+  "transcript_path": "/tmp/claude-transcript.json",
+  "cwd": "/home/dev/proj",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/home/dev/proj/src/app.ts",
+    "old_string": "const x = 1;",
+    "new_string": "const x = 2;"
+  }
+}
