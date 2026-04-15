@@ -220,6 +220,7 @@ pub async fn start_watch(
         snapshot,
         channel,
         tree_index: watcher_output.initial_tree,
+        repo_root: canonical.clone(),
     });
 
     tracing::info!(
@@ -258,6 +259,12 @@ pub async fn list_worktrees(repo_root: String) -> Result<Vec<Worktree>, String> 
 
 /// Get the file tree index from the active watch for the Phase 4 radar spatial map.
 /// Returns an empty vec if no watch is active.
+///
+/// Paths are serialized as repo-relative with forward-slash separators. Storing
+/// absolute paths on the frontend created an O(depth) chain of single-child
+/// directory wrappers (`/`, `home`, `prannayag`, …) before any real content,
+/// which visually crushed the treemap into a corner. The repo root itself is
+/// emitted as `""` so the frontend root aggregate stays intact.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_tree_index(
@@ -266,12 +273,20 @@ pub async fn get_tree_index(
     let guard = state.inner.lock().await;
     match guard.as_ref() {
         Some(active) => {
+            let repo_root = &active.repo_root;
             let entries: Vec<TreeIndexEntry> = active
                 .tree_index
                 .iter()
                 .map(|(path, node)| {
-                    let path_str = path.to_string_lossy().to_string();
-                    let depth = path.components().count() as u32;
+                    // Fall back to the full path if strip_prefix fails — shouldn't
+                    // happen in normal operation since the walker only produces
+                    // descendants of repo_root, but belt-and-suspenders keeps the
+                    // map populated even if a canonicalization quirk slips through.
+                    let rel = path.strip_prefix(repo_root).unwrap_or(path);
+                    let path_str = rel.to_string_lossy().replace('\\', "/");
+                    // Depth is measured from repo_root, not the filesystem root,
+                    // so a file at `<repo>/src/App.tsx` reports depth 2.
+                    let depth = rel.components().count() as u32;
                     TreeIndexEntry {
                         path: path_str,
                         size: node.size,
