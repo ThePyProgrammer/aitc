@@ -7,8 +7,17 @@ use std::sync::OnceLock;
 static LAUNCH_CWD: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 /// Called from lib.rs::run() at the very top, BEFORE the Tauri builder.
+///
+/// Respects the `AITC_REPO_OVERRIDE` env var so `npm run tauri dev` can point
+/// the app at a scratch repo instead of always watching the aitc source tree
+/// itself. Useful during local development -- agents editing the scratch repo
+/// don't trigger Vite/Cargo hot reload, which otherwise kills AITC and leaves
+/// spawned agent processes as orphans.
 pub fn capture_launch_cwd() {
-    let _ = LAUNCH_CWD.set(std::env::current_dir().ok());
+    let cwd = std::env::var_os("AITC_REPO_OVERRIDE")
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok());
+    let _ = LAUNCH_CWD.set(cwd);
 }
 
 #[tauri::command]
