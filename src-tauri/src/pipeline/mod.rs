@@ -14,6 +14,7 @@
 //! that all plans are implemented.
 
 pub mod commands;
+pub mod deps;
 pub mod events;
 pub mod ignore_filter;
 pub mod passive_bridge;
