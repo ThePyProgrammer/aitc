@@ -18,7 +18,13 @@ Items discovered while executing Phase 8 that are outside this phase's scope.
 - **Workaround used in Plan 08-01:** Verified Plan 08-01 stubs compile via `cargo check --workspace` (lib-only, not `--tests`). Could not run `cargo test --lib agents::hook_waiters ...` directly. The sidecar crate `aitc-hook` tests run cleanly (verified RED state).
 - **Owner:** Phase 9 — to be addressed by Phase 9 Plan 2 (which introduces the fixtures module) or a targeted fix to un-gate the empty module declaration.
 
-### 2. Non-root `[profile.release]` in `aitc-hook/Cargo.toml` ignored
+### 2. Pre-existing `tsc --noEmit` errors in `src/views/Radar/forceCluster.ts` + its tests
+
+- **Symptom:** `npx tsc --noEmit` reports 59 errors rooted in `d3-force` typings and `ClusterNode` missing `x`/`y`/`vx`/`vy` simulation fields.
+- **Scope:** Pre-existing (63 errors on base commit `fb5d5a9`, reduced to 59 after Plan 08-01 which adds zero errors).
+- **Owner:** Phase 7 — Plan 07-05 introduced the `forceCluster` module; fixing the d3-force typings is out of scope for Phase 8.
+
+### 3. Non-root `[profile.release]` in `aitc-hook/Cargo.toml` ignored
 
 - **Symptom:** `cargo check --workspace` emits:
   ```

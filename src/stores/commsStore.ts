@@ -17,12 +17,16 @@ export interface ApprovalRequest {
   requestType: string;
   filePath: string | null;
   diffContent: string | null;
-  status: 'pending' | 'approved' | 'denied' | 'info_requested';
+  status: 'pending' | 'approved' | 'denied' | 'info_requested' | 'abandoned';
   urgency: 'low' | 'medium' | 'high';
   responseNote: string | null;
   editedContent: string | null;
   createdAt: string;
   resolvedAt: string | null;
+  // Phase 8: PreToolUse hook context. Existing non-hook rows leave these null.
+  toolName: string | null;
+  toolInputJson: unknown | null;
+  sessionId: string | null;
 }
 
 export interface ChatMessage {
@@ -42,18 +46,27 @@ interface CommsStore {
   messages: Record<string, ChatMessage[]>;
   isLoading: boolean;
   error: string | null;
+  // Phase 8: session-scoped always-allow decisions keyed by agent_id -> set of tool_names.
+  // Populated when the user ticks "remember for this session" in the approve modal.
+  // Plan 05 wires this through to the backend; Plan 02 reads it in /hook.
+  sessionAlwaysAllow: Map<string, Set<string>>;
   fetchRequests: () => Promise<void>;
   selectRequest: (id: number | null) => void;
-  approveRequest: (id: number) => Promise<void>;
+  approveRequest: (id: number, opts?: { alwaysAllowForSession?: boolean }) => Promise<void>;
   denyRequest: (id: number) => Promise<void>;
   askMoreInfo: (id: number, question: string) => Promise<void>;
-  approveWithEdits: (id: number, editedContent: string) => Promise<void>;
+  approveWithEdits: (
+    id: number,
+    editedContent: string,
+    opts?: { alwaysAllowForSession?: boolean }
+  ) => Promise<void>;
   setEditing: (id: number | null) => void;
   sendMessage: (agentId: string, content: string) => Promise<void>;
   fetchMessages: (agentId: string) => Promise<void>;
   subscribeToApprovals: () => Promise<UnlistenFn>;
   pendingCount: () => number;
   selectedRequest: () => ApprovalRequest | undefined;
+  clearAlwaysAllowForAgent: (agentId: string) => void;
   reset: () => void;
 }
 
@@ -64,6 +77,7 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
   messages: {},
   isLoading: false,
   error: null,
+  sessionAlwaysAllow: new Map<string, Set<string>>(),
 
   fetchRequests: async () => {
     try {
@@ -79,7 +93,9 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
     set({ selectedRequestId: id });
   },
 
-  approveRequest: async (id) => {
+  approveRequest: async (id, _opts) => {
+    // Plan 05 wires `_opts.alwaysAllowForSession` into the invoke payload.
+    // Plan 01 only extends the signature so downstream callers type-check.
     try {
       await invoke('approve_request', { id });
       set((s) => ({
@@ -118,7 +134,8 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
     }
   },
 
-  approveWithEdits: async (id, editedContent) => {
+  approveWithEdits: async (id, editedContent, _opts) => {
+    // Plan 05 wires `_opts.alwaysAllowForSession` into the invoke payload.
     try {
       await invoke('approve_with_edits', { id, editedContent });
       set((s) => ({
@@ -130,6 +147,13 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
       set({ error: String(e) });
     }
   },
+
+  clearAlwaysAllowForAgent: (agentId) =>
+    set((s) => {
+      const m = new Map(s.sessionAlwaysAllow);
+      m.delete(agentId);
+      return { sessionAlwaysAllow: m };
+    }),
 
   setEditing: (id) => {
     set({ editingRequestId: id });
@@ -210,5 +234,6 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
       messages: {},
       isLoading: false,
       error: null,
+      sessionAlwaysAllow: new Map<string, Set<string>>(),
     }),
 }));
