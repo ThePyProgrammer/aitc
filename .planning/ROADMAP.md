@@ -173,15 +173,15 @@ Plans:
 
 **Requirements:** Carries forward the Phase 4 comms hub request flow; no new milestone requirements.
 **Depends on:** Phase 7. (Also builds on the existing Phase 3 self-register server and Phase 4 approval UI.)
-**Plans:** 6 plans
+**Plans:** 6/6 plans complete
 
 Plans:
-- [ ] 08-01-PLAN.md -- Wave 0: workspace + sidecar crate scaffold, DB migration 005, hook_waiters/hook_install/port_file module stubs, bundle+capability config, frontend ToolPreview registry stub, test fixtures (foundation)
-- [ ] 08-02-PLAN.md -- Wave 1 backend: /hook axum route with long-held response + AbandonGuard, WaiterRegistry impl, port_file writer, Tauri approve/deny/approve_with_edits signal waiters + terminate force-deny, e2e smokes (COMM-01/02/06, AGNT-03)
-- [ ] 08-03-PLAN.md -- Wave 1 sidecar: aitc-hook binary parses Claude PreToolUse stdin, POSTs /hook, emits modern hookSpecificOutput envelope, fail-safe deny on every error path (COMM-02, COMM-06)
-- [ ] 08-04-PLAN.md -- Wave 2 install: settings.local.json merge-safe writer, claude_code::launch chip-bypass wiring, passive consent event+commands, startup auto-heal, tauri-plugin-shell registration (AGNT-03, COMM-05)
-- [ ] 08-05-PLAN.md -- Wave 2 frontend: ToolBadge, per-tool ToolPreview renderers (Edit/Write/Bash/Notebook/ProtectedPath/Unknown), DontAskAgainCheckbox, PassiveHookConsentDialog, deepLinkNotification, RequestQueue abandoned-row treatment (COMM-01/02/03/05/06)
-- [ ] 08-06-PLAN.md -- Wave 3 e2e: cross-crate integration test driving real aitc-hook binary against real /hook endpoint (allow/allow_with_edits/deny/abandon); manual UAT + visual verification checkpoint against 08-UI-SPEC
+- [x] 08-01-PLAN.md -- Wave 0: workspace + sidecar crate scaffold, DB migration 005, hook_waiters/hook_install/port_file module stubs, bundle+capability config, frontend ToolPreview registry stub, test fixtures (foundation)
+- [x] 08-02-PLAN.md -- Wave 1 backend: /hook axum route with long-held response + AbandonGuard, WaiterRegistry impl, port_file writer, Tauri approve/deny/approve_with_edits signal waiters + terminate force-deny, e2e smokes (COMM-01/02/06, AGNT-03)
+- [x] 08-03-PLAN.md -- Wave 1 sidecar: aitc-hook binary parses Claude PreToolUse stdin, POSTs /hook, emits modern hookSpecificOutput envelope, fail-safe deny on every error path (COMM-02, COMM-06)
+- [x] 08-04-PLAN.md -- Wave 2 install: settings.local.json merge-safe writer, claude_code::launch chip-bypass wiring, passive consent event+commands, startup auto-heal, tauri-plugin-shell registration (AGNT-03, COMM-05)
+- [x] 08-05-PLAN.md -- Wave 2 frontend: ToolBadge, per-tool ToolPreview renderers (Edit/Write/Bash/Notebook/ProtectedPath/Unknown), DontAskAgainCheckbox, PassiveHookConsentDialog, deepLinkNotification, RequestQueue abandoned-row treatment (COMM-01/02/03/05/06)
+- [x] 08-06-PLAN.md -- Wave 3 e2e: cross-crate integration test driving real aitc-hook binary against real /hook endpoint (allow/allow_with_edits/deny/abandon); manual UAT + visual verification checkpoint against 08-UI-SPEC
 
 ### Phase 9: Implement a plugin / skill / tool / hook manager page that scans both ~/.claude/ and cwd/.claude/ via the watcher, this should be for me to track what things claude has access to at any one point and also edit the CLAUDE.md files in cwd/CLAUDE.md and cwd/.claude/CLAUDE.md if need be
 
