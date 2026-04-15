@@ -31,7 +31,7 @@ export function QuickCommands() {
         {!confirmHalt ? (
           <button
             onClick={() => setConfirmHalt(true)}
-            className="w-full text-left px-4 py-2 bg-transparent border border-outline/20 font-headline text-xs font-bold uppercase tracking-widest text-error hover:bg-error/10 transition-colors duration-150"
+            className="w-full text-center px-4 py-2 bg-transparent border border-outline/20 font-headline text-xs font-bold uppercase tracking-widest text-error hover:bg-error/10 transition-colors duration-150"
           >
             EMERGENCY_HALT_ALL
           </button>
