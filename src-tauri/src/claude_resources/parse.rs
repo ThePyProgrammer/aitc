@@ -135,6 +135,47 @@ fn file_stem_or(path: &Path, default: &str) -> String {
         .unwrap_or_else(|| default.to_string())
 }
 
+/// Derive the colon-separated qualified command name from the path relative
+/// to the nearest `commands/` ancestor. Matches Claude Code's presentation:
+///
+///   `commands/turing/sweep/SKILL.md`           → `"turing:sweep"`
+///   `commands/blueprint/agents/persona.md`     → `"blueprint:agents:persona"`
+///   `commands/commit.md`                       → `"commit"`
+///
+/// For SKILL.md files the filename is dropped (the parent dir IS the name).
+/// Returns `None` if `commands/` isn't in the path ancestry.
+fn command_qualified_name(path: &Path) -> Option<String> {
+    let components: Vec<String> = path
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    let idx = components.iter().rposition(|c| c == "commands")?;
+    let after = &components[idx + 1..];
+    if after.is_empty() {
+        return None;
+    }
+    let is_skill_md = path
+        .file_name()
+        .map(|n| n == "SKILL.md")
+        .unwrap_or(false);
+    let mut parts: Vec<String> = if is_skill_md {
+        // Drop SKILL.md — parent dirs form the qualified name.
+        after[..after.len() - 1].to_vec()
+    } else {
+        // Dirs + file stem (without .md).
+        let mut v: Vec<String> = after[..after.len() - 1].to_vec();
+        v.push(file_stem_or(path, "command"));
+        v
+    };
+    // Filter empties defensively.
+    parts.retain(|s| !s.is_empty());
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(":"))
+    }
+}
+
 // ---------- public parsers ----------
 
 /// Parse a `SKILL.md` file. The skill name is derived from the frontmatter
@@ -204,25 +245,13 @@ pub fn parse_agent(path: &Path, scope: Scope) -> Result<Resource, String> {
 pub fn parse_command(path: &Path, scope: Scope) -> Result<Resource, String> {
     let raw = read_file(path)?;
     let (front, _body) = parse_front::<CommandFront>(&raw)?;
-    // Name priority: frontmatter `name:` → parent dir (for SKILL.md files) → filename stem.
-    let name = front
-        .name
-        .clone()
-        .or_else(|| {
-            // SKILL.md files under commands/ use the parent dir as the command name
-            // (e.g. commands/turing/preflight/SKILL.md → "preflight").
-            let is_skill_md = path
-                .file_name()
-                .map(|n| n == "SKILL.md")
-                .unwrap_or(false);
-            if is_skill_md {
-                path.parent()
-                    .and_then(|p| p.file_name())
-                    .map(|s| s.to_string_lossy().into_owned())
-            } else {
-                None
-            }
-        })
+    // Derive the qualified command name from the path relative to the
+    // `commands/` directory — this matches Claude Code's presentation:
+    //   commands/turing/sweep/SKILL.md  → "turing:sweep"
+    //   commands/blueprint/agents/persona.md → "blueprint:agents:persona"
+    //   commands/commit.md              → "commit"
+    let name = command_qualified_name(path)
+        .or_else(|| front.name.clone())
         .unwrap_or_else(|| file_stem_or(path, "command"));
     let id = ResourceId(format!("{}::command::{}", scope_str(scope), name));
     Ok(Resource {
@@ -688,6 +717,31 @@ mod tests {
             }
             other => panic!("expected Agent, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn command_qualified_name_produces_colon_separated_path() {
+        use std::path::Path;
+        // SKILL.md under nested dirs → dirs joined by colon, SKILL.md dropped
+        assert_eq!(
+            command_qualified_name(Path::new("/home/u/.claude/commands/turing/sweep/SKILL.md")),
+            Some("turing:sweep".into())
+        );
+        // Regular .md → dirs + file stem joined by colon
+        assert_eq!(
+            command_qualified_name(Path::new("/home/u/.claude/commands/blueprint/agents/persona.md")),
+            Some("blueprint:agents:persona".into())
+        );
+        // Top-level command → just the stem
+        assert_eq!(
+            command_qualified_name(Path::new("/home/u/.claude/commands/commit.md")),
+            Some("commit".into())
+        );
+        // No commands/ ancestor → None
+        assert_eq!(
+            command_qualified_name(Path::new("/home/u/.claude/agents/foo.md")),
+            None
+        );
     }
 
     /// Regression: some real commands/agents ship with no frontmatter at
