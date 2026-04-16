@@ -61,11 +61,15 @@ export interface Viewport {
 export interface ForceConfig {
   centerStrength: number;   // 0..1, default 0.05
   clusterStrength: number;  // 0..1, default 0.08
+  linkStrength: number;     // 0..1, default 0.3; 0 = structure-only mode (no edge pull)
+  chargeStrength: number;   // -300..0, default -80; repulsion between all nodes
 }
 
 export const DEFAULT_FORCE_CONFIG: ForceConfig = {
   centerStrength: 0.05,
   clusterStrength: 0.08,
+  linkStrength: 0.3,
+  chargeStrength: -80,
 };
 
 // 8-color agent dot palette per UI-SPEC.

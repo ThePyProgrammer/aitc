@@ -122,12 +122,12 @@ export function useGraphLayout(): UseGraphLayoutResult {
           forceLink<SimNode, SimEdge>(simEdges)
             .id((n) => n.id)
             .distance(LINK_DISTANCE)
-            .strength(LINK_STRENGTH),
+            .strength(cfg.linkStrength),
         )
         .force(
           'charge',
           forceManyBody<SimNode>()
-            .strength(CHARGE_STRENGTH)
+            .strength(cfg.chargeStrength)
             .theta(CHARGE_THETA)
             .distanceMax(CHARGE_DISTANCE_MAX),
         )
@@ -232,16 +232,23 @@ export function useGraphLayout(): UseGraphLayoutResult {
     const sim = simRef.current;
     if (!sim) return;
     if (settledAt === null) return;
+    const prev = prevForceConfigRef.current;
     if (
-      prevForceConfigRef.current.centerStrength === forceConfig.centerStrength &&
-      prevForceConfigRef.current.clusterStrength === forceConfig.clusterStrength
+      prev.centerStrength === forceConfig.centerStrength &&
+      prev.clusterStrength === forceConfig.clusterStrength &&
+      prev.linkStrength === forceConfig.linkStrength &&
+      prev.chargeStrength === forceConfig.chargeStrength
     ) return;
     prevForceConfigRef.current = forceConfig;
-    // Update forces in-place on the existing simulation.
+    // Update all forces in-place on the existing simulation.
     const centerForce = sim.force('center') as ReturnType<typeof forceCenter> | undefined;
     if (centerForce) centerForce.strength(forceConfig.centerStrength);
     const clusterForce = sim.force('cluster') as ReturnType<typeof forceCluster> | undefined;
     if (clusterForce) clusterForce.strength(forceConfig.clusterStrength);
+    const linkForce = sim.force('link') as ReturnType<typeof forceLink> | undefined;
+    if (linkForce) linkForce.strength(forceConfig.linkStrength);
+    const chargeForce = sim.force('charge') as ReturnType<typeof forceManyBody> | undefined;
+    if (chargeForce) chargeForce.strength(forceConfig.chargeStrength);
     // Alpha-restart — d3's rAF loop picks up immediately, nodes glide.
     sim.alpha(FORCE_CONFIG_ALPHA).restart();
   }, [forceConfig, settledAt]);

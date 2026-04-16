@@ -180,6 +180,8 @@ const mockRadarState = {
   contentionScores: new Map<string, number>(),
   viewport: { zoom: 1, panX: 0, panY: 0 } as Viewport,
   activeTrails: [] as ActiveTrail[],
+  forceConfig: { centerStrength: 0.05, clusterStrength: 0.08, linkStrength: 0.3, chargeStrength: -80 },
+  setForceConfig: vi.fn(),
   fetchGraph: vi.fn(),
   setViewport: vi.fn(),
   toggleHeatMap: vi.fn(),
