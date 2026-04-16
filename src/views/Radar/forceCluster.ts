@@ -48,8 +48,9 @@ export interface ClusterCollideForce {
   strength: ((v: number) => ClusterCollideForce) & (() => number);
 }
 
-export const CLUSTER_COLLIDE_PADDING = 30; // world-space px between hull edges
-export const CLUSTER_COLLIDE_STRENGTH = 0.7;
+export const CLUSTER_COLLIDE_PADDING = 20; // world-space px between hull edges
+export const CLUSTER_COLLIDE_STRENGTH = 0.15; // gentle — high values cause explosion
+export const CLUSTER_COLLIDE_MAX_DISPLACEMENT = 5; // max px velocity added per tick per node
 
 export function forceClusterCollide(): ClusterCollideForce {
   let nodes: ClusterNode[] = [];
@@ -107,18 +108,28 @@ export function forceClusterCollide(): ClusterCollideForce {
         const minDist = a.r + b.r;
         if (dist >= minDist) continue;
         // Overlap detected — push apart along centroid axis.
+        // Divide by member count so large clusters don't get outsized impulse.
         const overlap = (minDist - dist) * 0.5;
         const k = strength * alpha;
-        const ux = (dx / dist) * overlap * k;
-        const uy = (dy / dist) * overlap * k;
+        let ux = (dx / dist) * overlap * k;
+        let uy = (dy / dist) * overlap * k;
+        // Cap displacement to prevent explosion during early chaotic ticks.
+        const mag = Math.sqrt(ux * ux + uy * uy);
+        if (mag > CLUSTER_COLLIDE_MAX_DISPLACEMENT) {
+          const scale = CLUSTER_COLLIDE_MAX_DISPLACEMENT / mag;
+          ux *= scale;
+          uy *= scale;
+        }
         // Apply to all members of each cluster (move cluster A left, B right).
+        const aScale = 1 / Math.max(a.members.length, 1);
+        const bScale = 1 / Math.max(b.members.length, 1);
         for (const m of a.members) {
-          m.vx = (m.vx ?? 0) - ux;
-          m.vy = (m.vy ?? 0) - uy;
+          m.vx = (m.vx ?? 0) - ux * aScale;
+          m.vy = (m.vy ?? 0) - uy * aScale;
         }
         for (const m of b.members) {
-          m.vx = (m.vx ?? 0) + ux;
-          m.vy = (m.vy ?? 0) + uy;
+          m.vx = (m.vx ?? 0) + ux * bScale;
+          m.vy = (m.vy ?? 0) + uy * bScale;
         }
       }
     }
