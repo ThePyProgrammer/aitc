@@ -75,7 +75,7 @@ fn map_approval_row(row: &sqlx::sqlite::SqliteRow) -> ApprovalRequest {
         // rows (from the Phase 4 protected-path trigger) never set these.
         tool_name: row.try_get("tool_name").ok().flatten(),
         tool_input_json: row.try_get("tool_input_json").ok().flatten(),
-        session_id: row.try_get("session_id").ok().flatten(),
+        session_id: row.try_get("hook_session_id").ok().flatten(),
     }
 }
 
@@ -125,11 +125,11 @@ pub async fn create_approval_request_internal<R: tauri::Runtime>(
 ) -> Result<ApprovalRequest, String> {
     let row = sqlx::query(
         "INSERT INTO approval_requests \
-         (agent_id, request_type, file_path, diff_content, urgency, tool_name, tool_input_json, session_id) \
+         (agent_id, request_type, file_path, diff_content, urgency, tool_name, tool_input_json, hook_session_id) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
          RETURNING id, agent_id, request_type, file_path, diff_content, status, urgency, \
                    response_note, edited_content, created_at, resolved_at, \
-                   tool_name, tool_input_json, session_id",
+                   tool_name, tool_input_json, hook_session_id",
     )
     .bind(agent_id)
     .bind(request_type)
@@ -600,7 +600,7 @@ pub(crate) mod tests {
                 resolved_at TEXT, \
                 tool_name TEXT, \
                 tool_input_json TEXT, \
-                session_id TEXT \
+                hook_session_id TEXT \
              )",
         )
         .execute(&pool)
@@ -614,7 +614,7 @@ pub(crate) mod tests {
         let pool = make_pool_with_approval_schema().await;
         sqlx::query(
             "INSERT INTO approval_requests \
-             (agent_id, request_type, urgency, tool_name, tool_input_json, session_id) \
+             (agent_id, request_type, urgency, tool_name, tool_input_json, hook_session_id) \
              VALUES ('K-1', 'pretool_use', 'high', 'Edit', \
                      '{\"file_path\":\"/x.ts\"}', 's1')",
         )

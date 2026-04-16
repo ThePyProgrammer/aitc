@@ -718,7 +718,7 @@ mod tests {
                 resolved_at TEXT, \
                 tool_name TEXT, \
                 tool_input_json TEXT, \
-                session_id TEXT \
+                hook_session_id TEXT \
              )",
         )
         .execute(&pool)
@@ -846,7 +846,7 @@ mod tests {
         };
         // Confirm the row carries the Phase 8 fields.
         let (tool_name, tool_input_json, session_id): (String, String, String) = sqlx::query_as(
-            "SELECT tool_name, tool_input_json, session_id FROM approval_requests WHERE id = ?",
+            "SELECT tool_name, tool_input_json, hook_session_id FROM approval_requests WHERE id = ?",
         )
         .bind(row_id)
         .fetch_one(&pool_clone)
