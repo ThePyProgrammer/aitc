@@ -89,7 +89,17 @@ pub fn category_for_path(path: &Path, scope_root: &Path) -> Option<Category> {
                 .map(|e| e == "md")
                 .unwrap_or(false)
             {
-                return Some(Category::Command);
+                // Plugins ship agents under commands/<plugin>/agents/*.md
+                // (e.g. commands/blueprint/agents/adr-researcher.md).
+                // Reclassify as Agent when an `agents/` segment is present.
+                let has_agents_segment = rel
+                    .components()
+                    .any(|c| c.as_os_str() == "agents");
+                return Some(if has_agents_segment {
+                    Category::Agent
+                } else {
+                    Category::Command
+                });
             }
             None
         }
