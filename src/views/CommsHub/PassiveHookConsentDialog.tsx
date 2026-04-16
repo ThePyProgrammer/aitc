@@ -81,9 +81,9 @@ export function PassiveHookConsentDialog() {
       aria-modal="true"
       aria-labelledby="passive-consent-title"
       data-passive-consent-dialog
-      className="fixed inset-0 z-50 flex items-center justify-center bg-surface/60"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
     >
-      <div className="bg-surface-container p-6 max-w-md w-full border border-outline-variant/20">
+      <div className="bg-surface-container p-6 max-w-md w-full border border-outline-variant/40 shadow-2xl shadow-black/50">
         <h2
           id="passive-consent-title"
           className="font-headline text-sm font-bold uppercase tracking-widest mb-4"
