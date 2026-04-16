@@ -109,27 +109,18 @@ export function ArsenalView() {
   // Rail counts ignore the filter + scope selector and respect D-03 shadow at
   // category level (combined count = union minus shadowed globals).
   const counts = useMemo<Record<UiCategory, number>>(() => {
-    const result: Record<UiCategory, number> = {
-      skill: 0,
-      agent: 0,
-      plugin: 0,
-      configuration: 0,
-    };
-    const perCategoryList: Record<UiCategory, Resource[]> = {
-      skill: [],
-      agent: [],
-      plugin: [],
-      configuration: [],
-    };
+    const uiKeys: UiCategory[] = ['skill', 'agent', 'plugin', 'instructions', 'configuration'];
+    const result = Object.fromEntries(uiKeys.map((k) => [k, 0])) as Record<UiCategory, number>;
+    const perCategoryList = Object.fromEntries(uiKeys.map((k) => [k, []])) as Record<UiCategory, Resource[]>;
     for (const r of Object.values(resources)) {
-      for (const ui of ['skill', 'agent', 'plugin', 'configuration'] as const) {
+      for (const ui of uiKeys) {
         if (categoryGroup(ui).includes(r.category)) {
           perCategoryList[ui].push(r);
           break;
         }
       }
     }
-    for (const ui of ['skill', 'agent', 'plugin', 'configuration'] as const) {
+    for (const ui of uiKeys) {
       const list = perCategoryList[ui].filter((r) =>
         shadowSuppress(r, resources),
       );
@@ -142,6 +133,7 @@ export function ArsenalView() {
     counts.skill === 0 &&
     counts.agent === 0 &&
     counts.plugin === 0 &&
+    counts.instructions === 0 &&
     counts.configuration === 0;
 
   return (

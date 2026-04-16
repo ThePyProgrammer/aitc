@@ -7,10 +7,10 @@
 // BLOCKER 4 REVISION, `'claudeMd'` is grouped under CONFIGURATION so the
 // CLAUDE.md rows emitted by the Plan 02 parser are reachable in the UI.
 
-import { Bot, Boxes, FileCode2, Settings2 } from 'lucide-react';
+import { Bot, Boxes, FileCode2, FileText, Settings2 } from 'lucide-react';
 import type { Category } from '../../bindings';
 
-export type UiCategory = 'skill' | 'agent' | 'plugin' | 'configuration';
+export type UiCategory = 'skill' | 'agent' | 'plugin' | 'instructions' | 'configuration';
 
 export interface CategoryRailProps {
   active: UiCategory;
@@ -22,6 +22,7 @@ const items: { key: UiCategory; label: string; icon: typeof FileCode2 }[] = [
   { key: 'skill', label: 'SKILLS', icon: FileCode2 },
   { key: 'agent', label: 'AGENTS', icon: Bot },
   { key: 'plugin', label: 'PLUGINS', icon: Boxes },
+  { key: 'instructions', label: 'INSTRUCTIONS', icon: FileText },
   { key: 'configuration', label: 'CONFIGURATION', icon: Settings2 },
 ];
 
@@ -74,8 +75,10 @@ export function categoryGroup(ui: UiCategory): Category[] {
       return ['agent'];
     case 'plugin':
       return ['plugin'];
+    case 'instructions':
+      return ['claudeMd'];
     case 'configuration':
-      return ['hook', 'command', 'settings', 'mcp', 'claudeMd'];
+      return ['hook', 'command', 'settings', 'mcp'];
   }
 }
 
@@ -87,6 +90,8 @@ export function uiCategoryLabel(c: UiCategory): string {
       return 'AGENTS';
     case 'plugin':
       return 'PLUGINS';
+    case 'instructions':
+      return 'INSTRUCTIONS';
     case 'configuration':
       return 'CONFIGURATION';
   }
