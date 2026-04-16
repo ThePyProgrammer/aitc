@@ -259,7 +259,6 @@ export const useRadarStore = create<RadarStore>((set) => ({
   setForceConfig: (cfg) =>
     set((s) => ({
       forceConfig: { ...s.forceConfig, ...cfg },
-      settledAt: null, // trigger re-settle with new force params
     })),
 
   setViewport: (v) =>

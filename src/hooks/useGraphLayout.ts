@@ -166,8 +166,7 @@ export function useGraphLayout(): UseGraphLayoutResult {
     useRadarStore.getState().commitSettledPositions(positions);
     lastNodeIdsRef.current = new Set(graphNodes.map((n) => n.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphNodes, graphEdges, settledAt, forceConfig]);
+  }, [graphNodes, graphEdges, settledAt]);
 
   // Re-warm when graph data mutates past the threshold. Runs only after
   // an initial settle (settledAt !== null).
@@ -180,7 +179,29 @@ export function useGraphLayout(): UseGraphLayoutResult {
     useRadarStore.getState().commitSettledPositions(positions);
     lastNodeIdsRef.current = currentIds;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphNodes, graphEdges, forceConfig]);
+  }, [graphNodes, graphEdges]);
+
+  // When forceConfig changes (and we already have a settled sim), update
+  // the existing simulation's forces in-place and re-warm gently so nodes
+  // glide to their new equilibrium instead of snapping.
+  const prevForceConfigRef = useRef(forceConfig);
+  useEffect(() => {
+    const sim = simRef.current;
+    if (!sim) return;
+    if (settledAt === null) return; // initial settle handles it
+    if (
+      prevForceConfigRef.current.centerStrength === forceConfig.centerStrength &&
+      prevForceConfigRef.current.clusterStrength === forceConfig.clusterStrength
+    ) return;
+    prevForceConfigRef.current = forceConfig;
+    // Update forces in-place on the existing simulation.
+    const centerForce = sim.force('center') as ReturnType<typeof forceCenter> | undefined;
+    if (centerForce) centerForce.strength(forceConfig.centerStrength);
+    const clusterForce = sim.force('cluster') as ReturnType<typeof forceCluster> | undefined;
+    if (clusterForce) clusterForce.strength(forceConfig.clusterStrength);
+    // Gentle re-warm — nodes glide to new equilibrium.
+    rewarm(REWARM_ALPHA);
+  }, [forceConfig, settledAt]);
 
   // Cleanup on unmount (Pitfall 2).
   useEffect(() => {
