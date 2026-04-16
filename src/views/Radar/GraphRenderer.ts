@@ -2,7 +2,10 @@
 // Pure render functions for the graph radar. Called by RadarCanvas's rAF loop.
 // All sizes are world-space pixels; divide by zoom for visual constancy.
 //
-// Color and sizing values copied verbatim from 07-UI-SPEC.md §Color and §Sizing.
+// Color tokens come from a GraphTheme threaded through every draw function;
+// see src/views/Radar/themes.ts for the catalog. The legacy COLORS export is
+// retained for a few sites (drawSelectedNode uses white stroke which is
+// theme-independent).
 // The render z-order in RadarCanvas walks these functions in sequence per
 // 07-UI-SPEC §Component Inventory (steps 2-7 in this plan; 8-13 land in Plans
 // 05 and 06).
@@ -10,6 +13,13 @@
 import { polygonHull, polygonCentroid } from 'd3-polygon';
 import { line, curveCatmullRomClosed } from 'd3-shape';
 import type { GraphNode, GraphEdge, Viewport } from '../../stores/radarStore';
+import type { GraphTheme } from './themes';
+import { clusterAccentFor, THEMES, DEFAULT_THEME_ID } from './themes';
+
+// Used as the optional-arg default across every draw function so legacy
+// callers / tests that pre-date the theme arg still render with the
+// original phosphor-classic palette.
+const FALLBACK_THEME: GraphTheme = THEMES[DEFAULT_THEME_ID];
 
 // Catmull-Rom closed spline for smooth hull outlines (ResearchOS technique).
 const smoothHullLine = line().curve(curveCatmullRomClosed.alpha(0.5));
@@ -67,16 +77,38 @@ export const PINNED_BADGE_SIZE = 5;
 export const FILE_LABEL_ZOOM_THRESHOLD = 4; // UI-SPEC §Progressive Detail: ≥ 4× shows file-name labels
 
 // ───── Heat-map color blend (D-19, UI-SPEC §Color heat-map ramp) ─────
+/** Error token — the end of the heat-map ramp. Stable across themes. */
+export const HEAT_RAMP_END = '#ff7351';
+
+/** Parse a #rgb or #rrggbb hex string into a [r, g, b] triple in 0..255. */
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.startsWith('#') ? hex.slice(1) : hex;
+  if (clean.length === 3) {
+    const r = parseInt(clean[0] + clean[0], 16);
+    const g = parseInt(clean[1] + clean[1], 16);
+    const b = parseInt(clean[2] + clean[2], 16);
+    return [r, g, b];
+  }
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return [r, g, b];
+}
+
 /**
- * Interpolate from surface-container (#0f1a0e) → error (#ff7351) along a
- * contention score in [0, 1]. Scores outside the range are clamped.
+ * Interpolate from `theme.heatRampStart` → HEAT_RAMP_END along a contention
+ * score in [0, 1]. Scores outside the range are clamped. If `theme` is
+ * omitted, falls back to the phosphor-classic ramp start (#0f1a0e) so
+ * existing callers / tests that pre-date the theme arg keep working.
  */
-export function heatColor(score: number): string {
+export function heatColor(score: number, theme?: GraphTheme): string {
   const clamped = Math.max(0, Math.min(1, score));
-  // surface-container #0f1a0e → error #ff7351
-  const r = Math.round(0x0f + (0xff - 0x0f) * clamped);
-  const g = Math.round(0x1a + (0x73 - 0x1a) * clamped);
-  const b = Math.round(0x0e + (0x51 - 0x0e) * clamped);
+  const start = theme?.heatRampStart ?? '#0f1a0e';
+  const [sr, sg, sb] = hexToRgb(start);
+  const [er, eg, eb] = hexToRgb(HEAT_RAMP_END);
+  const r = Math.round(sr + (er - sr) * clamped);
+  const g = Math.round(sg + (eg - sg) * clamped);
+  const b = Math.round(sb + (eb - sb) * clamped);
   const hex = (n: number) => n.toString(16).padStart(2, '0');
   return `#${hex(r)}${hex(g)}${hex(b)}`;
 }
@@ -167,6 +199,7 @@ export function drawFolderHulls(
   zoom: number,
   parentChildMap: Map<string, Set<string>>,
   dirsWithOwnFiles: Set<string>,
+  theme: GraphTheme = FALLBACK_THEME,
 ): void {
   const byDir = new Map<string, GraphNode[]>();
   for (const n of nodes) {
@@ -180,8 +213,8 @@ export function drawFolderHulls(
   const lineW = 1 / zoom;
   for (const [dirKey, members] of byDir) {
     if (!shouldRenderHullAtZoom(members[0].dirDepth, zoom)) continue;
-    ctx.strokeStyle = `rgba(42, 77, 36, ${FOLDER_HULL_STROKE_ALPHA})`;
-    ctx.fillStyle = `rgba(42, 77, 36, ${FOLDER_HULL_FILL_ALPHA})`;
+    ctx.strokeStyle = theme.hullStroke;
+    ctx.fillStyle = theme.hullFill;
     ctx.lineWidth = lineW;
 
     const pts = members.map((n) => [n.x!, n.y!] as [number, number]);
@@ -212,16 +245,18 @@ export function drawFolderHulls(
       ctx.stroke();
     }
 
-    // Label (collapsed-chain) — top-level depth 0/1 = 12px/zoom 60% opacity,
-    // depth ≥2 = 10px/zoom 40% opacity.
+    // Label (collapsed-chain) — top-level depth 0/1 = 12px/zoom full alpha,
+    // depth ≥2 = 10px/zoom dimmed via globalAlpha (keeps the theme color
+    // intact so we don't have to parse/rewrite rgba strings).
     const label = collapseSingleChildChain(dirKey, dirsWithOwnFiles, parentChildMap);
     const isTop = members[0].dirDepth <= 1;
     const fontSize = (isTop ? 12 : 10) / zoom;
-    const alpha = isTop ? 0.6 : 0.4;
     ctx.font = `${isTop ? 'bold ' : ''}${fontSize}px "Space Grotesk", sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillStyle = `rgba(173, 170, 170, ${alpha})`;
+    ctx.fillStyle = theme.folderLabelColor;
+    if (!isTop) ctx.globalAlpha = 0.67; // nested labels dimmed 40/60 of base.
     ctx.fillText(label.toUpperCase(), cx, cy - 6 / zoom);
+    if (!isTop) ctx.globalAlpha = 1;
   }
 }
 
@@ -238,9 +273,15 @@ export function drawEdges(
   viewport: Viewport,
   canvasWidth: number,
   canvasHeight: number,
+  theme: GraphTheme = FALLBACK_THEME,
 ): void {
-  ctx.strokeStyle = 'rgba(42, 77, 36, 0.55)';
+  ctx.strokeStyle = theme.edgeStroke;
   ctx.lineWidth = 1 / zoom;
+  // Optional glow for bright themes (synthwave / plasma / electric-ice).
+  if (theme.edgeGlow) {
+    ctx.shadowColor = theme.edgeGlow;
+    ctx.shadowBlur = 6 / zoom;
+  }
   for (const e of edges) {
     const sId =
       typeof e.source === 'string' ? e.source : (e.source as { id: string }).id;
@@ -260,6 +301,10 @@ export function drawEdges(
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
   }
+  if (theme.edgeGlow) {
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+  }
 }
 
 // ───── drawArrowHeads (UI-SPEC z-order step 5) ─────
@@ -276,9 +321,10 @@ export function drawArrowHeads(
   viewport: Viewport,
   canvasWidth: number,
   canvasHeight: number,
+  theme: GraphTheme = FALLBACK_THEME,
 ): void {
   if (zoom < 0.6) return;
-  ctx.fillStyle = 'rgba(42, 77, 36, 0.7)';
+  ctx.fillStyle = theme.arrowFill;
   const len = ARROW_LENGTH / zoom;
   const half = ARROW_BASE_WIDTH / zoom / 2;
   const inset = ARROW_INSET / zoom;
@@ -329,30 +375,62 @@ export function drawNodes(
   viewport: Viewport,
   canvasWidth: number,
   canvasHeight: number,
+  theme: GraphTheme = FALLBACK_THEME,
 ): void {
   ctx.lineWidth = 1 / zoom;
+  const hasGlow = Boolean(theme.nodeGlow);
+  const hasClusterAccents =
+    theme.clusterAccents !== undefined && theme.clusterAccents.length > 0;
   for (const n of nodes) {
     if (n.x === undefined || n.y === undefined) continue;
     if (!isInViewport({ x: n.x, y: n.y }, viewport, canvasWidth, canvasHeight)) continue;
 
     const score = contentionScores.get(n.id) ?? 0;
-    const fillBase =
-      heatMapEnabled && score > 0
-        ? heatColor(score)
-        : hoveredId === n.id
-          ? COLORS.surfaceContainerHigh
-          : COLORS.surfaceContainer;
-    ctx.fillStyle = fillBase;
-    ctx.strokeStyle =
-      heatMapEnabled && score > 0
-        ? `rgba(255, 115, 81, ${score * 0.8})`
-        : `rgba(42, 77, 36, 0.6)`;
+    const isHeat = heatMapEnabled && score > 0;
+    const isHover = hoveredId === n.id;
 
-    const r = hoveredId === n.id ? NODE_RADIUS_HOVERED : NODE_RADIUS_DEFAULT;
+    // Fill: heat-ramp wins, then hover variant, then base fill.
+    const fillBase = isHeat
+      ? heatColor(score, theme)
+      : isHover
+        ? theme.nodeFillHover
+        : theme.nodeFill;
+    ctx.fillStyle = fillBase;
+
+    // Stroke + glow: heat keeps the original error tint. Otherwise either a
+    // per-cluster accent (bright themes) or the theme's baseline node stroke.
+    if (isHeat) {
+      ctx.strokeStyle = `rgba(255, 115, 81, ${score * 0.8})`;
+      // Suppress glow while the node is heat-tinted so the error color reads.
+      if (hasGlow) {
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+      }
+    } else if (hasClusterAccents) {
+      const accent = clusterAccentFor(n.dirKey, theme.clusterAccents!);
+      ctx.strokeStyle = accent;
+      if (hasGlow) {
+        ctx.shadowColor = accent;
+        ctx.shadowBlur = 8 / zoom;
+      }
+    } else {
+      ctx.strokeStyle = theme.nodeStroke;
+      if (hasGlow) {
+        ctx.shadowColor = theme.nodeGlow!;
+        ctx.shadowBlur = 8 / zoom;
+      }
+    }
+
+    const r = isHover ? NODE_RADIUS_HOVERED : NODE_RADIUS_DEFAULT;
     ctx.beginPath();
     ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+  }
+  // Reset shadow state so subsequent draw steps aren't accidentally glowed.
+  if (hasGlow) {
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
   }
 }
 
@@ -370,11 +448,12 @@ export function drawFileLabels(
   viewport: Viewport,
   canvasWidth: number,
   canvasHeight: number,
+  theme: GraphTheme = FALLBACK_THEME,
 ): void {
   if (zoom < FILE_LABEL_ZOOM_THRESHOLD) return;
   const fontSize = 10 / zoom;
   ctx.font = `${fontSize}px "JetBrains Mono", monospace`;
-  ctx.fillStyle = COLORS.onSurfaceVariant;
+  ctx.fillStyle = theme.fileLabelColor;
   ctx.globalAlpha = 0.8;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
