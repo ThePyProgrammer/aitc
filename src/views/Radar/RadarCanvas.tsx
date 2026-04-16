@@ -42,6 +42,7 @@ import {
   drawArrowHeads,
   drawNodes,
   drawSelectedNode,
+  drawFileLabels,
   NODE_HIT_RADIUS,
 } from './GraphRenderer';
 import { drawCometTrails, drawAgentDots } from './CometTrail';
@@ -485,6 +486,9 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         w,
         h,
       );
+      // Step 6b: File-name labels at high zoom (UI-SPEC §Progressive Detail ≥ 4×).
+      drawFileLabels(ctx, s.graphNodes, vp.zoom, vp, w, h);
+
       // Step 7: Selected-agent ambient glow + 1px white outer stroke.
       if (s.selectedNode && s.selectedAgentId) {
         drawSelectedNode(

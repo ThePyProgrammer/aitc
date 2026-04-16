@@ -36,6 +36,7 @@ export const FOLDER_HULL_FILL_ALPHA = 0.05;
 export const FOLDER_HULL_STROKE_ALPHA = 0.4;
 export const VIEWPORT_CULL_PADDING = 100;
 export const PINNED_BADGE_SIZE = 5;
+export const FILE_LABEL_ZOOM_THRESHOLD = 4; // UI-SPEC §Progressive Detail: ≥ 4× shows file-name labels
 
 // ───── Heat-map color blend (D-19, UI-SPEC §Color heat-map ramp) ─────
 /**
@@ -330,6 +331,40 @@ export function drawNodes(
       ctx.fillRect(n.x + 6 / zoom, n.y + 6 / zoom, sz, sz);
     }
   }
+}
+
+// ───── drawFileLabels (UI-SPEC §Progressive Detail: zoom ≥ 4× shows file names) ─────
+/**
+ * At high zoom, render the file name (basename only) below each node so the
+ * user can identify what each dot represents. Uses JetBrains Mono at 10px
+ * (world-space / zoom) per UI-SPEC §Typography "Data-sm".
+ * Viewport-culled. Only drawn when zoom >= FILE_LABEL_ZOOM_THRESHOLD (4×).
+ */
+export function drawFileLabels(
+  ctx: CanvasRenderingContext2D,
+  nodes: GraphNode[],
+  zoom: number,
+  viewport: Viewport,
+  canvasWidth: number,
+  canvasHeight: number,
+): void {
+  if (zoom < FILE_LABEL_ZOOM_THRESHOLD) return;
+  const fontSize = 10 / zoom;
+  ctx.font = `${fontSize}px "JetBrains Mono", monospace`;
+  ctx.fillStyle = COLORS.onSurfaceVariant;
+  ctx.globalAlpha = 0.8;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (const n of nodes) {
+    if (n.x === undefined || n.y === undefined) continue;
+    if (!isInViewport({ x: n.x, y: n.y }, viewport, canvasWidth, canvasHeight)) continue;
+    // Extract basename from repo-relative path (forward-slash convention).
+    const basename = n.id.includes('/') ? n.id.slice(n.id.lastIndexOf('/') + 1) : n.id;
+    ctx.fillText(basename, n.x, n.y + (NODE_RADIUS_DEFAULT + 3) / zoom);
+  }
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'start';
+  ctx.textBaseline = 'alphabetic';
 }
 
 // ───── drawSelectedNode (UI-SPEC z-order steps 7-8) ─────
