@@ -2,7 +2,13 @@
 //
 // Exercises the graph-mode render path: node draw count, selected-node
 // outline, the D-23 performance banners, and (Plan 05) comet-trail spawn,
-// dot-snapping, and drag-to-pin. Treemap assertions are gone.
+// dot-snapping. Treemap assertions are gone.
+
+// Path2D polyfill for jsdom (Canvas 2D constructors not available in test env).
+if (typeof globalThis.Path2D === 'undefined') {
+  (globalThis as any).Path2D = class Path2D { constructor(_d?: string) {} };
+}
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import type {
@@ -110,14 +116,15 @@ function installCanvasShim() {
 // Mock useGraphLayout. Expose a mutable hit map so Plan 05 tests can
 // make the quadtree "find" a specific node on demand.
 const mockQuadtreeHit = { current: null as null | { id: string } };
-const mockRewarm = vi.fn();
 vi.mock('../../../hooks/useGraphLayout', () => {
   return {
     useGraphLayout: () => ({
       quadtreeRef: {
         current: { find: () => mockQuadtreeHit.current ?? undefined },
       },
-      rewarm: mockRewarm,
+      simNodesRef: { current: [] },
+      isSimulatingRef: { current: false },
+      markDirtyRef: { current: () => {} },
     }),
   };
 });

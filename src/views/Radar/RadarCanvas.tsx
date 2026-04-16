@@ -151,7 +151,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const contentionScores = useRadarStore((s) => s.contentionScores);
 
   const { viewport, handlers, screenToWorld } = useCanvasZoomPan();
-  const { quadtreeRef } = useGraphLayout();
+  const { quadtreeRef, simNodesRef, isSimulatingRef, markDirtyRef } = useGraphLayout();
   const activeTrails = useRadarStore((s) => s.activeTrails);
 
   // D-22 conflict subscription — reads all alerts, filters to active
@@ -178,6 +178,13 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     return m;
   }, [agents]);
 
+  // Connect the simulation's tick event to the canvas dirty flag so
+  // each simulation frame triggers a canvas repaint.
+  useEffect(() => {
+    markDirtyRef.current = () => { dirtyRef.current = true; };
+    return () => { markDirtyRef.current = () => {}; };
+  }, [markDirtyRef]);
+
   // Sync viewport back to store so minimap / debug tools can observe.
   const storeSetViewport = useRadarStore((s) => s.setViewport);
   useEffect(() => {
@@ -192,6 +199,10 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   }, []);
 
   // Positions map (O(1) lookup for edges/arrows) memoized on node identity.
+  // Positions: during live simulation, read from simNodesRef (updated
+  // each tick by d3). When idle, fall back to store positions. The memoized
+  // version is used for non-rAF consumers (minimap, hover, etc.). The rAF
+  // loop builds a fresh map each frame from simNodesRef when simulating.
   const positions = useMemo(() => {
     const m = new Map<string, { x: number; y: number }>();
     for (const n of graphNodes) {
@@ -462,22 +473,39 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         vp.panY * dpr,
       );
 
+      // When the d3 simulation is actively ticking, read live positions
+      // from simNodesRef (updated each tick) so nodes animate smoothly.
+      // When idle, fall back to the store positions (s.graphNodes / s.positions).
+      const simulating = isSimulatingRef.current;
+      let liveNodes = s.graphNodes;
+      let livePositions = s.positions;
+      if (simulating && simNodesRef.current.length > 0) {
+        liveNodes = simNodesRef.current as typeof s.graphNodes;
+        const m = new Map<string, { x: number; y: number }>();
+        for (const n of simNodesRef.current) {
+          if (n.x !== undefined && n.y !== undefined) {
+            m.set(n.id, { x: n.x, y: n.y });
+          }
+        }
+        livePositions = m;
+      }
+
       // Steps 2-3: Folder hulls (fill/stroke + label).
       drawFolderHulls(
         ctx,
-        s.graphNodes,
+        liveNodes,
         vp.zoom,
         s.parentChildMap,
         s.dirsWithOwnFiles,
       );
       // Step 4: Edges.
-      drawEdges(ctx, s.graphEdges, s.positions, vp.zoom, vp, w, h);
+      drawEdges(ctx, s.graphEdges, livePositions, vp.zoom, vp, w, h);
       // Step 5: Arrow heads.
-      drawArrowHeads(ctx, s.graphEdges, s.positions, vp.zoom, vp, w, h);
+      drawArrowHeads(ctx, s.graphEdges, livePositions, vp.zoom, vp, w, h);
       // Step 6: Nodes (heat-tint fill on demand).
       drawNodes(
         ctx,
-        s.graphNodes,
+        liveNodes,
         s.contentionScores,
         s.heatMapEnabled,
         s.hoveredNodeId,
@@ -487,7 +515,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         h,
       );
       // Step 6b: File-name labels at high zoom (UI-SPEC §Progressive Detail ≥ 4×).
-      drawFileLabels(ctx, s.graphNodes, vp.zoom, vp, w, h);
+      drawFileLabels(ctx, liveNodes, vp.zoom, vp, w, h);
 
       // Step 7: Selected-agent ambient glow + 1px white outer stroke.
       if (s.selectedNode && s.selectedAgentId) {
@@ -507,7 +535,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       // stays bounded even in long sessions. D-16 / D-18.
       useRadarStore.getState().pruneTrails(now);
       // Step 9-10: gradient tails + glowing heads.
-      drawCometTrails(ctx, s.activeTrails, s.positions, now, vp.zoom);
+      drawCometTrails(ctx, s.activeTrails, livePositions, now, vp.zoom);
       // Step 11: agent dots + pulse rings (D-17). Snapshot the ref's map
       // into an array for the pure draw function.
       const dots = Array.from(agentDotsRef.current.entries()).map(
@@ -521,8 +549,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       drawAgentDots(ctx, dots, now, vp.zoom);
 
       // Plan 06 z-order steps 12-13: conflict pulse rings + badge dots (D-22).
-      drawConflictPulses(ctx, s.activeConflictPaths, s.positions, now, vp.zoom);
-      drawConflictBadges(ctx, s.activeConflictPaths, s.positions, vp.zoom);
+      drawConflictPulses(ctx, s.activeConflictPaths, livePositions, now, vp.zoom);
+      drawConflictBadges(ctx, s.activeConflictPaths, livePositions, vp.zoom);
 
       dirtyRef.current = false;
       animFrameRef.current = requestAnimationFrame(render);

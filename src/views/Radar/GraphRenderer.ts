@@ -8,7 +8,31 @@
 // 05 and 06).
 
 import { polygonHull, polygonCentroid } from 'd3-polygon';
+import { line, curveCatmullRomClosed } from 'd3-shape';
 import type { GraphNode, GraphEdge, Viewport } from '../../stores/radarStore';
+
+// Catmull-Rom closed spline for smooth hull outlines (ResearchOS technique).
+const smoothHullLine = line().curve(curveCatmullRomClosed.alpha(0.5));
+
+/**
+ * Generate padded hull points by placing `resolution` points in a circle
+ * of `radius` around each node center. This inflates the hull so it
+ * doesn't hug nodes tightly. (ResearchOS NoteGraphView technique.)
+ */
+function paddedHullPoints(
+  nodePoints: [number, number][],
+  radius = 25,
+  resolution = 10,
+): [number, number][] {
+  const result: [number, number][] = [];
+  for (const [x, y] of nodePoints) {
+    for (let i = 0; i < resolution; i++) {
+      const angle = (i / resolution) * Math.PI * 2;
+      result.push([x + Math.cos(angle) * radius, y + Math.sin(angle) * radius]);
+    }
+  }
+  return result;
+}
 
 // ───── Color tokens (Command Horizon, from UI-SPEC §Color) ─────
 export const COLORS = {
@@ -156,24 +180,28 @@ export function drawFolderHulls(
     ctx.fillStyle = `rgba(73, 72, 71, ${FOLDER_HULL_FILL_ALPHA})`;
     ctx.lineWidth = lineW;
 
+    const pts = members.map((n) => [n.x!, n.y!] as [number, number]);
+    const padded = paddedHullPoints(pts, 25 / zoom);
+    const hull = polygonHull(padded);
+
     let cx: number;
     let cy: number;
-    if (members.length >= 3) {
-      const pts = members.map((n) => [n.x!, n.y!] as [number, number]);
-      const hull = polygonHull(pts);
-      if (!hull) continue;
-      ctx.beginPath();
-      hull.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
+    if (hull && hull.length >= 3) {
+      // Render smooth Catmull-Rom closed spline through hull points.
+      const pathStr = smoothHullLine(hull);
+      if (pathStr) {
+        const path2d = new Path2D(pathStr);
+        ctx.fill(path2d);
+        ctx.stroke(path2d);
+      }
       const centroid = polygonCentroid(hull);
       cx = centroid[0];
       cy = centroid[1];
     } else {
+      // Fallback circle for dirs with <3 nodes or degenerate hulls.
       cx = members.reduce((s, n) => s + (n.x ?? 0), 0) / members.length;
       cy = members.reduce((s, n) => s + (n.y ?? 0), 0) / members.length;
-      const r = 20 / zoom;
+      const r = 25 / zoom;
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fill();

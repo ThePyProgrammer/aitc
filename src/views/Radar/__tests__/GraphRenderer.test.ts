@@ -3,6 +3,12 @@
 // Covers D-12 (folder hulls + progressive detail), D-13 (uniform edge stroke),
 // D-19 (heat-tinted nodes), viewport culling (UI-SPEC §Sizing), and single-
 // child directory chain collapse (commit a8fe89b ported to hull labels).
+
+// Path2D polyfill for jsdom (Canvas 2D constructors not available in test env).
+if (typeof globalThis.Path2D === 'undefined') {
+  (globalThis as any).Path2D = class Path2D { constructor(_d?: string) {} };
+}
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   drawFolderHulls,
@@ -191,7 +197,7 @@ describe('GraphRenderer pure functions — Plan 04', () => {
       vi.clearAllMocks();
     });
 
-    it('renders a circle fallback for a dirKey with 2 nodes (Test 1)', () => {
+    it('renders a padded smooth hull for a dirKey with 2 nodes (Test 1)', () => {
       const ctx = createMockCtx();
       const nodes: GraphNode[] = [
         { id: 'a', dirKey: 'src', dirDepth: 1, x: 10, y: 10 },
@@ -200,14 +206,16 @@ describe('GraphRenderer pure functions — Plan 04', () => {
       const parentChildMap = new Map<string, Set<string>>([['src', new Set(['src'])]]);
       const dirsWithOwnFiles = new Set<string>(['src']);
       drawFolderHulls(ctx, nodes, 1, parentChildMap, dirsWithOwnFiles);
-      const arcCalls = (ctx as any)._calls.filter((c: any) => c.fn === 'arc');
-      expect(arcCalls.length).toBeGreaterThanOrEqual(1);
-      // Circle at mean position (15, 15)
-      expect(arcCalls[0].args[0]).toBeCloseTo(15);
-      expect(arcCalls[0].args[1]).toBeCloseTo(15);
+      // Padded hull technique generates enough points for a convex hull
+      // even with 2 nodes. Rendered via Path2D + ctx.fill(path2d).
+      const fills = (ctx as any)._calls.filter((c: any) => c.fn === 'fill');
+      expect(fills.length).toBeGreaterThanOrEqual(1);
+      // Should also have a label (fillText)
+      const texts = (ctx as any)._calls.filter((c: any) => c.fn === 'fillText');
+      expect(texts.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('renders a polygon hull for a dirKey with ≥3 nodes (Test 2)', () => {
+    it('renders a padded smooth hull for a dirKey with ≥3 nodes (Test 2)', () => {
       const ctx = createMockCtx();
       const nodes: GraphNode[] = [
         { id: 'a', dirKey: 'src', dirDepth: 1, x: 0, y: 0 },
@@ -219,14 +227,11 @@ describe('GraphRenderer pure functions — Plan 04', () => {
       const parentChildMap = new Map<string, Set<string>>([['src', new Set(['src'])]]);
       const dirsWithOwnFiles = new Set<string>(['src']);
       drawFolderHulls(ctx, nodes, 1, parentChildMap, dirsWithOwnFiles);
-      const moveTo = (ctx as any)._calls.filter((c: any) => c.fn === 'moveTo');
-      const lineTo = (ctx as any)._calls.filter((c: any) => c.fn === 'lineTo');
-      // Hull should be traced with moveTo + multiple lineTo calls
-      expect(moveTo.length).toBeGreaterThanOrEqual(1);
-      expect(lineTo.length).toBeGreaterThanOrEqual(2);
-      // Fill + stroke for the hull
-      expect((ctx as any)._calls.some((c: any) => c.fn === 'fill')).toBe(true);
-      expect((ctx as any)._calls.some((c: any) => c.fn === 'stroke')).toBe(true);
+      // Rendered via Path2D + Catmull-Rom spline — fill + stroke called
+      const fills = (ctx as any)._calls.filter((c: any) => c.fn === 'fill');
+      const strokes = (ctx as any)._calls.filter((c: any) => c.fn === 'stroke');
+      expect(fills.length).toBeGreaterThanOrEqual(1);
+      expect(strokes.length).toBeGreaterThanOrEqual(1);
     });
 
     it('skips hulls at low zoom for deep dirs (progressive detail)', () => {

@@ -1,21 +1,19 @@
 // D-03, D-11, D-23, VIZN-01, VIZN-04, VIZN-05.
-// Settle-then-freeze d3-force wrapper per 07-RESEARCH §Pattern 1.
+// Continuous d3-force simulation — inspired by ResearchOS NoteGraphView.
 //
-//   • Pulls graphNodes/graphEdges from radarStore; builds a fresh
-//     simulation with forceLink / forceManyBody / forceCenter /
-//     forceCollide / forceCluster (D-11).
-//   • Internal timer is `.stop()`ed; we manual-tick up to MAX_TICKS
-//     (500, D-03) or until `alpha < alphaMin`.
-//   • On settle, builds a d3-quadtree from final positions (D-23) and
-//     commits `{x,y}` + settledAt back to the store.
-//   • Re-warms (brief alpha boost + bounded tick loop) when node-id
-//     churn crosses `REWARM_NODE_COUNT_THRESHOLD` OR
-//     `REWARM_PERCENT_THRESHOLD` (RESEARCH §Pitfall 3).
-//   • Cleans up on unmount (RESEARCH §Pitfall 2).
-//   • Simulation + quadtree live in `useRef` — never in Zustand
-//     (RESEARCH §Pitfall 5).
+// Architecture (replaces batch-settle):
+//   • Simulation runs via d3's internal rAF loop (not manual ticks).
+//   • On each tick, node x/y positions update in-place on the SimNode array.
+//   • RadarCanvas reads positions from `simNodesRef` each frame — no Zustand
+//     round-trip for live animation (avoids React re-renders at 60fps).
+//   • When alpha cools (simulation stops), we commit final positions to the
+//     store and rebuild the quadtree.
+//   • Force config changes: update forces in-place + `.alpha(0.35).restart()`
+//     — nodes glide to new equilibrium.
+//   • Custom forces (forceCluster) read strength from refs so slider
+//     changes apply immediately on the next tick.
 
-import { useEffect, useRef, type MutableRefObject } from 'react';
+import { useEffect, useRef, useCallback, type MutableRefObject } from 'react';
 import {
   forceSimulation,
   forceLink,
@@ -33,8 +31,7 @@ import {
   type GraphEdge,
 } from '../stores/radarStore';
 
-// d3-force tuning constants (RESEARCH §Pattern 1 lines 218-235). Exported
-// so tests can assert contract values without re-deriving them.
+// d3-force tuning constants. Exported for tests.
 export const LINK_DISTANCE = 40;
 export const LINK_STRENGTH = 0.3;
 export const CHARGE_STRENGTH = -80;
@@ -50,9 +47,11 @@ export const REWARM_PERCENT_THRESHOLD = 0.01;
 export const REWARM_ALPHA = 0.3;
 export const REWARM_MAX_TICKS = 100;
 
-// Internal simulation shape — ClusterNode already extends
-// SimulationNodeDatum and carries dirKey/dirDepth.
-interface SimNode extends ClusterNode {
+// Alpha used when force config sliders change — enough to see movement,
+// not so much that the graph explodes.
+const FORCE_CONFIG_ALPHA = 0.35;
+
+export interface SimNode extends ClusterNode {
   id: string;
 }
 
@@ -64,12 +63,20 @@ interface SimEdge extends SimulationLinkDatum<SimNode> {
 
 export interface UseGraphLayoutResult {
   quadtreeRef: MutableRefObject<Quadtree<SimNode> | null>;
-  rewarm: (alpha?: number) => void;
+  /** Ref to the live simulation nodes — RadarCanvas reads this each rAF frame. */
+  simNodesRef: MutableRefObject<SimNode[]>;
+  /** True while the simulation is actively ticking (alpha > alphaMin). */
+  isSimulatingRef: MutableRefObject<boolean>;
+  /** Callback to mark the canvas dirty — set by RadarCanvas. */
+  markDirtyRef: MutableRefObject<() => void>;
 }
 
 export function useGraphLayout(): UseGraphLayoutResult {
   const simRef = useRef<Simulation<SimNode, SimEdge> | null>(null);
   const quadtreeRef = useRef<Quadtree<SimNode> | null>(null);
+  const simNodesRef = useRef<SimNode[]>([]);
+  const isSimulatingRef = useRef(false);
+  const markDirtyRef = useRef<() => void>(() => {});
   const lastNodeIdsRef = useRef<Set<string>>(new Set());
 
   const graphNodes = useRadarStore((s) => s.graphNodes);
@@ -77,72 +84,111 @@ export function useGraphLayout(): UseGraphLayoutResult {
   const settledAt = useRadarStore((s) => s.settledAt);
   const forceConfig = useRadarStore((s) => s.forceConfig);
 
+  // Keep force config in refs so the tick handler reads current values
+  // without needing to rebuild the simulation.
+  const forceConfigRef = useRef(forceConfig);
+  forceConfigRef.current = forceConfig;
+
   /**
-   * Build a fresh simulation, manual-tick until alpha cools or MAX_TICKS,
-   * snapshot positions, rebuild quadtree. Returns the position map so
-   * the caller can commit it into the store.
+   * Build a simulation from graph data. For the initial load, we do a
+   * fast synchronous settle (MAX_TICKS) so the graph doesn't appear as
+   * a chaotic blob. After that, the simulation stays alive for smooth
+   * force-config transitions.
    */
-  function buildAndSettle(
-    nodes: GraphNode[],
-    edges: GraphEdge[],
-  ): Map<string, { x: number; y: number }> {
-    // Seed positions near origin so new nodes don't fly in from
-    // undefined-land (Pitfall 3).
-    const simNodes: SimNode[] = nodes.map((n) => ({
-      id: n.id,
-      dirKey: n.dirKey,
-      dirDepth: n.dirDepth,
-      x: n.x ?? (Math.random() - 0.5) * 200,
-      y: n.y ?? (Math.random() - 0.5) * 200,
-      fx: n.fx ?? null,
-      fy: n.fy ?? null,
-    }));
-    const simEdges: SimEdge[] = edges.map((e) => ({
-      source: typeof e.source === 'string' ? e.source : (e.source as SimNode).id,
-      target: typeof e.target === 'string' ? e.target : (e.target as SimNode).id,
-      kind: e.kind,
-    }));
+  const buildSimulation = useCallback(
+    (nodes: GraphNode[], edges: GraphEdge[], fastSettle: boolean) => {
+      // Stop any existing sim.
+      if (simRef.current) simRef.current.stop();
 
-    const sim = forceSimulation<SimNode>(simNodes)
-      .force(
-        'link',
-        forceLink<SimNode, SimEdge>(simEdges)
-          .id((n) => n.id)
-          .distance(LINK_DISTANCE)
-          .strength(LINK_STRENGTH),
-      )
-      .force(
-        'charge',
-        forceManyBody<SimNode>()
-          .strength(CHARGE_STRENGTH)
-          .theta(CHARGE_THETA)
-          .distanceMax(CHARGE_DISTANCE_MAX),
-      )
-      .force('center', forceCenter(0, 0).strength(forceConfig.centerStrength))
-      .force('collide', forceCollide(COLLIDE_RADIUS))
-      .force('cluster', forceCluster().strength(forceConfig.clusterStrength))
-      .alphaDecay(ALPHA_DECAY)
-      .velocityDecay(VELOCITY_DECAY)
-      .stop();
+      const simNodes: SimNode[] = nodes.map((n) => ({
+        id: n.id,
+        dirKey: n.dirKey,
+        dirDepth: n.dirDepth,
+        x: n.x ?? (Math.random() - 0.5) * 200,
+        y: n.y ?? (Math.random() - 0.5) * 200,
+        fx: n.fx ?? null,
+        fy: n.fy ?? null,
+      }));
+      const simEdges: SimEdge[] = edges.map((e) => ({
+        source: typeof e.source === 'string' ? e.source : (e.source as SimNode).id,
+        target: typeof e.target === 'string' ? e.target : (e.target as SimNode).id,
+        kind: e.kind,
+      }));
 
-    simRef.current = sim;
+      const cfg = forceConfigRef.current;
+      const sim = forceSimulation<SimNode>(simNodes)
+        .force(
+          'link',
+          forceLink<SimNode, SimEdge>(simEdges)
+            .id((n) => n.id)
+            .distance(LINK_DISTANCE)
+            .strength(LINK_STRENGTH),
+        )
+        .force(
+          'charge',
+          forceManyBody<SimNode>()
+            .strength(CHARGE_STRENGTH)
+            .theta(CHARGE_THETA)
+            .distanceMax(CHARGE_DISTANCE_MAX),
+        )
+        .force('center', forceCenter(0, 0).strength(cfg.centerStrength))
+        .force('collide', forceCollide(COLLIDE_RADIUS))
+        .force('cluster', forceCluster().strength(cfg.clusterStrength))
+        .alphaDecay(ALPHA_DECAY)
+        .velocityDecay(VELOCITY_DECAY)
+        .stop(); // we control when it runs
 
-    for (let i = 0; i < MAX_TICKS && sim.alpha() > sim.alphaMin(); i++) {
-      sim.tick();
-    }
+      simRef.current = sim;
+      simNodesRef.current = simNodes;
 
-    const positions = new Map<string, { x: number; y: number }>();
-    for (const n of simNodes) {
-      positions.set(n.id, { x: n.x ?? 0, y: n.y ?? 0 });
-    }
-    quadtreeRef.current = quadtree<SimNode>()
-      .x((n) => n.x ?? 0)
-      .y((n) => n.y ?? 0)
-      .addAll(simNodes);
-    return positions;
-  }
+      if (fastSettle) {
+        // Synchronous initial settle so the graph appears stable on first paint.
+        for (let i = 0; i < MAX_TICKS && sim.alpha() > sim.alphaMin(); i++) {
+          sim.tick();
+        }
+      }
 
-  /** Decide whether node-id churn crosses the rewarm thresholds (Pitfall 3). */
+      // Commit positions to the store (for hover hit-testing, minimap, etc.)
+      const positions = new Map<string, { x: number; y: number }>();
+      for (const n of simNodes) {
+        positions.set(n.id, { x: n.x ?? 0, y: n.y ?? 0 });
+      }
+      quadtreeRef.current = quadtree<SimNode>()
+        .x((n) => n.x ?? 0)
+        .y((n) => n.y ?? 0)
+        .addAll(simNodes);
+      useRadarStore.getState().commitSettledPositions(positions);
+
+      // Now let the simulation run continuously via d3's internal rAF.
+      // On each tick: mark canvas dirty so it redraws with live positions.
+      // On end: commit final positions + rebuild quadtree.
+      sim.on('tick', () => {
+        isSimulatingRef.current = true;
+        markDirtyRef.current();
+      });
+      sim.on('end', () => {
+        isSimulatingRef.current = false;
+        // Commit final positions to store + rebuild quadtree.
+        const finalPositions = new Map<string, { x: number; y: number }>();
+        for (const n of sim.nodes()) {
+          finalPositions.set(n.id, { x: n.x ?? 0, y: n.y ?? 0 });
+        }
+        quadtreeRef.current = quadtree<SimNode>()
+          .x((n) => n.x ?? 0)
+          .y((n) => n.y ?? 0)
+          .addAll(sim.nodes());
+        useRadarStore.getState().commitSettledPositions(finalPositions);
+      });
+
+      // Restart the simulation (d3's internal rAF loop takes over).
+      sim.alpha(fastSettle ? 0.01 : 1).restart();
+
+      return positions;
+    },
+    [],
+  );
+
+  /** Decide whether node-id churn crosses the rewarm thresholds. */
   function shouldRewarm(currentIds: Set<string>): boolean {
     const prev = lastNodeIdsRef.current;
     let added = 0;
@@ -158,37 +204,33 @@ export function useGraphLayout(): UseGraphLayoutResult {
     );
   }
 
-  // Initial settle when graph data lands without positions (settledAt === null).
+  // Initial build when graph data lands without positions (settledAt === null).
   useEffect(() => {
     if (graphNodes.length === 0) return;
     if (settledAt !== null) return;
-    const positions = buildAndSettle(graphNodes, graphEdges);
-    useRadarStore.getState().commitSettledPositions(positions);
+    buildSimulation(graphNodes, graphEdges, true);
     lastNodeIdsRef.current = new Set(graphNodes.map((n) => n.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graphNodes, graphEdges, settledAt]);
 
-  // Re-warm when graph data mutates past the threshold. Runs only after
-  // an initial settle (settledAt !== null).
+  // Re-warm when graph data mutates past the threshold.
   useEffect(() => {
     if (settledAt === null) return;
     if (graphNodes.length === 0) return;
     const currentIds = new Set(graphNodes.map((n) => n.id));
     if (!shouldRewarm(currentIds)) return;
-    const positions = buildAndSettle(graphNodes, graphEdges);
-    useRadarStore.getState().commitSettledPositions(positions);
+    buildSimulation(graphNodes, graphEdges, true);
     lastNodeIdsRef.current = currentIds;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graphNodes, graphEdges]);
 
-  // When forceConfig changes (and we already have a settled sim), update
-  // the existing simulation's forces in-place and re-warm gently so nodes
-  // glide to their new equilibrium instead of snapping.
+  // When forceConfig changes: update existing sim forces in-place and
+  // alpha-restart. Nodes glide smoothly to new equilibrium — no rebuild.
   const prevForceConfigRef = useRef(forceConfig);
   useEffect(() => {
     const sim = simRef.current;
     if (!sim) return;
-    if (settledAt === null) return; // initial settle handles it
+    if (settledAt === null) return;
     if (
       prevForceConfigRef.current.centerStrength === forceConfig.centerStrength &&
       prevForceConfigRef.current.clusterStrength === forceConfig.clusterStrength
@@ -199,39 +241,16 @@ export function useGraphLayout(): UseGraphLayoutResult {
     if (centerForce) centerForce.strength(forceConfig.centerStrength);
     const clusterForce = sim.force('cluster') as ReturnType<typeof forceCluster> | undefined;
     if (clusterForce) clusterForce.strength(forceConfig.clusterStrength);
-    // Gentle re-warm — nodes glide to new equilibrium.
-    rewarm(REWARM_ALPHA);
+    // Alpha-restart — d3's rAF loop picks up immediately, nodes glide.
+    sim.alpha(FORCE_CONFIG_ALPHA).restart();
   }, [forceConfig, settledAt]);
 
-  // Cleanup on unmount (Pitfall 2).
+  // Cleanup on unmount.
   useEffect(() => {
     return () => {
       if (simRef.current) simRef.current.stop();
     };
   }, []);
 
-  /**
-   * Manual re-warm entry point. Keeps the existing simulation (so
-   * accumulated state like charge cache survives) and tick-bounds at
-   * REWARM_MAX_TICKS. Used by drag/pin flows in Plan 04.
-   */
-  function rewarm(alpha: number = REWARM_ALPHA) {
-    const sim = simRef.current;
-    if (!sim) return;
-    sim.alpha(alpha);
-    for (let i = 0; i < REWARM_MAX_TICKS && sim.alpha() > sim.alphaMin(); i++) {
-      sim.tick();
-    }
-    const positions = new Map<string, { x: number; y: number }>();
-    for (const n of sim.nodes()) {
-      positions.set(n.id, { x: n.x ?? 0, y: n.y ?? 0 });
-    }
-    useRadarStore.getState().commitSettledPositions(positions);
-    quadtreeRef.current = quadtree<SimNode>()
-      .x((n) => n.x ?? 0)
-      .y((n) => n.y ?? 0)
-      .addAll(sim.nodes());
-  }
-
-  return { quadtreeRef, rewarm };
+  return { quadtreeRef, simNodesRef, isSimulatingRef, markDirtyRef };
 }
