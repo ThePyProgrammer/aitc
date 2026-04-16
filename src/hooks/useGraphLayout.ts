@@ -24,7 +24,7 @@ import {
   type SimulationLinkDatum,
 } from 'd3-force';
 import { quadtree, type Quadtree } from 'd3-quadtree';
-import { forceCluster, type ClusterNode } from '../views/Radar/forceCluster';
+import { forceCluster, forceClusterCollide, type ClusterNode } from '../views/Radar/forceCluster';
 import {
   useRadarStore,
   type GraphNode,
@@ -134,6 +134,7 @@ export function useGraphLayout(): UseGraphLayoutResult {
         .force('center', forceCenter(0, 0).strength(cfg.centerStrength))
         .force('collide', forceCollide(COLLIDE_RADIUS))
         .force('cluster', forceCluster().strength(cfg.clusterStrength))
+        .force('clusterCollide', forceClusterCollide())
         .alphaDecay(ALPHA_DECAY)
         .velocityDecay(VELOCITY_DECAY)
         .stop(); // we control when it runs
