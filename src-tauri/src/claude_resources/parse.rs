@@ -96,6 +96,8 @@ struct AgentFront {
 #[derive(Debug, Default, Deserialize)]
 struct CommandFront {
     #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
     description: Option<String>,
     #[serde(default, rename = "argument-hint")]
     argument_hint: Option<String>,
@@ -202,7 +204,26 @@ pub fn parse_agent(path: &Path, scope: Scope) -> Result<Resource, String> {
 pub fn parse_command(path: &Path, scope: Scope) -> Result<Resource, String> {
     let raw = read_file(path)?;
     let (front, _body) = parse_front::<CommandFront>(&raw)?;
-    let name = file_stem_or(path, "command");
+    // Name priority: frontmatter `name:` → parent dir (for SKILL.md files) → filename stem.
+    let name = front
+        .name
+        .clone()
+        .or_else(|| {
+            // SKILL.md files under commands/ use the parent dir as the command name
+            // (e.g. commands/turing/preflight/SKILL.md → "preflight").
+            let is_skill_md = path
+                .file_name()
+                .map(|n| n == "SKILL.md")
+                .unwrap_or(false);
+            if is_skill_md {
+                path.parent()
+                    .and_then(|p| p.file_name())
+                    .map(|s| s.to_string_lossy().into_owned())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| file_stem_or(path, "command"));
     let id = ResourceId(format!("{}::command::{}", scope_str(scope), name));
     Ok(Resource {
         id,
