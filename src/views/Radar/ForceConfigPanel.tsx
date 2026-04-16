@@ -9,6 +9,7 @@
 import { useState } from 'react';
 import { Settings2, ChevronDown, ChevronUp } from 'lucide-react';
 import { useRadarStore, DEFAULT_FORCE_CONFIG } from '../../stores/radarStore';
+import { ThemePicker } from './ThemePicker';
 
 export function ForceConfigPanel() {
   const [open, setOpen] = useState(false);
@@ -32,6 +33,12 @@ export function ForceConfigPanel() {
 
       {open && (
         <div className="mt-1 bg-surface-container border border-outline-variant p-3 w-56 space-y-3">
+          {/* Theme picker — lives above the force sliders per spec §5. */}
+          <ThemePicker />
+
+          {/* Divider between theme section and force controls. */}
+          <div className="border-t border-outline-variant/20 -mx-3" />
+
           {/* Quick toggle: structure map mode */}
           <button
             onClick={() =>
