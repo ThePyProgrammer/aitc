@@ -16,11 +16,13 @@ const DEFAULT_GATED: &[&str] = &["Edit", "MultiEdit", "Write", "NotebookEdit", "
 
 /// Ensure the `app_settings` table exists.
 pub async fn ensure_schema(pool: &Pool<Sqlite>) -> Result<(), String> {
+    // app_settings was created in migration 001 with just (key, value).
+    // CREATE TABLE IF NOT EXISTS is a no-op when it already exists, so we
+    // cannot add columns via this path. Keep the schema minimal to match.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS app_settings ( \
             key TEXT PRIMARY KEY, \
-            value TEXT NOT NULL, \
-            updated_at TEXT NOT NULL DEFAULT (datetime('now')) \
+            value TEXT NOT NULL \
          )",
     )
     .execute(pool)
@@ -65,8 +67,8 @@ pub async fn set_pretool_gated_tools(
     ensure_schema(pool).await?;
     let json_str = serde_json::to_string(tools).map_err(|e| format!("serialize: {e}"))?;
     sqlx::query(
-        "INSERT INTO app_settings (key, value, updated_at) VALUES ('pretool_gated_tools', ?, datetime('now')) \
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        "INSERT INTO app_settings (key, value) VALUES ('pretool_gated_tools', ?) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     )
     .bind(&json_str)
     .execute(pool)
@@ -144,7 +146,7 @@ pub async fn record_passive_hook_consent(
     let key = format!("passive_hook_consent:{repo_cwd}");
     sqlx::query(
         "INSERT INTO app_settings (key, value) VALUES (?, ?) \
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     )
     .bind(&key)
     .bind(decision)
