@@ -48,9 +48,9 @@ export interface ClusterCollideForce {
   strength: ((v: number) => ClusterCollideForce) & (() => number);
 }
 
-export const CLUSTER_COLLIDE_PADDING = 20; // world-space px between hull edges
-export const CLUSTER_COLLIDE_STRENGTH = 0.15; // gentle — high values cause explosion
-export const CLUSTER_COLLIDE_MAX_DISPLACEMENT = 5; // max px velocity added per tick per node
+export const CLUSTER_COLLIDE_PADDING = 25; // world-space px between hull edges
+export const CLUSTER_COLLIDE_STRENGTH = 0.3;
+export const CLUSTER_COLLIDE_MAX_DISPLACEMENT = 3; // max px velocity added per tick per node
 
 export function forceClusterCollide(): ClusterCollideForce {
   let nodes: ClusterNode[] = [];
@@ -120,16 +120,14 @@ export function forceClusterCollide(): ClusterCollideForce {
           ux *= scale;
           uy *= scale;
         }
-        // Apply to all members of each cluster (move cluster A left, B right).
-        const aScale = 1 / Math.max(a.members.length, 1);
-        const bScale = 1 / Math.max(b.members.length, 1);
+        // Apply capped displacement uniformly to all members of each cluster.
         for (const m of a.members) {
-          m.vx = (m.vx ?? 0) - ux * aScale;
-          m.vy = (m.vy ?? 0) - uy * aScale;
+          m.vx = (m.vx ?? 0) - ux;
+          m.vy = (m.vy ?? 0) - uy;
         }
         for (const m of b.members) {
-          m.vx = (m.vx ?? 0) + ux * bScale;
-          m.vy = (m.vy ?? 0) + uy * bScale;
+          m.vx = (m.vx ?? 0) + ux;
+          m.vy = (m.vy ?? 0) + uy;
         }
       }
     }
