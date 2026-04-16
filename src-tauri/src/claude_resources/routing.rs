@@ -89,9 +89,18 @@ pub fn category_for_path(path: &Path, scope_root: &Path) -> Option<Category> {
                 .map(|e| e == "md")
                 .unwrap_or(false)
             {
+                // SKILL.md is the canonical skill marker — classify as Skill
+                // even when shipped under a plugin's commands/ tree
+                // (e.g. commands/blueprint/challenge/SKILL.md).
+                let is_skill_md = path
+                    .file_name()
+                    .map(|n| n == "SKILL.md")
+                    .unwrap_or(false);
+                if is_skill_md {
+                    return Some(Category::Skill);
+                }
                 // Plugins ship agents under commands/<plugin>/agents/*.md
                 // (e.g. commands/blueprint/agents/adr-researcher.md).
-                // Reclassify as Agent when an `agents/` segment is present.
                 let has_agents_segment = rel
                     .components()
                     .any(|c| c.as_os_str() == "agents");
