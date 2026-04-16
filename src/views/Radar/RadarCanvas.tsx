@@ -150,7 +150,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const heatMapEnabled = useRadarStore((s) => s.heatMapEnabled);
   const contentionScores = useRadarStore((s) => s.contentionScores);
 
-  const { viewport, handlers, screenToWorld } = useCanvasZoomPan();
+  const { viewport, setViewport, handlers, screenToWorld } = useCanvasZoomPan();
   const { quadtreeRef, simNodesRef, isSimulatingRef, markDirtyRef } = useGraphLayout();
   const activeTrails = useRadarStore((s) => s.activeTrails);
 
@@ -185,6 +185,49 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     return () => { markDirtyRef.current = () => {}; };
   }, [markDirtyRef]);
 
+  // Auto-fit viewport to center the graph when positions first settle.
+  // d3-force centers nodes around world (0,0), but viewport default is
+  // panX=0, panY=0 (world origin at screen top-left). This shifts the
+  // viewport so world (0,0) maps to the center of the canvas.
+  const hasFittedRef = useRef(false);
+  useEffect(() => {
+    if (settledAt === null) return;
+    if (hasFittedRef.current) return;
+    if (graphNodes.length === 0) return;
+    hasFittedRef.current = true;
+
+    // Compute graph bounding box from settled positions.
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of graphNodes) {
+      if (n.x !== undefined && n.y !== undefined) {
+        if (n.x < minX) minX = n.x;
+        if (n.y < minY) minY = n.y;
+        if (n.x > maxX) maxX = n.x;
+        if (n.y > maxY) maxY = n.y;
+      }
+    }
+    if (!isFinite(minX)) return;
+
+    const graphW = maxX - minX || 1;
+    const graphH = maxY - minY || 1;
+    const graphCx = (minX + maxX) / 2;
+    const graphCy = (minY + maxY) / 2;
+
+    // Fit graph into 90% of canvas with a minimum zoom of 0.3.
+    const fitZoom = Math.max(0.3, Math.min(
+      (canvasSize.width * 0.9) / graphW,
+      (canvasSize.height * 0.9) / graphH,
+      2, // don't over-zoom small graphs
+    ));
+
+    setViewport({
+      zoom: fitZoom,
+      panX: canvasSize.width / 2 - graphCx * fitZoom,
+      panY: canvasSize.height / 2 - graphCy * fitZoom,
+    });
+    dirtyRef.current = true;
+  }, [settledAt, graphNodes, canvasSize, setViewport]);
+
   // Sync viewport back to store so minimap / debug tools can observe.
   const storeSetViewport = useRadarStore((s) => s.setViewport);
   useEffect(() => {
@@ -196,8 +239,14 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   // fire before start_watch completes, yielding empty results.
   const isWatching = usePipelineStore((s) => s.isWatching);
   useEffect(() => {
+    console.log('[RadarCanvas] fetch trigger, isWatching:', isWatching);
     useRadarStore.getState().fetchGraph();
   }, [isWatching]);
+
+  // DEBUG: surface state visibility
+  useEffect(() => {
+    console.log('[RadarCanvas] graphNodes:', graphNodes.length, 'edges:', graphEdges.length, 'settledAt:', settledAt, 'isWatching:', isWatching);
+  }, [graphNodes, graphEdges, settledAt, isWatching]);
 
   // Positions map (O(1) lookup for edges/arrows) memoized on node identity.
   // Positions: during live simulation, read from simNodesRef (updated
