@@ -47,6 +47,7 @@ import {
 } from './GraphRenderer';
 import { drawCometTrails, drawAgentDots } from './CometTrail';
 import { ForceConfigPanel } from './ForceConfigPanel';
+import { resolveTheme } from './themes';
 
 // UI-SPEC §Performance states thresholds (D-23).
 const DEGRADED_NODE_THRESHOLD = 5_000;
@@ -149,6 +150,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const selectedAgentId = useRadarStore((s) => s.selectedAgentId);
   const heatMapEnabled = useRadarStore((s) => s.heatMapEnabled);
   const contentionScores = useRadarStore((s) => s.contentionScores);
+  const themeId = useRadarStore((s) => s.themeId);
+  const theme = useMemo(() => resolveTheme(themeId), [themeId]);
 
   const { viewport, setViewport, handlers, screenToWorld } = useCanvasZoomPan();
   const { quadtreeRef, simNodesRef, isSimulatingRef, markDirtyRef } = useGraphLayout();
@@ -368,6 +371,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     activeTrails,
     agentFileVersion,
     activeConflictPaths,
+    theme,
   ]);
 
   // Keep the render loop dirty while any conflict pulse is active so the
@@ -447,6 +451,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     selectedAgentId,
     activeTrails,
     activeConflictPaths,
+    theme,
   });
   useEffect(() => {
     stateRef.current = {
@@ -463,6 +468,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       selectedAgentId,
       activeTrails,
       activeConflictPaths,
+      theme,
     };
   }, [
     graphNodes,
@@ -478,6 +484,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     selectedAgentId,
     activeTrails,
     activeConflictPaths,
+    theme,
   ]);
 
   // Main rAF render loop — single subscription for the lifetime of the view.
@@ -499,10 +506,10 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       const w = canvas!.width / dpr;
       const h = canvas!.height / dpr;
 
-      // Step 1 — Canvas clear (surface-container-lowest / #000000).
+      // Step 1 — Canvas clear, painted with the active theme's background.
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = '#000000';
+      ctx.fillStyle = s.theme.canvasBackground;
       ctx.fillRect(0, 0, canvas!.width, canvas!.height);
       ctx.restore();
 
@@ -541,11 +548,12 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         vp.zoom,
         s.parentChildMap,
         s.dirsWithOwnFiles,
+        s.theme,
       );
       // Step 4: Edges.
-      drawEdges(ctx, s.graphEdges, livePositions, vp.zoom, vp, w, h);
+      drawEdges(ctx, s.graphEdges, livePositions, vp.zoom, vp, w, h, s.theme);
       // Step 5: Arrow heads.
-      drawArrowHeads(ctx, s.graphEdges, livePositions, vp.zoom, vp, w, h);
+      drawArrowHeads(ctx, s.graphEdges, livePositions, vp.zoom, vp, w, h, s.theme);
       // Step 6: Nodes (heat-tint fill on demand).
       drawNodes(
         ctx,
@@ -557,9 +565,10 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         vp,
         w,
         h,
+        s.theme,
       );
       // Step 6b: File-name labels at high zoom (UI-SPEC §Progressive Detail ≥ 4×).
-      drawFileLabels(ctx, liveNodes, vp.zoom, vp, w, h);
+      drawFileLabels(ctx, liveNodes, vp.zoom, vp, w, h, s.theme);
 
       // Step 7: Selected-agent ambient glow + 1px white outer stroke.
       if (s.selectedNode && s.selectedAgentId) {
