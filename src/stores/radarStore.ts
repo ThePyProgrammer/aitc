@@ -26,6 +26,11 @@ import {
   MAX_TRAILS_PER_AGENT,
   TRAIL_TOTAL_LIFESPAN_MS,
 } from '../views/Radar/CometTrail';
+import {
+  THEMES,
+  DEFAULT_THEME_ID,
+  THEME_STORAGE_KEY,
+} from '../views/Radar/themes';
 
 // Phase 7 graph state (D-01..D-03, D-11).
 export interface GraphNode {
@@ -109,6 +114,10 @@ interface RadarStore {
   pinnedNodeIds: Set<string>;
   activeTrails: ActiveTrail[];
   forceConfig: ForceConfig;
+  /** Currently selected graph color theme id. Persisted in localStorage
+   *  under THEME_STORAGE_KEY. Always a valid key in THEMES (invalid values
+   *  are coerced to DEFAULT_THEME_ID on write). */
+  themeId: string;
   // Actions.
   fetchGraph: () => Promise<void>;
   commitSettledPositions: (positions: Map<string, { x: number; y: number }>) => void;
@@ -121,8 +130,29 @@ interface RadarStore {
   selectAgent: (id: string | null) => void;
   toggleManifest: () => void;
   toggleHeatMap: () => void;
+  /** Switch the active graph theme. Unknown ids fall back to the default
+   *  silently. Persists to localStorage so the selection survives restart. */
+  setThemeId: (id: string) => void;
   updateContentionScores: (conflicts: ConflictAlert[], agentFileEvents: Map<string, string[]>) => void;
   reset: () => void;
+}
+
+/**
+ * Read the persisted theme id from localStorage, validating it against the
+ * THEMES catalog. Missing / unknown / unreadable values fall back to the
+ * default silently — acceptance criterion (spec §9).
+ */
+function readPersistedThemeId(): string {
+  try {
+    if (typeof localStorage === 'undefined') return DEFAULT_THEME_ID;
+    const raw = localStorage.getItem(THEME_STORAGE_KEY);
+    if (raw && Object.prototype.hasOwnProperty.call(THEMES, raw)) {
+      return raw;
+    }
+  } catch {
+    // localStorage may throw in private-browsing / file:// contexts.
+  }
+  return DEFAULT_THEME_ID;
 }
 
 export const useRadarStore = create<RadarStore>((set) => ({
@@ -137,6 +167,7 @@ export const useRadarStore = create<RadarStore>((set) => ({
   pinnedNodeIds: new Set<string>(),
   activeTrails: [],
   forceConfig: { ...DEFAULT_FORCE_CONFIG },
+  themeId: readPersistedThemeId(),
 
   /**
    * D-03 + D-05: fetch tree index + dependency graph in parallel, derive
@@ -275,6 +306,25 @@ export const useRadarStore = create<RadarStore>((set) => ({
 
   toggleHeatMap: () =>
     set((s) => ({ heatMapEnabled: !s.heatMapEnabled })),
+
+  /**
+   * Persist and apply a new theme id. Invalid ids coerce to the default
+   * (we still persist — so a corrupted value self-heals on next write).
+   * localStorage write is try/caught because private-browsing can throw.
+   */
+  setThemeId: (id) => {
+    const nextId = Object.prototype.hasOwnProperty.call(THEMES, id)
+      ? id
+      : DEFAULT_THEME_ID;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(THEME_STORAGE_KEY, nextId);
+      }
+    } catch {
+      // Persist best-effort; the live selection still applies.
+    }
+    set({ themeId: nextId });
+  },
 
   updateContentionScores: (conflicts, agentFileEvents) => {
     const fileStats = new Map<string, { conflictCount: number; agentIds: Set<string> }>();
