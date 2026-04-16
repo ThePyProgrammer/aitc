@@ -278,9 +278,12 @@ export function drawEdges(
   ctx.strokeStyle = theme.edgeStroke;
   ctx.lineWidth = 1 / zoom;
   // Optional glow for bright themes (synthwave / plasma / electric-ice).
+  // shadowBlur is in screen pixels (NOT affected by the canvas transform),
+  // so we scale it WITH zoom and cap it — more zoom → more glow up to 4px;
+  // zoomed out, glow shrinks to near zero so 5k-node views stay crisp.
   if (theme.edgeGlow) {
     ctx.shadowColor = theme.edgeGlow;
-    ctx.shadowBlur = 6 / zoom;
+    ctx.shadowBlur = Math.min(4, zoom * 4);
   }
   for (const e of edges) {
     const sId =
@@ -399,6 +402,12 @@ export function drawNodes(
 
     // Stroke + glow: heat keeps the original error tint. Otherwise either a
     // per-cluster accent (bright themes) or the theme's baseline node stroke.
+    //
+    // shadowBlur is in *screen* pixels — it is NOT scaled by the canvas
+    // transform. A naive `8 / zoom` blows up to ~160px at zoom 0.05, drowning
+    // the whole canvas in haze. We scale with zoom and cap at 6px so glow
+    // stays subtle when zoomed out and never dominates at close zoom.
+    const glowPx = Math.min(6, zoom * 6);
     if (isHeat) {
       ctx.strokeStyle = `rgba(255, 115, 81, ${score * 0.8})`;
       // Suppress glow while the node is heat-tinted so the error color reads.
@@ -411,13 +420,13 @@ export function drawNodes(
       ctx.strokeStyle = accent;
       if (hasGlow) {
         ctx.shadowColor = accent;
-        ctx.shadowBlur = 8 / zoom;
+        ctx.shadowBlur = glowPx;
       }
     } else {
       ctx.strokeStyle = theme.nodeStroke;
       if (hasGlow) {
         ctx.shadowColor = theme.nodeGlow!;
-        ctx.shadowBlur = 8 / zoom;
+        ctx.shadowBlur = glowPx;
       }
     }
 
