@@ -371,4 +371,38 @@ describe('installRadarPipelineBridge', () => {
 // Phase 7 Plan 04: `computeTreemapLayout` tests removed — the function is
 // gone along with `useTreemapLayout`. Reference `sampleTree` retained for
 // the `fetchGraph` fixtures above.
+
+// ───── Graph color theme persistence (2026-04-16 spec §4, §9) ─────
+describe('radarStore theme persistence', () => {
+  beforeEach(() => {
+    // Wipe localStorage so each test starts from a clean slate — otherwise
+    // the initial-read path would be contaminated by the previous test.
+    localStorage.clear();
+    // Reset the store to its natural defaults (reset() intentionally does
+    // NOT touch themeId so user preference survives resets; we assert this).
+    useRadarStore.setState({ themeId: 'phosphor-classic' });
+  });
+
+  it('defaults to phosphor-classic when localStorage is empty', () => {
+    expect(useRadarStore.getState().themeId).toBe('phosphor-classic');
+  });
+
+  it('setThemeId writes to localStorage and updates state', () => {
+    useRadarStore.getState().setThemeId('plasma');
+    expect(useRadarStore.getState().themeId).toBe('plasma');
+    expect(localStorage.getItem('aitc:graphTheme')).toBe('plasma');
+  });
+
+  it('setThemeId coerces unknown ids to the default + still persists', () => {
+    useRadarStore.getState().setThemeId('does-not-exist');
+    expect(useRadarStore.getState().themeId).toBe('phosphor-classic');
+    expect(localStorage.getItem('aitc:graphTheme')).toBe('phosphor-classic');
+  });
+
+  it('reset() leaves themeId intact so the user preference survives', () => {
+    useRadarStore.getState().setThemeId('synthwave-nebula');
+    useRadarStore.getState().reset();
+    expect(useRadarStore.getState().themeId).toBe('synthwave-nebula');
+  });
+});
 void sampleTree;

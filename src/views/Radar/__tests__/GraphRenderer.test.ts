@@ -27,6 +27,7 @@ import {
   VIEWPORT_CULL_PADDING,
 } from '../GraphRenderer';
 import type { GraphNode, GraphEdge } from '../../../stores/radarStore';
+import { THEMES } from '../themes';
 
 // Minimal mock CanvasRenderingContext2D with vitest spies on every method the
 // renderer calls. We track lineWidth / fillStyle / strokeStyle assignments so
@@ -372,6 +373,123 @@ describe('GraphRenderer pure functions — Plan 04', () => {
     });
     it('uses 5px world-space for arrow length', () => {
       expect(ARROW_LENGTH).toBe(5);
+    });
+  });
+
+  // ───── Theme arg integration (2026-04-16 color theme spec §3) ─────
+  describe('theme arg threading', () => {
+    beforeEach(() => vi.clearAllMocks());
+
+    it('drawNodes honours theme.nodeFill for non-hover, non-heat nodes', () => {
+      const ctx = createMockCtx();
+      const nodes: GraphNode[] = [{ id: 'a', dirKey: 'src', dirDepth: 1, x: 10, y: 10 }];
+      drawNodes(
+        ctx,
+        nodes,
+        new Map(),
+        false,
+        null,
+        1,
+        VIEWPORT,
+        CANVAS_W,
+        CANVAS_H,
+        THEMES['phosphor-cyan'],
+      );
+      const fills = (ctx as any)._assignments.fillStyle;
+      expect(fills).toContain(THEMES['phosphor-cyan'].nodeFill);
+    });
+
+    it('drawNodes uses clusterAccents for the stroke when the theme ships them', () => {
+      const ctx = createMockCtx();
+      const nodes: GraphNode[] = [{ id: 'a', dirKey: 'src/foo', dirDepth: 2, x: 10, y: 10 }];
+      drawNodes(
+        ctx,
+        nodes,
+        new Map(),
+        false,
+        null,
+        1,
+        VIEWPORT,
+        CANVAS_W,
+        CANVAS_H,
+        THEMES.plasma,
+      );
+      const strokes = (ctx as any)._assignments.strokeStyle;
+      // One of the plasma accents must have been picked for this dirKey.
+      const accents = THEMES.plasma.clusterAccents!;
+      expect(accents.some((a) => strokes.includes(a))).toBe(true);
+    });
+
+    it('drawEdges honours theme.edgeStroke', () => {
+      const ctx = createMockCtx();
+      const edges: GraphEdge[] = [{ source: 'a', target: 'b', kind: 'import' }];
+      const positions = new Map<string, { x: number; y: number }>([
+        ['a', { x: 0, y: 0 }],
+        ['b', { x: 100, y: 0 }],
+      ]);
+      drawEdges(
+        ctx,
+        edges,
+        positions,
+        1,
+        VIEWPORT,
+        CANVAS_W,
+        CANVAS_H,
+        THEMES['amber-terminal'],
+      );
+      const strokes = (ctx as any)._assignments.strokeStyle;
+      expect(strokes).toContain(THEMES['amber-terminal'].edgeStroke);
+    });
+
+    it('drawArrowHeads honours theme.arrowFill', () => {
+      const ctx = createMockCtx();
+      const edges: GraphEdge[] = [{ source: 'a', target: 'b', kind: 'import' }];
+      const positions = new Map<string, { x: number; y: number }>([
+        ['a', { x: 0, y: 0 }],
+        ['b', { x: 100, y: 0 }],
+      ]);
+      drawArrowHeads(
+        ctx,
+        edges,
+        positions,
+        1,
+        VIEWPORT,
+        CANVAS_W,
+        CANVAS_H,
+        THEMES['cool-slate'],
+      );
+      const fills = (ctx as any)._assignments.fillStyle;
+      expect(fills).toContain(THEMES['cool-slate'].arrowFill);
+    });
+
+    it('drawFolderHulls honours theme.hullStroke + hullFill', () => {
+      const ctx = createMockCtx();
+      const nodes: GraphNode[] = [
+        { id: 'a', dirKey: 'src', dirDepth: 1, x: 0, y: 0 },
+        { id: 'b', dirKey: 'src', dirDepth: 1, x: 10, y: 0 },
+        { id: 'c', dirKey: 'src', dirDepth: 1, x: 5, y: 10 },
+      ];
+      const parentChildMap = new Map<string, Set<string>>([['src', new Set(['src'])]]);
+      const dirsWithOwnFiles = new Set<string>(['src']);
+      drawFolderHulls(
+        ctx,
+        nodes,
+        1,
+        parentChildMap,
+        dirsWithOwnFiles,
+        THEMES['stellar-forge'],
+      );
+      const strokes = (ctx as any)._assignments.strokeStyle;
+      const fills = (ctx as any)._assignments.fillStyle;
+      expect(strokes).toContain(THEMES['stellar-forge'].hullStroke);
+      expect(fills).toContain(THEMES['stellar-forge'].hullFill);
+    });
+
+    it('heatColor ramps from theme.heatRampStart to #ff7351', () => {
+      // At score=0 we expect exactly the theme.heatRampStart.
+      expect(heatColor(0, THEMES['amber-terminal'])).toBe('#1a1408');
+      // At score=1 every theme lands on error red.
+      expect(heatColor(1, THEMES['amber-terminal'])).toBe('#ff7351');
     });
   });
 });
