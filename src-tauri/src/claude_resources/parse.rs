@@ -37,15 +37,47 @@ fn scope_str(s: Scope) -> &'static str {
 
 // ---------- frontmatter shapes ----------
 
+/// Lenient list deserializer: real Claude agent/command frontmatter often
+/// writes `tools: Read, Bash, Grep` (comma-separated string) rather than
+/// `tools: [Read, Bash, Grep]` (YAML list). Accept either form plus a lone
+/// string value and normalise to `Vec<String>`. The `(*)` suffix and other
+/// punctuation inside items are preserved verbatim.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum StringOrList {
+    List(Vec<String>),
+    Csv(String),
+}
+
+impl From<StringOrList> for Vec<String> {
+    fn from(v: StringOrList) -> Self {
+        match v {
+            StringOrList::List(xs) => xs,
+            StringOrList::Csv(s) => s
+                .split(',')
+                .map(|x| x.trim().to_string())
+                .filter(|x| !x.is_empty())
+                .collect(),
+        }
+    }
+}
+
+fn de_opt_stringlist<'de, D>(d: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<StringOrList>::deserialize(d)?.map(Vec::<String>::from))
+}
+
 #[derive(Debug, Deserialize)]
 struct SkillFront {
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
     description: Option<String>,
-    #[serde(default, rename = "allowed-tools")]
+    #[serde(default, rename = "allowed-tools", deserialize_with = "de_opt_stringlist")]
     allowed_tools: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_stringlist")]
     tools: Option<Vec<String>>,
 }
 
@@ -55,7 +87,7 @@ struct AgentFront {
     name: Option<String>,
     #[serde(default)]
     description: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_stringlist")]
     tools: Option<Vec<String>>,
     #[serde(default)]
     model: Option<String>,
@@ -67,7 +99,7 @@ struct CommandFront {
     description: Option<String>,
     #[serde(default, rename = "argument-hint")]
     argument_hint: Option<String>,
-    #[serde(default, rename = "allowed-tools")]
+    #[serde(default, rename = "allowed-tools", deserialize_with = "de_opt_stringlist")]
     allowed_tools: Option<Vec<String>>,
 }
 
@@ -602,6 +634,32 @@ mod tests {
             !json.contains("sk-test-abc123"),
             "API_TOKEN value leaked into serialized Resource: {json}"
         );
+    }
+
+    /// Regression: real agent frontmatter writes `tools: Read, Bash, Grep`
+    /// as a comma-separated string rather than a YAML list. Strict parsing
+    /// rejected every such file with "missing or invalid YAML frontmatter"
+    /// even though the block was valid YAML.
+    #[test]
+    fn parse_agent_accepts_csv_tools_string() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("real-agent.md");
+        std::fs::write(
+            &path,
+            "---\nname: real-agent\ndescription: Handles stuff.\ntools: Read, Bash, Grep, Glob\ncolor: blue\n---\n\nBody.\n",
+        )
+        .expect("write");
+        let r = parse_agent(&path, Scope::Global).expect("lenient parse");
+        assert_eq!(r.name, "real-agent");
+        match r.metadata {
+            ResourceMetadata::Agent { tools, .. } => {
+                assert_eq!(
+                    tools.as_deref(),
+                    Some(&["Read".into(), "Bash".into(), "Grep".into(), "Glob".into()][..])
+                );
+            }
+            other => panic!("expected Agent, got {other:?}"),
+        }
     }
 
     #[test]
