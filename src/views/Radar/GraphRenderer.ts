@@ -293,7 +293,6 @@ export function drawNodes(
   contentionScores: Map<string, number>,
   heatMapEnabled: boolean,
   hoveredId: string | null,
-  pinnedIds: Set<string>,
   zoom: number,
   viewport: Viewport,
   canvasWidth: number,
@@ -322,14 +321,6 @@ export function drawNodes(
     ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-
-    // Pinned-node lock badge — UI-SPEC §Color: secondary #00cffc, 5px / zoom
-    // square (zero-radius) drawn offset +6, +6 from node center.
-    if (pinnedIds.has(n.id)) {
-      ctx.fillStyle = COLORS.secondary;
-      const sz = PINNED_BADGE_SIZE / zoom;
-      ctx.fillRect(n.x + 6 / zoom, n.y + 6 / zoom, sz, sz);
-    }
   }
 }
 

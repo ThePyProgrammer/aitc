@@ -313,7 +313,7 @@ describe('GraphRenderer pure functions — Plan 04', () => {
       const ctx = createMockCtx();
       const nodes: GraphNode[] = [{ id: 'a', dirKey: 'src', dirDepth: 1, x: 10, y: 10 }];
       const scores = new Map<string, number>([['a', 0.7]]);
-      drawNodes(ctx, nodes, scores, /*heatMapEnabled=*/ false, null, new Set(), 1, VIEWPORT, CANVAS_W, CANVAS_H);
+      drawNodes(ctx, nodes, scores, /*heatMapEnabled=*/ false, null, 1, VIEWPORT, CANVAS_W, CANVAS_H);
       const fills = (ctx as any)._assignments.fillStyle;
       expect(fills).toContain('#1a1919');
     });
@@ -322,7 +322,7 @@ describe('GraphRenderer pure functions — Plan 04', () => {
       const ctx = createMockCtx();
       const nodes: GraphNode[] = [{ id: 'a', dirKey: 'src', dirDepth: 1, x: 10, y: 10 }];
       const scores = new Map<string, number>([['a', 0.5]]);
-      drawNodes(ctx, nodes, scores, /*heatMapEnabled=*/ true, null, new Set(), 1, VIEWPORT, CANVAS_W, CANVAS_H);
+      drawNodes(ctx, nodes, scores, /*heatMapEnabled=*/ true, null, 1, VIEWPORT, CANVAS_W, CANVAS_H);
       const fills = (ctx as any)._assignments.fillStyle;
       expect(fills).toContain(heatColor(0.5));
     });
@@ -330,7 +330,7 @@ describe('GraphRenderer pure functions — Plan 04', () => {
     it('grows hover radius from 5 → 6 world px (Test 8)', () => {
       const ctx = createMockCtx();
       const nodes: GraphNode[] = [{ id: 'a', dirKey: 'src', dirDepth: 1, x: 10, y: 10 }];
-      drawNodes(ctx, nodes, new Map(), false, 'a', new Set(), 1, VIEWPORT, CANVAS_W, CANVAS_H);
+      drawNodes(ctx, nodes, new Map(), false, 'a', 1, VIEWPORT, CANVAS_W, CANVAS_H);
       const arcs = (ctx as any)._calls.filter((c: any) => c.fn === 'arc');
       expect(arcs[0].args[2]).toBe(NODE_RADIUS_HOVERED);
       expect(NODE_RADIUS_DEFAULT).toBe(5);
@@ -340,19 +340,9 @@ describe('GraphRenderer pure functions — Plan 04', () => {
     it('culls nodes outside viewport + 100px padding', () => {
       const ctx = createMockCtx();
       const nodes: GraphNode[] = [{ id: 'a', dirKey: 'src', dirDepth: 1, x: -5000, y: -5000 }];
-      drawNodes(ctx, nodes, new Map(), false, null, new Set(), 1, VIEWPORT, CANVAS_W, CANVAS_H);
+      drawNodes(ctx, nodes, new Map(), false, null, 1, VIEWPORT, CANVAS_W, CANVAS_H);
       const arcs = (ctx as any)._calls.filter((c: any) => c.fn === 'arc');
       expect(arcs.length).toBe(0);
-    });
-
-    it('renders pinned-node lock badge using secondary #00cffc', () => {
-      const ctx = createMockCtx();
-      const nodes: GraphNode[] = [{ id: 'a', dirKey: 'src', dirDepth: 1, x: 10, y: 10 }];
-      drawNodes(ctx, nodes, new Map(), false, null, new Set(['a']), 1, VIEWPORT, CANVAS_W, CANVAS_H);
-      const fills = (ctx as any)._assignments.fillStyle;
-      expect(fills).toContain('#00cffc');
-      const rects = (ctx as any)._calls.filter((c: any) => c.fn === 'fillRect');
-      expect(rects.length).toBeGreaterThanOrEqual(1);
     });
   });
 

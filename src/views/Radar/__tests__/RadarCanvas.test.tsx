@@ -223,6 +223,9 @@ vi.mock('lucide-react', () => ({
   Flame: () => null,
   AlertTriangle: () => null,
   Info: () => null,
+  Settings2: () => null,
+  ChevronDown: () => null,
+  ChevronUp: () => null,
 }));
 
 // Import after mocks are in place.
@@ -348,48 +351,6 @@ describe('RadarCanvas (graph mode) — Plan 04', () => {
       return Math.abs(x - 100) < 0.01 && Math.abs(y - 0) < 0.01;
     });
     expect(agentDotArc).toBeDefined();
-  });
-
-  it('drag-to-pin: mousedown on a node → mouseup calls pinNode + rewarm', () => {
-    mockRadarState.graphNodes = [
-      { id: 'a.ts', dirKey: '', dirDepth: 0, x: 0, y: 0 },
-    ];
-    mockRadarState.settledAt = Date.now();
-    mockQuadtreeHit.current = { id: 'a.ts' };
-
-    const { container } = render(<RadarCanvas />);
-    const canvas = container.querySelector('canvas')!;
-    // viewport panX=400, panY=300, zoom=1 → screen (400,300) maps to world (0,0).
-    fireEvent.mouseDown(canvas, { button: 0, clientX: 400, clientY: 300 });
-    fireEvent.mouseMove(canvas, { clientX: 500, clientY: 350 });
-    fireEvent.mouseUp(canvas, { clientX: 500, clientY: 350 });
-
-    expect(mockRadarState.pinNode).toHaveBeenCalledTimes(1);
-    const [id] = mockRadarState.pinNode.mock.calls[0];
-    expect(id).toBe('a.ts');
-    expect(mockRewarm).toHaveBeenCalledWith(0.3);
-    expect(mockRadarState.pinnedNodeIds.has('a.ts')).toBe(true);
-  });
-
-  it('shift+click on a pinned node → unpinNode + rewarm(0.2)', () => {
-    mockRadarState.graphNodes = [
-      { id: 'a.ts', dirKey: '', dirDepth: 0, x: 0, y: 0, fx: 0, fy: 0 },
-    ];
-    mockRadarState.pinnedNodeIds = new Set(['a.ts']);
-    mockRadarState.settledAt = Date.now();
-    mockQuadtreeHit.current = { id: 'a.ts' };
-
-    const { container } = render(<RadarCanvas />);
-    const canvas = container.querySelector('canvas')!;
-    fireEvent.mouseDown(canvas, {
-      button: 0,
-      clientX: 400,
-      clientY: 300,
-      shiftKey: true,
-    });
-
-    expect(mockRadarState.unpinNode).toHaveBeenCalledWith('a.ts');
-    expect(mockRewarm).toHaveBeenCalledWith(0.2);
   });
 
   it('selected node gets 1px white outer stroke at 80% opacity (UI-SPEC §Color)', async () => {

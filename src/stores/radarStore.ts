@@ -58,6 +58,16 @@ export interface Viewport {
   panY: number;
 }
 
+export interface ForceConfig {
+  centerStrength: number;   // 0..1, default 0.05
+  clusterStrength: number;  // 0..1, default 0.08
+}
+
+export const DEFAULT_FORCE_CONFIG: ForceConfig = {
+  centerStrength: 0.05,
+  clusterStrength: 0.08,
+};
+
 // 8-color agent dot palette per UI-SPEC.
 export const AGENT_DOT_PALETTE = [
   '#8eff71', '#00cffc', '#ffd16f', '#ff7351',
@@ -94,6 +104,7 @@ interface RadarStore {
   settledAt: number | null;
   pinnedNodeIds: Set<string>;
   activeTrails: ActiveTrail[];
+  forceConfig: ForceConfig;
   // Actions.
   fetchGraph: () => Promise<void>;
   commitSettledPositions: (positions: Map<string, { x: number; y: number }>) => void;
@@ -101,6 +112,7 @@ interface RadarStore {
   unpinNode: (id: string) => void;
   pushTrail: (t: ActiveTrail) => void;
   pruneTrails: (now?: number) => void;
+  setForceConfig: (cfg: Partial<ForceConfig>) => void;
   setViewport: (v: Partial<Viewport>) => void;
   selectAgent: (id: string | null) => void;
   toggleManifest: () => void;
@@ -120,6 +132,7 @@ export const useRadarStore = create<RadarStore>((set) => ({
   settledAt: null,
   pinnedNodeIds: new Set<string>(),
   activeTrails: [],
+  forceConfig: { ...DEFAULT_FORCE_CONFIG },
 
   /**
    * D-03 + D-05: fetch tree index + dependency graph in parallel, derive
@@ -242,6 +255,12 @@ export const useRadarStore = create<RadarStore>((set) => ({
       ),
     }));
   },
+
+  setForceConfig: (cfg) =>
+    set((s) => ({
+      forceConfig: { ...s.forceConfig, ...cfg },
+      settledAt: null, // trigger re-settle with new force params
+    })),
 
   setViewport: (v) =>
     set((s) => ({ viewport: { ...s.viewport, ...v } })),

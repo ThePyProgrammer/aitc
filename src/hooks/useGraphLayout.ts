@@ -75,6 +75,7 @@ export function useGraphLayout(): UseGraphLayoutResult {
   const graphNodes = useRadarStore((s) => s.graphNodes);
   const graphEdges = useRadarStore((s) => s.graphEdges);
   const settledAt = useRadarStore((s) => s.settledAt);
+  const forceConfig = useRadarStore((s) => s.forceConfig);
 
   /**
    * Build a fresh simulation, manual-tick until alpha cools or MAX_TICKS,
@@ -117,9 +118,9 @@ export function useGraphLayout(): UseGraphLayoutResult {
           .theta(CHARGE_THETA)
           .distanceMax(CHARGE_DISTANCE_MAX),
       )
-      .force('center', forceCenter(0, 0).strength(CENTER_STRENGTH))
+      .force('center', forceCenter(0, 0).strength(forceConfig.centerStrength))
       .force('collide', forceCollide(COLLIDE_RADIUS))
-      .force('cluster', forceCluster())
+      .force('cluster', forceCluster().strength(forceConfig.clusterStrength))
       .alphaDecay(ALPHA_DECAY)
       .velocityDecay(VELOCITY_DECAY)
       .stop();
@@ -165,7 +166,8 @@ export function useGraphLayout(): UseGraphLayoutResult {
     useRadarStore.getState().commitSettledPositions(positions);
     lastNodeIdsRef.current = new Set(graphNodes.map((n) => n.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphNodes, graphEdges, settledAt]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graphNodes, graphEdges, settledAt, forceConfig]);
 
   // Re-warm when graph data mutates past the threshold. Runs only after
   // an initial settle (settledAt !== null).
@@ -178,7 +180,7 @@ export function useGraphLayout(): UseGraphLayoutResult {
     useRadarStore.getState().commitSettledPositions(positions);
     lastNodeIdsRef.current = currentIds;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphNodes, graphEdges]);
+  }, [graphNodes, graphEdges, forceConfig]);
 
   // Cleanup on unmount (Pitfall 2).
   useEffect(() => {

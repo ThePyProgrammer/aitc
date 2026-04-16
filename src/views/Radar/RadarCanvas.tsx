@@ -46,6 +46,7 @@ import {
   NODE_HIT_RADIUS,
 } from './GraphRenderer';
 import { drawCometTrails, drawAgentDots } from './CometTrail';
+import { ForceConfigPanel } from './ForceConfigPanel';
 
 // UI-SPEC §Performance states thresholds (D-23).
 const DEGRADED_NODE_THRESHOLD = 5_000;
@@ -150,7 +151,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const contentionScores = useRadarStore((s) => s.contentionScores);
 
   const { viewport, handlers, screenToWorld } = useCanvasZoomPan();
-  const { quadtreeRef, rewarm } = useGraphLayout();
+  const { quadtreeRef } = useGraphLayout();
   const activeTrails = useRadarStore((s) => s.activeTrails);
 
   // D-22 conflict subscription — reads all alerts, filters to active
@@ -480,7 +481,6 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         s.contentionScores,
         s.heatMapEnabled,
         s.hoveredNodeId,
-        s.pinnedNodeIds,
         vp.zoom,
         vp,
         w,
@@ -532,17 +532,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     return () => cancelAnimationFrame(animFrameRef.current);
   }, []); // empty deps — one loop for the component lifetime
 
-  // Drag-to-pin state (UI-SPEC §Interaction §Drag-to-pin). When set, the
-  // native-pan handler bails out in the useEffect below so clicks on nodes
-  // don't also pan the viewport.
-  const [dragState, setDragState] = useState<{ nodeId: string } | null>(null);
-  const dragStateRef = useRef<{ nodeId: string } | null>(null);
-  useEffect(() => {
-    dragStateRef.current = dragState;
-  }, [dragState]);
-
-  // Quadtree-powered hit-test on mouse move (RESEARCH §Pattern 4) — plus
-  // node-drag position update when a drag is active.
+  // Quadtree-powered hit-test on mouse move (RESEARCH §Pattern 4).
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       const rect = canvasRef.current?.getBoundingClientRect();
@@ -550,125 +540,35 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
       const world = screenToWorld(sx, sy);
-      if (dragStateRef.current) {
-        // Dragging a node: update its live x/y in the store so the render
-        // loop picks up the new position immediately.
-        const id = dragStateRef.current.nodeId;
-        useRadarStore.setState((s) => ({
-          graphNodes: s.graphNodes.map((n) =>
-            n.id === id ? { ...n, x: world.x, y: world.y } : n,
-          ),
-        }));
-        return;
-      }
       const found = quadtreeRef.current?.find(
         world.x,
         world.y,
         NODE_HIT_RADIUS / Math.max(viewport.zoom, 0.1),
       );
       setHoveredNodeId(found?.id ?? null);
-      // Plan 05 will map the hit to an agent (via current-position tracking)
-      // and forward to the tooltip. For now we surface the raw node id via a
-      // data attribute and send a null agent to the parent.
       onHoveredAgentChange?.(null, sx, sy);
     },
     [screenToWorld, viewport.zoom, onHoveredAgentChange, quadtreeRef],
   );
 
-  // mousedown on a node → enter drag state; shift+mousedown on a pinned node
-  // → unpin. Capturing at the React level (React's onMouseDown) is simpler
-  // than intercepting the useCanvasZoomPan native handler, but we gate the
-  // pan handler via dragStateRef in the effect below.
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (e.button !== 0) return;
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const sx = e.clientX - rect.left;
-      const sy = e.clientY - rect.top;
-      const world = screenToWorld(sx, sy);
-      const found = quadtreeRef.current?.find(
-        world.x,
-        world.y,
-        NODE_HIT_RADIUS / Math.max(viewport.zoom, 0.1),
-      );
-      if (!found) return;
-      if (e.shiftKey) {
-        // Shift+click a pinned node → unpin + rewarm.
-        if (useRadarStore.getState().pinnedNodeIds.has(found.id)) {
-          useRadarStore.getState().unpinNode(found.id);
-          rewarm(0.2);
-        }
-        return;
-      }
-      // Begin drag.
-      setDragState({ nodeId: found.id });
-    },
-    [screenToWorld, viewport.zoom, quadtreeRef, rewarm],
-  );
-
-  const handleMouseUp = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      const drag = dragStateRef.current;
-      if (!drag) return;
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) {
-        setDragState(null);
-        return;
-      }
-      const sx = e.clientX - rect.left;
-      const sy = e.clientY - rect.top;
-      const world = screenToWorld(sx, sy);
-      // Commit pinned position + rewarm so neighbors settle around the pin.
-      useRadarStore.getState().pinNode(drag.nodeId, world.x, world.y);
-      rewarm(0.3);
-      setDragState(null);
-    },
-    [screenToWorld, rewarm],
-  );
-
-  // Attach native wheel/mouse handlers (wheel must be non-passive). Pan
-  // handlers are gated on dragStateRef so node-drag doesn't also pan the
-  // viewport.
+  // Attach native wheel/mouse handlers for pan/zoom (wheel must be non-passive).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const { onWheel, onMouseDown, onMouseMove, onMouseUp } = handlers;
-    const gatedMouseDown = (e: MouseEvent) => {
-      // Skip pan when a node hit is about to start a drag. We re-check the
-      // quadtree here because handleMouseDown (React synthetic) and the
-      // native pan handler both fire on the same event.
-      if (e.button !== 0) return;
-      const rect = canvas.getBoundingClientRect();
-      const world = screenToWorld(
-        e.clientX - rect.left,
-        e.clientY - rect.top,
-      );
-      const hit = quadtreeRef.current?.find(
-        world.x,
-        world.y,
-        NODE_HIT_RADIUS / Math.max(viewport.zoom, 0.1),
-      );
-      if (hit) return; // node hit → let handleMouseDown start the drag
-      onMouseDown(e);
-    };
-    const gatedMouseMove = (e: MouseEvent) => {
-      if (dragStateRef.current) return;
-      onMouseMove(e);
-    };
     canvas.addEventListener('wheel', onWheel, { passive: false });
-    canvas.addEventListener('mousedown', gatedMouseDown);
-    canvas.addEventListener('mousemove', gatedMouseMove);
+    canvas.addEventListener('mousedown', onMouseDown);
+    canvas.addEventListener('mousemove', onMouseMove);
     canvas.addEventListener('mouseup', onMouseUp);
     window.addEventListener('mouseup', onMouseUp);
     return () => {
       canvas.removeEventListener('wheel', onWheel);
-      canvas.removeEventListener('mousedown', gatedMouseDown);
-      canvas.removeEventListener('mousemove', gatedMouseMove);
+      canvas.removeEventListener('mousedown', onMouseDown);
+      canvas.removeEventListener('mousemove', onMouseMove);
       canvas.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [handlers, screenToWorld, viewport.zoom, quadtreeRef]);
+  }, [handlers]);
 
   // Reset dismissals when node count falls back into NORMAL.
   useEffect(() => {
@@ -733,11 +633,12 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         </div>
       )}
 
+      {/* Force configuration panel */}
+      <ForceConfigPanel />
+
       <canvas
         ref={canvasRef}
         onMouseMove={handleMouseMove}
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
         className="block"
         data-hovered-node={hoveredNodeId}
         role="img"
