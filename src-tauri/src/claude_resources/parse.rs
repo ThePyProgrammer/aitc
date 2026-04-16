@@ -69,7 +69,7 @@ where
     Ok(Option::<StringOrList>::deserialize(d)?.map(Vec::<String>::from))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct SkillFront {
     #[serde(default)]
     name: Option<String>,
@@ -81,7 +81,7 @@ struct SkillFront {
     tools: Option<Vec<String>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct AgentFront {
     #[serde(default)]
     name: Option<String>,
@@ -93,7 +93,7 @@ struct AgentFront {
     model: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct CommandFront {
     #[serde(default)]
     description: Option<String>,
@@ -110,14 +110,21 @@ fn read_file(path: &Path) -> Result<String, String> {
         .map_err(|e| format!("read {} failed: {e}", path.display()))
 }
 
-fn parse_front<D: serde::de::DeserializeOwned>(
+fn parse_front<D: serde::de::DeserializeOwned + Default>(
     raw: &str,
 ) -> Result<(D, String), String> {
+    // Detect whether a frontmatter block is present at all. gray_matter
+    // returns None both when the `---...---` delimiters are missing AND when
+    // the block fails to deserialize — we want to treat "no block" as a
+    // valid empty-frontmatter case (fall back to Default::default), but
+    // still surface real parse errors when a block is present.
+    let has_front = raw.starts_with("---\n") || raw.starts_with("---\r\n");
     let matter: Matter<YAML> = Matter::new();
-    let parsed = matter
-        .parse_with_struct::<D>(raw)
-        .ok_or_else(|| "missing or invalid YAML frontmatter".to_string())?;
-    Ok((parsed.data, parsed.content))
+    match matter.parse_with_struct::<D>(raw) {
+        Some(parsed) => Ok((parsed.data, parsed.content)),
+        None if !has_front => Ok((D::default(), raw.to_string())),
+        None => Err("missing or invalid YAML frontmatter".to_string()),
+    }
 }
 
 fn file_stem_or(path: &Path, default: &str) -> String {
@@ -662,6 +669,40 @@ mod tests {
         }
     }
 
+    /// Regression: some real commands/agents ship with no frontmatter at
+    /// all (e.g. `commands/turing/rules/loop-protocol.md`, `commands/blueprint/agents/persona.md`).
+    /// The parser must treat "no frontmatter block" as empty defaults, not
+    /// as a parse error.
+    #[test]
+    fn parse_command_tolerates_missing_frontmatter() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("persona.md");
+        std::fs::write(
+            &path,
+            "# Senior Engineer Persona\n\nJust prose. No frontmatter at all.\n",
+        )
+        .expect("write");
+        let r = parse_command(&path, Scope::Global).expect("lenient parse");
+        assert_eq!(r.name, "persona");
+        assert!(r.description.is_none());
+        match r.metadata {
+            ResourceMetadata::Command { argument_hint, allowed_tools } => {
+                assert!(argument_hint.is_none());
+                assert!(allowed_tools.is_none());
+            }
+            other => panic!("expected Command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_agent_tolerates_missing_frontmatter() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("loop-protocol.md");
+        std::fs::write(&path, "# Just a header\n\nBody.\n").expect("write");
+        let r = parse_agent(&path, Scope::Global).expect("lenient parse");
+        assert_eq!(r.name, "loop-protocol");
+    }
+
     #[test]
     fn parse_installed_plugins_multi_entry() {
         let path = fixture_root().join("plugins/installed_plugins.json");
@@ -802,12 +843,20 @@ mod tests {
         }
     }
 
+    /// Contract change (previously asserted Err): SKILL.md without a
+    /// `---...---` frontmatter block is now tolerated and falls back to
+    /// filename-derived defaults. Mirrors the agent/command lenient path
+    /// so real-world files that ship as plain markdown still surface.
     #[test]
-    fn parse_skill_missing_frontmatter_returns_err() {
+    fn parse_skill_missing_frontmatter_uses_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("SKILL.md");
+        let sub = dir.path().join("my-skill");
+        std::fs::create_dir_all(&sub).unwrap();
+        let path = sub.join("SKILL.md");
         std::fs::write(&path, "no frontmatter here\njust a body\n").unwrap();
-        let err = parse_skill(&path, Scope::Global);
-        assert!(err.is_err(), "expected Err on missing frontmatter");
+        let r = parse_skill(&path, Scope::Global).expect("lenient");
+        // name falls back to parent directory name per parse_skill_with_body.
+        assert_eq!(r.name, "my-skill");
+        assert!(r.description.is_none());
     }
 }
