@@ -239,14 +239,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   // fire before start_watch completes, yielding empty results.
   const isWatching = usePipelineStore((s) => s.isWatching);
   useEffect(() => {
-    console.log('[RadarCanvas] fetch trigger, isWatching:', isWatching);
     useRadarStore.getState().fetchGraph();
   }, [isWatching]);
-
-  // DEBUG: surface state visibility
-  useEffect(() => {
-    console.log('[RadarCanvas] graphNodes:', graphNodes.length, 'edges:', graphEdges.length, 'settledAt:', settledAt, 'isWatching:', isWatching);
-  }, [graphNodes, graphEdges, settledAt, isWatching]);
 
   // Positions map (O(1) lookup for edges/arrows) memoized on node identity.
   // Positions: during live simulation, read from simNodesRef (updated
