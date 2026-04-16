@@ -36,10 +36,10 @@ const GLOBAL_PATH = '/home/u/.claude/CLAUDE.md';
 
 function setReadWrite(initial = 'hello') {
   invokeMock.mockImplementation(async (cmd: string) => {
-    if (cmd === 'readClaudeMd') {
+    if (cmd === 'read_claude_md') {
       return { content: initial, editable: true, path: EDITABLE_PATH };
     }
-    if (cmd === 'writeClaudeMd') {
+    if (cmd === 'write_claude_md') {
       return null;
     }
     throw new Error(`unexpected invoke ${cmd}`);
@@ -54,7 +54,7 @@ describe('ClaudeMdEditor — load + save + undo', () => {
       'arsenal-editor-textarea',
     )) as HTMLTextAreaElement;
     expect(ta.value).toBe('initial body');
-    expect(invokeMock).toHaveBeenCalledWith('readClaudeMd', {
+    expect(invokeMock).toHaveBeenCalledWith('read_claude_md', {
       path: EDITABLE_PATH,
       cwd: '/repo',
     });
@@ -70,7 +70,7 @@ describe('ClaudeMdEditor — load + save + undo', () => {
     fireEvent.click(screen.getByTestId('arsenal-save-button'));
 
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith('writeClaudeMd', {
+      expect(invokeMock).toHaveBeenCalledWith('write_claude_md', {
         path: EDITABLE_PATH,
         content: 'aa-modified',
         cwd: '/repo',
@@ -102,7 +102,7 @@ describe('ClaudeMdEditor — load + save + undo', () => {
     fireEvent.click(screen.getByRole('button', { name: /Undo save/ }));
 
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith('writeClaudeMd', {
+      expect(invokeMock).toHaveBeenCalledWith('write_claude_md', {
         path: EDITABLE_PATH,
         content: 'orig',
         cwd: '/repo',
@@ -157,7 +157,7 @@ describe('ClaudeMdEditor — external change + read-only', () => {
     await screen.findByTestId('arsenal-editor-textarea');
     // Update the read response to simulate new disk content.
     invokeMock.mockImplementation(async (cmd: string) => {
-      if (cmd === 'readClaudeMd') {
+      if (cmd === 'read_claude_md') {
         return { content: 'new-disk', editable: true, path: EDITABLE_PATH };
       }
       return null;
@@ -205,7 +205,7 @@ describe('ClaudeMdEditor — keyboard + error paths', () => {
     fireEvent.change(ta, { target: { value: 'a2' } });
     fireEvent.keyDown(ta, { key: 's', ctrlKey: true });
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith('writeClaudeMd', {
+      expect(invokeMock).toHaveBeenCalledWith('write_claude_md', {
         path: EDITABLE_PATH,
         content: 'a2',
         cwd: null,
@@ -215,10 +215,10 @@ describe('ClaudeMdEditor — keyboard + error paths', () => {
 
   it('save_failure_renders_save_failed_toast', async () => {
     invokeMock.mockImplementation(async (cmd: string) => {
-      if (cmd === 'readClaudeMd') {
+      if (cmd === 'read_claude_md') {
         return { content: 'x', editable: true, path: EDITABLE_PATH };
       }
-      if (cmd === 'writeClaudeMd') {
+      if (cmd === 'write_claude_md') {
         throw new Error('path is not editable: /etc/passwd');
       }
       return null;
@@ -240,7 +240,7 @@ describe('ClaudeMdEditor — keyboard + error paths', () => {
 describe('ContentPreview (WARNING 3: generic reader reuse)', () => {
   it('renders non-CLAUDE.md file content via readClaudeMd', async () => {
     invokeMock.mockImplementation(async (cmd: string) => {
-      if (cmd === 'readClaudeMd') {
+      if (cmd === 'read_claude_md') {
         return {
           content: '---\nname: test\n---\n# skill body',
           editable: false,

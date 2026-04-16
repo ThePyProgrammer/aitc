@@ -71,7 +71,7 @@ describe('useClaudeResourcesChannel', () => {
 
     expect(invokeMock).toHaveBeenCalledTimes(1);
     const [cmd, args] = invokeMock.mock.calls[0];
-    expect(cmd).toBe('startClaudeResourcesWatch');
+    expect(cmd).toBe('start_claude_resources_watch');
     expect((args as { cwd: string }).cwd).toBe('/tmp/repo');
     expect((args as { channel: unknown }).channel).toBeInstanceOf(FakeChannelCtor);
     expect(useClaudeResourcesStore.getState().resourcesById[seed[0].id]).toEqual(seed[0]);
@@ -126,7 +126,7 @@ describe('useClaudeResourcesChannel', () => {
       await result.current.stop();
     });
 
-    expect(invokeMock).toHaveBeenLastCalledWith('stopClaudeResourcesWatch');
+    expect(invokeMock).toHaveBeenLastCalledWith('stop_claude_resources_watch');
     const s = useClaudeResourcesStore.getState();
     expect(s.resourcesById).toEqual({});
     expect(s.loaded).toBe(false);

@@ -28,7 +28,7 @@ export function ContentPreview({ path, cwd = null }: ContentPreviewProps) {
     let cancelled = false;
     setContent(null);
     setError(null);
-    invoke<ReadClaudeMdResult>('readClaudeMd', { path, cwd })
+    invoke<ReadClaudeMdResult>('read_claude_md', { path, cwd })
       .then((result) => {
         if (cancelled) return;
         setContent(result.content);

@@ -102,7 +102,7 @@ export function ClaudeMdEditor({ path, cwd }: ClaudeMdEditorProps) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    invoke<ReadClaudeMdResult>('readClaudeMd', { path, cwd })
+    invoke<ReadClaudeMdResult>('read_claude_md', { path, cwd })
       .then((r) => {
         if (cancelled) return;
         setContent(r.content);
@@ -136,7 +136,7 @@ export function ClaudeMdEditor({ path, cwd }: ClaudeMdEditorProps) {
     lastSeenExternalRef.current = externalMtime;
     if (!dirty) {
       // Silent reload.
-      invoke<ReadClaudeMdResult>('readClaudeMd', { path, cwd })
+      invoke<ReadClaudeMdResult>('read_claude_md', { path, cwd })
         .then((r) => {
           setContent(r.content);
           setInitialContent(r.content);
@@ -152,7 +152,7 @@ export function ClaudeMdEditor({ path, cwd }: ClaudeMdEditorProps) {
     if (!editable || !dirty) return;
     const snapshot = initialContent;
     try {
-      await invoke('writeClaudeMd', { path, content, cwd });
+      await invoke('write_claude_md', { path, content, cwd });
       setInitialContent(content);
       setSavedSnapshot(snapshot);
       setSavedAt(Date.now());
@@ -165,7 +165,7 @@ export function ClaudeMdEditor({ path, cwd }: ClaudeMdEditorProps) {
   const handleUndo = useCallback(async () => {
     if (savedSnapshot === null) return;
     try {
-      await invoke('writeClaudeMd', {
+      await invoke('write_claude_md', {
         path,
         content: savedSnapshot,
         cwd,
@@ -203,7 +203,7 @@ export function ClaudeMdEditor({ path, cwd }: ClaudeMdEditorProps) {
   );
 
   const handleReload = useCallback(() => {
-    invoke<ReadClaudeMdResult>('readClaudeMd', { path, cwd })
+    invoke<ReadClaudeMdResult>('read_claude_md', { path, cwd })
       .then((r) => {
         setContent(r.content);
         setInitialContent(r.content);

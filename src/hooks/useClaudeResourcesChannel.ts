@@ -33,7 +33,7 @@ export function useClaudeResourcesChannel() {
     if (!channelRef.current) {
       throw new Error('useClaudeResourcesChannel: channel not ready');
     }
-    const initial = await invoke<Resource[]>('startClaudeResourcesWatch', {
+    const initial = await invoke<Resource[]>('start_claude_resources_watch', {
       cwd,
       channel: channelRef.current,
     });
@@ -42,7 +42,7 @@ export function useClaudeResourcesChannel() {
   }, []);
 
   const stop = useCallback(async () => {
-    await invoke('stopClaudeResourcesWatch');
+    await invoke('stop_claude_resources_watch');
     useClaudeResourcesStore.getState().reset();
   }, []);
 
