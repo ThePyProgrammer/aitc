@@ -179,9 +179,20 @@ pub fn parse_command(path: &Path, scope: Scope) -> Result<Resource, String> {
     })
 }
 
-/// Parse `installed_plugins.json`. Keys are `"name@marketplace"`. Preserves
-/// the full key as the ResourceId suffix (Pitfall 9) while exposing the
-/// short name + marketplace via metadata.
+/// Parse `installed_plugins.json`. Supports two schema variants:
+///
+/// * **v2 (current Claude Code):**
+///   `{ "version": 2, "plugins": { "name@market": [ {entry}, ... ] } }`
+///   — each plugin name maps to an array of installation entries (one per
+///   scope). We emit one Resource per installation; the ResourceId suffix
+///   appends the scope so multiple installations of the same plugin can
+///   coexist.
+/// * **legacy flat:** `{ "name@market": {entry} }` — used by older Claude
+///   Code builds and by our fixture; single entry per plugin.
+///
+/// Keys are `"name@marketplace"`; preserves the full key as the ResourceId
+/// suffix (Pitfall 9) while exposing the short name + marketplace via
+/// metadata.
 pub fn parse_installed_plugins(
     path: &Path,
     scope: Scope,
@@ -189,59 +200,114 @@ pub fn parse_installed_plugins(
     let raw = read_file(path)?;
     let val: serde_json::Value = serde_json::from_str(&raw)
         .map_err(|e| format!("parse {} as JSON failed: {e}", path.display()))?;
-    let obj = val
+    let root_obj = val
         .as_object()
         .ok_or_else(|| "installed_plugins.json is not an object".to_string())?;
-    let mut out = Vec::with_capacity(obj.len());
-    for (full_key, entry) in obj {
-        let (name, marketplace) = match full_key.split_once('@') {
-            Some((n, m)) => (n.to_string(), Some(m.to_string())),
-            None => (full_key.clone(), None),
-        };
-        let version = entry
-            .get("version")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let install_path = entry
-            .get("installPath")
-            .and_then(|v| v.as_str())
-            .map(PathBuf::from);
-        let installed_at = entry
-            .get("installedAt")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let last_updated = entry
-            .get("lastUpdated")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let git_commit_sha = entry
-            .get("gitCommitSha")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let id = ResourceId(format!(
-            "{}::plugin::{}",
-            scope_str(scope),
-            full_key
-        ));
-        out.push(Resource {
-            id,
-            category: Category::Plugin,
-            scope,
-            name,
-            description: None,
-            path: path.to_path_buf(),
-            metadata: ResourceMetadata::Plugin {
-                version,
-                marketplace,
-                install_path,
-                installed_at,
-                last_updated,
-                git_commit_sha,
-            },
-        });
+
+    // Detect v2 schema: top-level has "version" number + "plugins" object.
+    let v2_plugins = root_obj
+        .get("version")
+        .and_then(|v| v.as_u64())
+        .and_then(|_| root_obj.get("plugins"))
+        .and_then(|p| p.as_object());
+
+    let mut out: Vec<Resource> = Vec::new();
+
+    if let Some(plugins_map) = v2_plugins {
+        // v2: iterate plugins → each value is an array of install entries.
+        for (full_key, installs_val) in plugins_map {
+            let installs = match installs_val.as_array() {
+                Some(a) => a.as_slice(),
+                None => {
+                    // Some schemas may store the entry directly; treat as single.
+                    std::slice::from_ref(installs_val)
+                }
+            };
+            for (idx, entry) in installs.iter().enumerate() {
+                out.push(build_plugin_resource(
+                    path, scope, full_key, entry, installs.len() > 1,
+                    idx,
+                ));
+            }
+        }
+    } else {
+        // Legacy flat: iterate each key as a single entry.
+        for (full_key, entry) in root_obj {
+            // Skip non-object entries (defensive — any bookkeeping fields).
+            if !entry.is_object() {
+                continue;
+            }
+            out.push(build_plugin_resource(path, scope, full_key, entry, false, 0));
+        }
     }
+
     Ok(out)
+}
+
+/// Build one Plugin Resource from a single installation entry.
+///
+/// `disambiguate` + `idx` are used when a v2 plugin has multiple installs —
+/// the ResourceId gets a per-install suffix so ids stay unique; `name` keeps
+/// the short plugin name.
+fn build_plugin_resource(
+    path: &Path,
+    scope: Scope,
+    full_key: &str,
+    entry: &serde_json::Value,
+    disambiguate: bool,
+    idx: usize,
+) -> Resource {
+    let (name, marketplace) = match full_key.split_once('@') {
+        Some((n, m)) => (n.to_string(), Some(m.to_string())),
+        None => (full_key.to_string(), None),
+    };
+    let version = entry
+        .get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let install_path = entry
+        .get("installPath")
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from);
+    let installed_at = entry
+        .get("installedAt")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let last_updated = entry
+        .get("lastUpdated")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let git_commit_sha = entry
+        .get("gitCommitSha")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let id_suffix = if disambiguate {
+        format!("{full_key}#{idx}")
+    } else {
+        full_key.to_string()
+    };
+    let id = ResourceId(format!(
+        "{}::plugin::{}",
+        scope_str(scope),
+        id_suffix
+    ));
+    Resource {
+        id,
+        category: Category::Plugin,
+        scope,
+        name,
+        description: None,
+        path: path.to_path_buf(),
+        metadata: ResourceMetadata::Plugin {
+            version,
+            marketplace,
+            install_path,
+            installed_at,
+            last_updated,
+            git_commit_sha,
+        },
+    }
 }
 
 /// Parse `settings.json` into a top-level Settings summary Resource plus one
@@ -558,6 +624,74 @@ mod tests {
                 assert_eq!(marketplace.as_deref(), Some("pragnition-plugins"));
             }
             other => panic!("expected Plugin metadata, got {other:?}"),
+        }
+    }
+
+    /// Regression: real `~/.claude/plugins/installed_plugins.json` uses the
+    /// v2 schema `{ "version": 2, "plugins": { "name@market": [ {entry}, ... ] } }`.
+    /// The legacy flat parser emitted garbage "version" and "plugins" rows
+    /// instead of the real plugins — caught in UAT, fixed by the v2 branch.
+    #[test]
+    fn parse_installed_plugins_v2_schema() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("installed_plugins.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "version": 2,
+                "plugins": {
+                    "rapid@pragnition-plugins": [
+                        {
+                            "scope": "user",
+                            "installPath": "/home/u/.claude/plugins/cache/rapid",
+                            "version": "6.2.0",
+                            "installedAt": "2026-03-16T02:50:21.149Z",
+                            "lastUpdated": "2026-04-09T06:32:23.696Z",
+                            "gitCommitSha": "91ea44fbb57dd0bc66845ff4760bb135af835e5e"
+                        }
+                    ],
+                    "superpowers@claude-plugins-official": [
+                        {
+                            "scope": "user",
+                            "installPath": "/home/u/.claude/plugins/cache/superpowers",
+                            "version": "5.0.7"
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .expect("write");
+
+        let rs =
+            parse_installed_plugins(&path, Scope::Global).expect("parse v2");
+        assert_eq!(rs.len(), 2, "expected two plugins, got {rs:?}");
+
+        // No garbage entries named "version" or "plugins" (the old bug).
+        assert!(
+            !rs.iter().any(|r| r.name == "version" || r.name == "plugins"),
+            "v2 parser leaked top-level keys as plugins: {rs:?}"
+        );
+
+        let rapid = rs
+            .iter()
+            .find(|r| r.name == "rapid")
+            .expect("rapid plugin");
+        assert_eq!(
+            rapid.id.0,
+            "global::plugin::rapid@pragnition-plugins"
+        );
+        match &rapid.metadata {
+            ResourceMetadata::Plugin {
+                version,
+                marketplace,
+                install_path,
+                ..
+            } => {
+                assert_eq!(version, "6.2.0");
+                assert_eq!(marketplace.as_deref(), Some("pragnition-plugins"));
+                assert!(install_path.is_some());
+            }
+            other => panic!("expected Plugin, got {other:?}"),
         }
     }
 
