@@ -12,7 +12,7 @@ export interface CanvasViewport {
   panY: number;
 }
 
-const MIN_ZOOM = 0.5;
+const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 20;
 const ZOOM_IN_FACTOR = 1.1;
 const ZOOM_OUT_FACTOR = 0.9;

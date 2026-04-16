@@ -214,7 +214,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     const graphCy = (minY + maxY) / 2;
 
     // Fit graph into 90% of canvas with a minimum zoom of 0.3.
-    const fitZoom = Math.max(0.3, Math.min(
+    const fitZoom = Math.max(0.05, Math.min(
       (canvasSize.width * 0.9) / graphW,
       (canvasSize.height * 0.9) / graphH,
       2, // don't over-zoom small graphs
