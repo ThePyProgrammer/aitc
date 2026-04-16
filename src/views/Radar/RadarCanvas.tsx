@@ -191,12 +191,13 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     storeSetViewport(viewport);
   }, [viewport, storeSetViewport]);
 
-  // Bootstrap: fetch graph once + install pipeline→fetch bridge.
+  // Bootstrap: fetch graph once. Also re-fetch when the pipeline watcher
+  // starts (pipelineStore.isWatching flips true) — the initial mount may
+  // fire before start_watch completes, yielding empty results.
+  const isWatching = usePipelineStore((s) => s.isWatching);
   useEffect(() => {
     useRadarStore.getState().fetchGraph();
-    const dispose = installRadarPipelineBridge();
-    return () => dispose();
-  }, []);
+  }, [isWatching]);
 
   // Positions map (O(1) lookup for edges/arrows) memoized on node identity.
   // Positions: during live simulation, read from simNodesRef (updated
