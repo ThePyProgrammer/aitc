@@ -91,23 +91,21 @@ const CANVAS_H = 600;
 
 describe('GraphRenderer pure functions — Plan 04', () => {
   describe('heatColor (D-19, UI-SPEC §Color heat-map ramp)', () => {
-    it('returns surface-container #1a1919 at score=0', () => {
-      expect(heatColor(0)).toBe('#1a1919');
+    it('returns surface-container #0f1a0e at score=0', () => {
+      expect(heatColor(0)).toBe('#0f1a0e');
     });
     it('returns error #ff7351 at score=1', () => {
       expect(heatColor(1)).toBe('#ff7351');
     });
     it('returns interpolated blend at score=0.5 (Test 6)', () => {
-      // mixRgb(#1a1919, #ff7351, 0.5) — each channel averaged.
-      // R: 0x1a + (0xff - 0x1a) * 0.5 = 26 + 229 * 0.5 = 140.5 → 141 = 0x8d
-      // Our clamp uses Math.round so (26+229)/2 = 255/2 + 26 = 127.5 + 26 = 140.5 ≈ 141 ... actually:
-      // round(0x1a + (0xff-0x1a)*0.5) = round(26 + 229/2) = round(26 + 114.5) = round(140.5) = 141 = 0x8d
-      // G: round(0x19 + (0x73-0x19)*0.5) = round(25 + 90/2) = round(25+45) = 70 = 0x46
-      // B: round(0x19 + (0x51-0x19)*0.5) = round(25 + 56/2) = round(25+28) = 53 = 0x35
-      expect(heatColor(0.5)).toBe('#8d4635');
+      // mixRgb(#0f1a0e, #ff7351, 0.5):
+      // R: round(0x0f + (0xff-0x0f)*0.5) = round(15 + 120) = 135 = 0x87
+      // G: round(0x1a + (0x73-0x1a)*0.5) = round(26 + 44.5) = 71 = 0x47
+      // B: round(0x0e + (0x51-0x0e)*0.5) = round(14 + 33.5) = 48 = 0x30
+      expect(heatColor(0.5)).toBe('#874730');
     });
     it('clamps negative scores to 0', () => {
-      expect(heatColor(-0.5)).toBe('#1a1919');
+      expect(heatColor(-0.5)).toBe('#0f1a0e');
     });
     it('clamps scores >1 to 1', () => {
       expect(heatColor(2)).toBe('#ff7351');
@@ -314,13 +312,13 @@ describe('GraphRenderer pure functions — Plan 04', () => {
   describe('drawNodes (UI-SPEC z-order step 6)', () => {
     beforeEach(() => vi.clearAllMocks());
 
-    it('uses default fill #1a1919 when heat-map disabled (Test 7)', () => {
+    it('uses default fill #0f1a0e when heat-map disabled (Test 7)', () => {
       const ctx = createMockCtx();
       const nodes: GraphNode[] = [{ id: 'a', dirKey: 'src', dirDepth: 1, x: 10, y: 10 }];
       const scores = new Map<string, number>([['a', 0.7]]);
       drawNodes(ctx, nodes, scores, /*heatMapEnabled=*/ false, null, 1, VIEWPORT, CANVAS_W, CANVAS_H);
       const fills = (ctx as any)._assignments.fillStyle;
-      expect(fills).toContain('#1a1919');
+      expect(fills).toContain('#0f1a0e');
     });
 
     it('uses heat-tinted fill when heat-map enabled (Test 6 integration)', () => {

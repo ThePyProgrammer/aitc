@@ -34,15 +34,19 @@ function paddedHullPoints(
   return result;
 }
 
-// ───── Color tokens (Command Horizon, from UI-SPEC §Color) ─────
+// ───── Color tokens (Command Horizon phosphor green palette) ─────
 export const COLORS = {
-  surfaceContainer: '#1a1919',
-  surfaceContainerHigh: '#201f1f',
-  surfaceContainerHighest: '#262626',
-  outline: '#777575',
-  outlineVariant: '#494847',
-  onSurface: '#ffffff',
-  onSurfaceVariant: '#adaaaa',
+  // Node fills — dark green tint instead of neutral grey
+  surfaceContainer: '#0f1a0e',
+  surfaceContainerHigh: '#162015',
+  surfaceContainerHighest: '#1e281c',
+  // Edges + hull strokes — muted phosphor green
+  outline: '#3d6b35',
+  outlineVariant: '#2a4d24',
+  // Text
+  onSurface: '#d4ffc8',
+  onSurfaceVariant: '#7fbf72',
+  // Accents
   primary: '#8eff71',
   secondary: '#00cffc',
   error: '#ff7351',
@@ -64,15 +68,15 @@ export const FILE_LABEL_ZOOM_THRESHOLD = 4; // UI-SPEC §Progressive Detail: ≥
 
 // ───── Heat-map color blend (D-19, UI-SPEC §Color heat-map ramp) ─────
 /**
- * Interpolate from surface-container (#1a1919) → error (#ff7351) along a
+ * Interpolate from surface-container (#0f1a0e) → error (#ff7351) along a
  * contention score in [0, 1]. Scores outside the range are clamped.
  */
 export function heatColor(score: number): string {
   const clamped = Math.max(0, Math.min(1, score));
-  // surface-container #1a1919 → error #ff7351
-  const r = Math.round(0x1a + (0xff - 0x1a) * clamped);
-  const g = Math.round(0x19 + (0x73 - 0x19) * clamped);
-  const b = Math.round(0x19 + (0x51 - 0x19) * clamped);
+  // surface-container #0f1a0e → error #ff7351
+  const r = Math.round(0x0f + (0xff - 0x0f) * clamped);
+  const g = Math.round(0x1a + (0x73 - 0x1a) * clamped);
+  const b = Math.round(0x0e + (0x51 - 0x0e) * clamped);
   const hex = (n: number) => n.toString(16).padStart(2, '0');
   return `#${hex(r)}${hex(g)}${hex(b)}`;
 }
@@ -176,8 +180,8 @@ export function drawFolderHulls(
   const lineW = 1 / zoom;
   for (const [dirKey, members] of byDir) {
     if (!shouldRenderHullAtZoom(members[0].dirDepth, zoom)) continue;
-    ctx.strokeStyle = `rgba(73, 72, 71, ${FOLDER_HULL_STROKE_ALPHA})`;
-    ctx.fillStyle = `rgba(73, 72, 71, ${FOLDER_HULL_FILL_ALPHA})`;
+    ctx.strokeStyle = `rgba(42, 77, 36, ${FOLDER_HULL_STROKE_ALPHA})`;
+    ctx.fillStyle = `rgba(42, 77, 36, ${FOLDER_HULL_FILL_ALPHA})`;
     ctx.lineWidth = lineW;
 
     const pts = members.map((n) => [n.x!, n.y!] as [number, number]);
@@ -235,7 +239,7 @@ export function drawEdges(
   canvasWidth: number,
   canvasHeight: number,
 ): void {
-  ctx.strokeStyle = 'rgba(73, 72, 71, 0.55)';
+  ctx.strokeStyle = 'rgba(42, 77, 36, 0.55)';
   ctx.lineWidth = 1 / zoom;
   for (const e of edges) {
     const sId =
@@ -274,7 +278,7 @@ export function drawArrowHeads(
   canvasHeight: number,
 ): void {
   if (zoom < 0.6) return;
-  ctx.fillStyle = 'rgba(73, 72, 71, 0.7)';
+  ctx.fillStyle = 'rgba(42, 77, 36, 0.7)';
   const len = ARROW_LENGTH / zoom;
   const half = ARROW_BASE_WIDTH / zoom / 2;
   const inset = ARROW_INSET / zoom;
@@ -342,7 +346,7 @@ export function drawNodes(
     ctx.strokeStyle =
       heatMapEnabled && score > 0
         ? `rgba(255, 115, 81, ${score * 0.8})`
-        : `rgba(73, 72, 71, 0.6)`;
+        : `rgba(42, 77, 36, 0.6)`;
 
     const r = hoveredId === n.id ? NODE_RADIUS_HOVERED : NODE_RADIUS_DEFAULT;
     ctx.beginPath();
