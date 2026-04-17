@@ -532,16 +532,21 @@ pub fn parse_claude_md(
     let meta = std::fs::metadata(path)
         .map_err(|e| format!("stat {} failed: {e}", path.display()))?;
     let byte_size = meta.len();
-    // Name is path-based so the frontend can distinguish the variants.
-    let name = if path
-        .components()
-        .any(|c| c.as_os_str().to_string_lossy() == ".claude")
-    {
-        "project .claude/CLAUDE.md".to_string()
-    } else if editable {
-        "project CLAUDE.md".to_string()
-    } else {
-        "CLAUDE.md".to_string()
+    // Name distinguishes the three CLAUDE.md variants by scope + path.
+    let name = match scope {
+        Scope::Global => "~/.claude/CLAUDE.md".to_string(),
+        Scope::Project => {
+            let inside_dot_claude = path
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|n| n == ".claude")
+                .unwrap_or(false);
+            if inside_dot_claude {
+                ".claude/CLAUDE.md".to_string()
+            } else {
+                "CLAUDE.md".to_string()
+            }
+        }
     };
     let id = ResourceId(format!(
         "{}::claudeMd::{}",
