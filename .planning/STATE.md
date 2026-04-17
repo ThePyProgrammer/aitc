@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 10-02-PLAN.md
-last_updated: "2026-04-17T10:19:52.371Z"
+stopped_at: Completed 10-03-PLAN.md
+last_updated: "2026-04-17T10:34:58.662Z"
 last_activity: 2026-04-17
 progress:
   total_phases: 17
   completed_phases: 9
   total_plans: 53
-  completed_plans: 46
-  percent: 87
+  completed_plans: 47
+  percent: 89
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 ## Current Position
 
 Phase: 10 (Implement a proper chat user interface for agents I deploy) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-04-17
 
@@ -62,6 +62,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 09 P03 | 17m | 3 tasks | 8 files |
 | Phase 10 P01 | 14 min | 3 tasks | 66 files |
 | Phase 10 P02 | 60 min | 3 tasks | 11 files |
+| Phase 10 P03 | 10 min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,10 @@ Recent decisions affecting current work:
 - [Phase 10]: Plan 02: adapter_chat_duplex is a local Plan-02 rule (claude-code only); Plan 04 may widen via AgentAdapter capability API
 - [Phase 10]: Plan 02: parser uses aggregator-mpsc pattern — reader is pure-logic, downstream aggregator (Plan 04) owns DB writes + Tauri emits
 - [Phase 10]: Plan 02: auto_resume validates session_id as hyphenated UUID shape before Command::arg (T-10-11)
+- [Phase 10]: UUIDv4 via the uuid crate (v4 feature) rather than hand-rolled getrandom — already a transitive dep via tauri-utils; direct-import gives one-line Uuid::new_v4().to_string() safer than manual RFC 4122 bit fixup
+- [Phase 10]: call_get_pending_user_messages v1 returns empty messages list — stdin JSONL writer is the primary user→agent transport per D-08; MCP tool is Claude fallback only. Documented so downstream plans don't rely on it for primary delivery
+- [Phase 10]: call_request_user_input is fire-and-forget v1 — inserts system_note transcript row + fires OS notification + returns ack immediately; long-hold is Phase 11+ polish. User replies via ChatInput through normal send_chat_message_to_agent path
+- [Phase 10]: GET /mcp returns 405 (SSE upgrade v1-deferred); MCP 2025-03-26 makes SSE optional, Claude Code 2.x polls via POST when it sees non-2xx on GET. Full SSE is Phase 11+ candidate
 
 ### Roadmap Evolution
 
@@ -119,6 +124,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-17T10:19:44.416Z
-Stopped at: Completed 10-02-PLAN.md
+Last session: 2026-04-17T10:34:58.652Z
+Stopped at: Completed 10-03-PLAN.md
 Resume file: None
