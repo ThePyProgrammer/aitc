@@ -292,16 +292,39 @@ pub fn run() {
                 }
             });
 
-            // Lock webview zoom to 1.0 — WebKitGTK (Linux) handles
-            // Ctrl+scroll zoom at the native layer before JavaScript sees
-            // the event, so we monitor the `zoom-level` property and
-            // immediately revert any change. This is a no-op on other
-            // platforms (cfg-gated).
+            // Prevent ALL webview zoom on Linux.
+            //
+            // WebKitGTK processes Ctrl+scroll and trackpad pinch-to-zoom
+            // at the native GTK layer before JavaScript fires, so JS
+            // preventDefault() cannot stop it. We attack at two levels:
+            //
+            //   (a) Intercept the GTK `scroll-event` signal on the
+            //       WebView widget — when Ctrl is held, stop propagation
+            //       so WebKitGTK's zoom handler never runs.
+            //
+            //   (b) As a safety net, monitor the `zoom-level` property
+            //       and snap it back to 1.0 if anything else manages to
+            //       change it (e.g. touchscreen gestures, accessibility).
             #[cfg(target_os = "linux")]
             {
                 use webkit2gtk::WebViewExt;
+                use webkit2gtk::glib;
+                use gtk::prelude::WidgetExt;
                 let _ = window.with_webview(|webview| {
                     let wv: webkit2gtk::WebView = webview.inner().clone();
+
+                    // (a) Block Ctrl+scroll at the GTK widget level.
+                    wv.connect_scroll_event(|_wv, event| {
+                        if event
+                            .state()
+                            .intersects(gdk::ModifierType::CONTROL_MASK)
+                        {
+                            return glib::Propagation::Stop;
+                        }
+                        glib::Propagation::Proceed
+                    });
+
+                    // (b) Revert zoom-level changes from any source.
                     wv.connect_zoom_level_notify(move |wv| {
                         if (wv.zoom_level() - 1.0).abs() > 0.001 {
                             wv.set_zoom_level(1.0);
