@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 10-03-PLAN.md
-last_updated: "2026-04-17T10:34:58.662Z"
+stopped_at: Completed 10-04-PLAN.md
+last_updated: "2026-04-17T11:00:20.805Z"
 last_activity: 2026-04-17
 progress:
   total_phases: 17
   completed_phases: 9
   total_plans: 53
-  completed_plans: 47
-  percent: 89
+  completed_plans: 48
+  percent: 91
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 ## Current Position
 
 Phase: 10 (Implement a proper chat user interface for agents I deploy) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-04-17
 
@@ -63,6 +63,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 10 P01 | 14 min | 3 tasks | 66 files |
 | Phase 10 P02 | 60 min | 3 tasks | 11 files |
 | Phase 10 P03 | 10 min | 2 tasks | 9 files |
+| Phase 10 P04 | 20m | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,9 @@ Recent decisions affecting current work:
 - [Phase 10]: call_get_pending_user_messages v1 returns empty messages list — stdin JSONL writer is the primary user→agent transport per D-08; MCP tool is Claude fallback only. Documented so downstream plans don't rely on it for primary delivery
 - [Phase 10]: call_request_user_input is fire-and-forget v1 — inserts system_note transcript row + fires OS notification + returns ack immediately; long-hold is Phase 11+ polish. User replies via ChatInput through normal send_chat_message_to_agent path
 - [Phase 10]: GET /mcp returns 405 (SSE upgrade v1-deferred); MCP 2025-03-26 makes SSE optional, Claude Code 2.x polls via POST when it sees non-2xx on GET. Full SSE is Phase 11+ candidate
+- [Phase 10]: Plan 04: LaunchOptions.agent_id minted UP FRONT via uuid::Uuid::new_v4().simple()[:4].to_uppercase() so duplex adapters can write per-session MCP config before spawn. Honors explicit agent_id for D-04 relaunch continuity.
+- [Phase 10]: Plan 04: AdapterCapabilities flags-struct + trait-method-with-default (chat_duplex: false) widens Plan 02's inline adapter_type match into a typed per-adapter API. ClaudeCodeAdapter overrides to true; Codex/OpenCode/Generic inherit default.
+- [Phase 10]: Plan 04: D-21 deletion scope — Phase 4 send_chat_message/list_chat_messages/update_message_delivery_status + ChatMessage type removed from backend. chat_messages DB table kept empty (migration 006) in case rollback needed; Plan 06 catches lingering frontend callers via TS errors.
 
 ### Roadmap Evolution
 
@@ -124,6 +128,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-17T10:34:58.652Z
-Stopped at: Completed 10-03-PLAN.md
+Last session: 2026-04-17T11:00:20.800Z
+Stopped at: Completed 10-04-PLAN.md
 Resume file: None
