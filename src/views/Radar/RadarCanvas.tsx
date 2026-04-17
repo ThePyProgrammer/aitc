@@ -498,6 +498,12 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Reusable position map — cleared and re-populated each frame when the
+    // simulation is active, avoiding a new Map allocation per frame. With
+    // 5k nodes at 60fps that eliminates ~300k/sec short-lived entries from
+    // hitting the GC.
+    const simPositionMap = new Map<string, { x: number; y: number }>();
+
     function render() {
       if (!ctx) return;
       if (!dirtyRef.current) {
@@ -536,13 +542,13 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       let livePositions = s.positions;
       if (simulating && simNodesRef.current.length > 0) {
         liveNodes = simNodesRef.current as typeof s.graphNodes;
-        const m = new Map<string, { x: number; y: number }>();
+        simPositionMap.clear();
         for (const n of simNodesRef.current) {
           if (n.x !== undefined && n.y !== undefined) {
-            m.set(n.id, { x: n.x, y: n.y });
+            simPositionMap.set(n.id, { x: n.x, y: n.y });
           }
         }
-        livePositions = m;
+        livePositions = simPositionMap;
       }
 
       // Steps 2-3: Folder hulls (fill/stroke + label).
