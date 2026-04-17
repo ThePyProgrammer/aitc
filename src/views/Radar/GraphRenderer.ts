@@ -384,50 +384,60 @@ export function drawNodes(
   const hasGlow = Boolean(theme.nodeGlow);
   const hasClusterAccents =
     theme.clusterAccents !== undefined && theme.clusterAccents.length > 0;
+
+  // Two-pass drawing to avoid shadow state churn. On glow themes the old
+  // code toggled ctx.shadowColor/shadowBlur per-node (5k state writes);
+  // now we set shadow state once per pass:
+  //
+  //   Pass 1 — shadow OFF: heat-tinted nodes (error stroke, no glow).
+  //   Pass 2 — shadow ON:  everything else (glow themes only; for non-glow
+  //            themes there's only one pass and shadow is never touched).
+
+  // ── Pass 1: heat-tinted nodes (shadow always off) ──
+  if (heatMapEnabled) {
+    if (hasGlow) {
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+    }
+    for (const n of nodes) {
+      if (n.x === undefined || n.y === undefined) continue;
+      if (!isInViewport({ x: n.x, y: n.y }, viewport, canvasWidth, canvasHeight)) continue;
+      const score = contentionScores.get(n.id) ?? 0;
+      if (score <= 0) continue; // non-heat → pass 2
+      ctx.fillStyle = heatColor(score, theme);
+      ctx.strokeStyle = `rgba(255, 115, 81, ${score * 0.8})`;
+      const r = hoveredId === n.id ? NODE_RADIUS_HOVERED : NODE_RADIUS_DEFAULT;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  // ── Pass 2: non-heat nodes (shadow set once at the top) ──
+  const glowPx = hasGlow ? Math.min(6, zoom * 6) : 0;
+  if (hasGlow) {
+    // For non-cluster themes, one shadowColor covers the whole pass.
+    // For cluster themes, shadowColor changes per-accent but shadowBlur
+    // stays constant — far cheaper than toggling on/off per node.
+    ctx.shadowBlur = glowPx;
+    if (!hasClusterAccents) ctx.shadowColor = theme.nodeGlow!;
+  }
   for (const n of nodes) {
     if (n.x === undefined || n.y === undefined) continue;
     if (!isInViewport({ x: n.x, y: n.y }, viewport, canvasWidth, canvasHeight)) continue;
-
     const score = contentionScores.get(n.id) ?? 0;
-    const isHeat = heatMapEnabled && score > 0;
+    if (heatMapEnabled && score > 0) continue; // drawn in pass 1
+
     const isHover = hoveredId === n.id;
+    ctx.fillStyle = isHover ? theme.nodeFillHover : theme.nodeFill;
 
-    // Fill: heat-ramp wins, then hover variant, then base fill.
-    const fillBase = isHeat
-      ? heatColor(score, theme)
-      : isHover
-        ? theme.nodeFillHover
-        : theme.nodeFill;
-    ctx.fillStyle = fillBase;
-
-    // Stroke + glow: heat keeps the original error tint. Otherwise either a
-    // per-cluster accent (bright themes) or the theme's baseline node stroke.
-    //
-    // shadowBlur is in *screen* pixels — it is NOT scaled by the canvas
-    // transform. A naive `8 / zoom` blows up to ~160px at zoom 0.05, drowning
-    // the whole canvas in haze. We scale with zoom and cap at 6px so glow
-    // stays subtle when zoomed out and never dominates at close zoom.
-    const glowPx = Math.min(6, zoom * 6);
-    if (isHeat) {
-      ctx.strokeStyle = `rgba(255, 115, 81, ${score * 0.8})`;
-      // Suppress glow while the node is heat-tinted so the error color reads.
-      if (hasGlow) {
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
-      }
-    } else if (hasClusterAccents) {
+    if (hasClusterAccents) {
       const accent = clusterAccentFor(n.dirKey, theme.clusterAccents!);
       ctx.strokeStyle = accent;
-      if (hasGlow) {
-        ctx.shadowColor = accent;
-        ctx.shadowBlur = glowPx;
-      }
+      if (hasGlow) ctx.shadowColor = accent;
     } else {
       ctx.strokeStyle = theme.nodeStroke;
-      if (hasGlow) {
-        ctx.shadowColor = theme.nodeGlow!;
-        ctx.shadowBlur = glowPx;
-      }
     }
 
     const r = isHover ? NODE_RADIUS_HOVERED : NODE_RADIUS_DEFAULT;
@@ -436,7 +446,7 @@ export function drawNodes(
     ctx.fill();
     ctx.stroke();
   }
-  // Reset shadow state so subsequent draw steps aren't accidentally glowed.
+
   if (hasGlow) {
     ctx.shadowColor = 'transparent';
     ctx.shadowBlur = 0;
