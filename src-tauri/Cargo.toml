@@ -72,9 +72,9 @@ tauri-plugin-shell = "2"
 # already transitive deps of tauri (via wry / tray-icon) — pinning
 # here just gives us direct import access without pulling new C libs.
 [target.'cfg(target_os = "linux")'.dependencies]
-webkit2gtk = "=2.0.1"
-gtk = "=0.18.2"
-gdk = "=0.18.2"
+webkit2gtk = "2.0"
+gtk = "0.18"
+gdk = "0.18"
 
 [dev-dependencies]
 tempfile = "3"
