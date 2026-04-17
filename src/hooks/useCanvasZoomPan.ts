@@ -14,8 +14,8 @@ export interface CanvasViewport {
 
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 20;
-const ZOOM_IN_FACTOR = 1.1;
-const ZOOM_OUT_FACTOR = 0.9;
+const ZOOM_IN_FACTOR = 1.04;
+const ZOOM_OUT_FACTOR = 1 / 1.04;
 
 export function useCanvasZoomPan(initialViewport?: Partial<CanvasViewport>) {
   const [viewport, setViewport] = useState<CanvasViewport>({
