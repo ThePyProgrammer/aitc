@@ -14,9 +14,12 @@ import {
   type ScopeKey,
 } from './EmptyState';
 import { uiCategoryLabel, type UiCategory } from './CategoryRail';
+import { CreateClaudeMdPrompt } from './CreateClaudeMdPrompt';
 
 export interface ResourceListProps {
   rows: Resource[];
+  allResources: Record<string, Resource>;
+  cwd: string | null;
   filter: string;
   onFilterChange: (s: string) => void;
   selectedId: string | null;
@@ -29,6 +32,8 @@ export interface ResourceListProps {
 
 export function ResourceList({
   rows,
+  allResources,
+  cwd,
   filter,
   onFilterChange,
   selectedId,
@@ -149,6 +154,12 @@ export function ResourceList({
             })}
           </div>
         </div>
+      )}
+      {activeCategory === 'instructions' && (
+        <CreateClaudeMdPrompt
+          cwd={cwd}
+          resources={Object.values(allResources)}
+        />
       )}
     </>
   );

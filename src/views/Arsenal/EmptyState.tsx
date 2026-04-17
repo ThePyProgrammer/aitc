@@ -58,6 +58,11 @@ export function emptyStateFor({
         headline: 'NO_PLUGINS_INSTALLED',
         body: `installed_plugins.json is empty or absent at ${scopePath}.`,
       };
+    case 'instructions':
+      return {
+        headline: 'NO_INSTRUCTION_FILES',
+        body: `No CLAUDE.md files found. Create one to give Claude project-specific instructions.`,
+      };
     case 'configuration':
       return {
         headline: 'NO_CONFIGURATION',

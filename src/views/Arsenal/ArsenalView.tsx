@@ -161,6 +161,8 @@ export function ArsenalView() {
         list={
           <ResourceList
             rows={rows}
+            allResources={resources}
+            cwd={activeRepo}
             filter={filter}
             onFilterChange={setFilter}
             selectedId={selectedId}
