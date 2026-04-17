@@ -19,7 +19,7 @@ export function AgentManifest() {
         <h3 className="mt-4 font-headline text-sm font-bold uppercase tracking-widest text-on-surface-variant">
           TOWER_OFFLINE
         </h3>
-        <p className="mt-2 font-mono text-xs text-on-surface-variant/60 max-w-md text-center">
+        <p className="mt-2 font-mono text-xs text-on-surface-variant/60 max-w-xs text-center text-balance">
           No agents detected. Deploy or attach agents to populate the manifest.
         </p>
       </div>
