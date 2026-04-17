@@ -657,29 +657,6 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     };
   }, [handlers]);
 
-  // Block the native webview zoom (Ctrl+scroll, Ctrl+±, pinch) while the
-  // radar is mounted. Tauri's WebView2/WebKitGTK handle these at the
-  // native layer before JS gets them, so we need document-level listeners
-  // with { passive: false } and early preventDefault() to intercept.
-  useEffect(() => {
-    const blockWheelZoom = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) e.preventDefault();
-    };
-    const blockKeyZoom = (e: KeyboardEvent) => {
-      if (
-        (e.ctrlKey || e.metaKey) &&
-        (e.key === '+' || e.key === '-' || e.key === '=' || e.key === '0')
-      ) {
-        e.preventDefault();
-      }
-    };
-    document.addEventListener('wheel', blockWheelZoom, { passive: false });
-    document.addEventListener('keydown', blockKeyZoom);
-    return () => {
-      document.removeEventListener('wheel', blockWheelZoom);
-      document.removeEventListener('keydown', blockKeyZoom);
-    };
-  }, []);
 
   // Reset dismissals when node count falls back into NORMAL.
   useEffect(() => {
