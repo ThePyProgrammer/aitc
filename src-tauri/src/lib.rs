@@ -310,8 +310,9 @@ pub fn run() {
                 use webkit2gtk::WebViewExt;
                 use webkit2gtk::glib;
                 use gtk::prelude::WidgetExt;
-                let _ = window.with_webview(|webview| {
+                match window.with_webview(|webview| {
                     let wv: webkit2gtk::WebView = webview.inner().clone();
+                    tracing::info!("zoom-lock: with_webview succeeded, wiring handlers");
 
                     // (a) Block Ctrl+scroll at the GTK widget level.
                     wv.connect_scroll_event(|_wv, event| {
@@ -319,6 +320,7 @@ pub fn run() {
                             .state()
                             .intersects(gdk::ModifierType::CONTROL_MASK)
                         {
+                            tracing::info!("zoom-lock: blocked Ctrl+scroll");
                             return glib::Propagation::Stop;
                         }
                         glib::Propagation::Proceed
@@ -326,11 +328,16 @@ pub fn run() {
 
                     // (b) Revert zoom-level changes from any source.
                     wv.connect_zoom_level_notify(move |wv| {
-                        if (wv.zoom_level() - 1.0).abs() > 0.001 {
+                        let level = wv.zoom_level();
+                        if (level - 1.0).abs() > 0.001 {
+                            tracing::info!(level, "zoom-lock: reverting zoom-level to 1.0");
                             wv.set_zoom_level(1.0);
                         }
                     });
-                });
+                }) {
+                    Ok(_) => tracing::info!("zoom-lock: handlers installed"),
+                    Err(e) => tracing::warn!(error = ?e, "zoom-lock: with_webview failed"),
+                };
             }
 
             Ok(())

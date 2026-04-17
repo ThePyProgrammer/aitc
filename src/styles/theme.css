@@ -2,6 +2,12 @@
 @import "./fonts.css";
 @import "./animations.css";
 
+/* Disable pinch-to-zoom and other touch gestures that could trigger
+   webview zoom. The canvas has its own zoom handler. */
+html {
+  touch-action: pan-x pan-y;
+}
+
 @theme {
   /* Surface hierarchy (60% - dominant) */
   --color-surface: #0e0e0e;
