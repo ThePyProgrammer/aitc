@@ -381,40 +381,6 @@ async approveWithEdits(id: number, editedContent: string, alwaysAllowForSession:
 }
 },
 /**
- * Send a chat message to an agent.
- */
-async sendChatMessage(agentId: string, content: string) : Promise<Result<ChatMessage, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("send_chat_message", { agentId, content }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * List all chat messages for a given agent, oldest first.
- */
-async listChatMessages(agentId: string) : Promise<Result<ChatMessage[], string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("list_chat_messages", { agentId }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Update the delivery status of a chat message.
- * Validates that status is one of 'delivered', 'queued', 'unsupported'.
- */
-async updateMessageDeliveryStatus(messageId: number, status: string) : Promise<Result<null, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("update_message_delivery_status", { messageId, status }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * List all configured protected path glob patterns.
  */
 async listProtectedPaths() : Promise<Result<ProtectedPath[], string>> {
@@ -713,10 +679,6 @@ export type Category = "skill" | "agent" | "plugin" | "hook" | "command" | "sett
  * `list_chat_channels` — Wave 0 just declares the shape.
  */
 export type ChatChannel = { agentId: string; adapterType: string; status: string; archived: boolean; chatDuplex: boolean; lastEvent: AgentEvent | null; unreadCount: number; currentSessionId: string | null }
-/**
- * A chat message between user and agent.
- */
-export type ChatMessage = { id: number; agentId: string; direction: string; content: string; deliveryStatus: string; approvalRequestId: number | null; createdAt: string }
 /**
  * An alert generated when two different agents write the same file within the
  * configured conflict window.

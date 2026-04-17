@@ -2,14 +2,19 @@
 //!
 //! Commands:
 //!   - Approval workflow: list, create, approve, deny, ask_more_info, approve_with_edits
-//!   - Chat: send_chat_message, list_chat_messages, update_message_delivery_status
 //!   - Protected paths: list, add, remove
+//!
+//! Phase 10 D-21: the Phase 4 `send_chat_message` / `list_chat_messages` /
+//! `update_message_delivery_status` command surface was REMOVED — replaced
+//! by `chat_runtime::commands` (agent_events-based, D-14). The
+//! `chat_messages` DB table is left in place (emptied by migration 006) so
+//! a rollback migration would be possible in an emergency.
 
 // Phase 8: WaiterRegistry is wired into approve/deny/approve_with_edits
 // below. approve_request signals HookDecision::Allow; deny_request signals
 // Deny(reason); approve_with_edits signals AllowWithEdits(updated_input).
 use crate::agents::hook_waiters::{HookDecision, WaiterRegistry};
-use crate::comms::types::{ApprovalRequest, ChatMessage, ProtectedPath};
+use crate::comms::types::{ApprovalRequest, ProtectedPath};
 use sqlx::{Pool, Row, Sqlite};
 use std::sync::Arc;
 use tauri::Emitter;
@@ -76,18 +81,6 @@ fn map_approval_row(row: &sqlx::sqlite::SqliteRow) -> ApprovalRequest {
         tool_name: row.try_get("tool_name").ok().flatten(),
         tool_input_json: row.try_get("tool_input_json").ok().flatten(),
         session_id: row.try_get("hook_session_id").ok().flatten(),
-    }
-}
-
-fn map_chat_row(row: &sqlx::sqlite::SqliteRow) -> ChatMessage {
-    ChatMessage {
-        id: row.get("id"),
-        agent_id: row.get("agent_id"),
-        direction: row.get("direction"),
-        content: row.get("content"),
-        delivery_status: row.get("delivery_status"),
-        approval_request_id: row.get("approval_request_id"),
-        created_at: row.get("created_at"),
     }
 }
 
@@ -443,77 +436,17 @@ pub async fn approve_with_edits(
 }
 
 // ---------------------------------------------------------------------------
-// Chat commands
+// Chat commands — REMOVED IN PHASE 10 (D-21).
+//
+// Replaced by src-tauri/src/chat_runtime/commands.rs which uses the
+// agent_events table (D-14) — an AgentEvent-based surface that unifies
+// assistant_text, tool_use, tool_result, system_note, session_boundary,
+// and user_text into a single transcript stream per agent.
+//
+// The `chat_messages` table itself is left in place but empty (migration
+// 006 deleted all rows); a full DROP is deferred to a later cleanup
+// migration in case rollback is ever needed.
 // ---------------------------------------------------------------------------
-
-/// Send a chat message to an agent.
-#[tauri::command]
-#[specta::specta]
-pub async fn send_chat_message(
-    agent_id: String,
-    content: String,
-    pool: tauri::State<'_, Pool<Sqlite>>,
-    app_handle: tauri::AppHandle,
-) -> Result<ChatMessage, String> {
-    let row = sqlx::query(
-        "INSERT INTO chat_messages (agent_id, direction, content, delivery_status) \
-         VALUES (?, 'outbound', ?, 'queued') \
-         RETURNING id, agent_id, direction, content, delivery_status, approval_request_id, created_at",
-    )
-    .bind(&agent_id)
-    .bind(&content)
-    .fetch_one(pool.inner())
-    .await
-    .map_err(|e| format!("send_chat_message failed: {e}"))?;
-
-    let msg = map_chat_row(&row);
-    let _ = app_handle.emit("chat-message-sent", &msg);
-    Ok(msg)
-}
-
-/// List all chat messages for a given agent, oldest first.
-#[tauri::command]
-#[specta::specta]
-pub async fn list_chat_messages(
-    agent_id: String,
-    pool: tauri::State<'_, Pool<Sqlite>>,
-) -> Result<Vec<ChatMessage>, String> {
-    let rows = sqlx::query(
-        "SELECT * FROM chat_messages WHERE agent_id = ? ORDER BY created_at ASC",
-    )
-    .bind(&agent_id)
-    .fetch_all(pool.inner())
-    .await
-    .map_err(|e| format!("list_chat_messages failed: {e}"))?;
-
-    Ok(rows.iter().map(map_chat_row).collect())
-}
-
-/// Update the delivery status of a chat message.
-/// Validates that status is one of 'delivered', 'queued', 'unsupported'.
-#[tauri::command]
-#[specta::specta]
-pub async fn update_message_delivery_status(
-    message_id: i64,
-    status: String,
-    pool: tauri::State<'_, Pool<Sqlite>>,
-) -> Result<(), String> {
-    // Validate status value
-    if !matches!(status.as_str(), "delivered" | "queued" | "unsupported") {
-        return Err(format!(
-            "Invalid delivery status '{status}'. Must be 'delivered', 'queued', or 'unsupported'"
-        ));
-    }
-
-    sqlx::query("UPDATE chat_messages SET delivery_status = ? WHERE id = ?")
-        .bind(&status)
-        .bind(message_id)
-        .execute(pool.inner())
-        .await
-        .map_err(|e| format!("update_message_delivery_status failed: {e}"))?;
-
-    Ok(())
-}
 
 // ---------------------------------------------------------------------------
 // Protected paths commands

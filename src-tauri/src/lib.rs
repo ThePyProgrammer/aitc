@@ -69,9 +69,10 @@ pub fn run() {
             comms::commands::deny_request,
             comms::commands::ask_more_info,
             comms::commands::approve_with_edits,
-            comms::commands::send_chat_message,
-            comms::commands::list_chat_messages,
-            comms::commands::update_message_delivery_status,
+            // Phase 10 D-21: send_chat_message / list_chat_messages /
+            // update_message_delivery_status REMOVED. See
+            // chat_runtime::commands::send_chat_message_to_agent +
+            // list_agent_events + clear_agent_thread for the replacement.
             comms::commands::list_protected_paths,
             comms::commands::add_protected_path,
             comms::commands::remove_protected_path,
@@ -108,7 +109,8 @@ pub fn run() {
         .typ::<agents::notifications::NotificationPrefs>()
         .typ::<conflict::ConflictAlert>()
         .typ::<comms::types::ApprovalRequest>()
-        .typ::<comms::types::ChatMessage>()
+        // Phase 10 D-21: the Phase 4 chat type was removed; the
+        // replacement AgentEvent type is registered below.
         .typ::<comms::types::ProtectedPath>()
         .typ::<comms::types::TreeIndexEntry>()
         .typ::<system_load::SystemLoadInfo>()

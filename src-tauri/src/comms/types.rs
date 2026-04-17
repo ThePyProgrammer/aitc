@@ -24,18 +24,11 @@ pub struct ApprovalRequest {
     pub session_id: Option<String>,
 }
 
-/// A chat message between user and agent.
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatMessage {
-    pub id: i64,
-    pub agent_id: String,
-    pub direction: String,
-    pub content: String,
-    pub delivery_status: String,
-    pub approval_request_id: Option<i64>,
-    pub created_at: String,
-}
+// `ChatMessage` was REMOVED in Phase 10 (D-21). The Phase 4 chat surface
+// has been replaced by `chat_runtime::types::AgentEvent` — a unified
+// transcript row that handles assistant_text, tool_use, tool_result,
+// system_note, session_boundary, and user_text. Do not re-add without
+// reverting Phase 10's architecture.
 
 /// A protected path glob pattern that triggers synthetic approval requests.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
