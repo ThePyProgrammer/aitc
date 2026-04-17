@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 10-01-PLAN.md
-last_updated: "2026-04-17T09:54:50.848Z"
+stopped_at: Completed 10-02-PLAN.md
+last_updated: "2026-04-17T10:19:52.371Z"
 last_activity: 2026-04-17
 progress:
   total_phases: 17
   completed_phases: 9
   total_plans: 53
-  completed_plans: 45
-  percent: 85
+  completed_plans: 46
+  percent: 87
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 ## Current Position
 
 Phase: 10 (Implement a proper chat user interface for agents I deploy) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-04-17
 
@@ -61,6 +61,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 9 P04 | 383 | 3 tasks | 12 files |
 | Phase 09 P03 | 17m | 3 tasks | 8 files |
 | Phase 10 P01 | 14 min | 3 tasks | 66 files |
+| Phase 10 P02 | 60 min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,9 @@ Recent decisions affecting current work:
 - [Phase 10]: Enabled specta's serde_json cargo feature so AgentEvent.payload_json can be serde_json::Value (not raw String).
 - [Phase 10]: Forward-declared chat_runtime::types::AgentEvent in Task 1 so db::events.rs compiles at commit boundary (Rule 3 blocker auto-fix).
 - [Phase 10]: Module-level EMPTY_EVENTS sentinel in ChatTranscript Zustand selector avoids React 19 useSyncExternalStore infinite-loop guard.
+- [Phase 10]: Plan 02: adapter_chat_duplex is a local Plan-02 rule (claude-code only); Plan 04 may widen via AgentAdapter capability API
+- [Phase 10]: Plan 02: parser uses aggregator-mpsc pattern — reader is pure-logic, downstream aggregator (Plan 04) owns DB writes + Tauri emits
+- [Phase 10]: Plan 02: auto_resume validates session_id as hyphenated UUID shape before Command::arg (T-10-11)
 
 ### Roadmap Evolution
 
@@ -115,6 +119,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-17T09:54:50.845Z
-Stopped at: Completed 10-01-PLAN.md
+Last session: 2026-04-17T10:19:44.416Z
+Stopped at: Completed 10-02-PLAN.md
 Resume file: None
