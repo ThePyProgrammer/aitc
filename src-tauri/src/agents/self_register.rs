@@ -24,7 +24,7 @@ use axum::{
     extract::{DefaultBodyLimit, Extension},
     http::StatusCode,
     response::IntoResponse,
-    routing::post,
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -510,24 +510,42 @@ async fn register_agent(
 /// isolated from the bind step lets tests compose Routers with an arbitrary
 /// TcpListener. Generic over Tauri runtime `R` so tests can use
 /// `tauri::test::MockRuntime` while production uses `tauri::Wry`.
+///
+/// Phase 10 Plan 03: adds POST/GET/DELETE `/mcp` routes backed by
+/// `crate::mcp::streamable_http` with two new Extension layers —
+/// `Arc<LiveSessionRegistry>` (chat runtime session registry) and
+/// `Arc<McpState>` (per-MCP-session state). The body cap applies to all
+/// routes on this router.
+#[allow(clippy::too_many_arguments)]
 pub fn build_router<R: tauri::Runtime>(
     registry: Arc<AgentRegistry>,
     pool: sqlx::SqlitePool,
     waiters: Arc<WaiterRegistry>,
     app: tauri::AppHandle<R>,
     rate_limiter: Arc<RateLimiter>,
+    chat_sessions: Arc<crate::chat_runtime::session_registry::LiveSessionRegistry>,
+    mcp_state: Arc<crate::mcp::McpState>,
 ) -> Router {
     Router::new()
         .route("/register", post(register_agent))
         .route("/hook", post(hook_handler::<R>))
-        // T-08-04 body cap — layered before Extensions so the limit applies
-        // to both routes.
+        .route("/mcp", post(crate::mcp::streamable_http::mcp_post_handler::<R>))
+        .route("/mcp", get(crate::mcp::streamable_http::mcp_get_handler::<R>))
+        .route(
+            "/mcp",
+            delete(crate::mcp::streamable_http::mcp_delete_handler::<R>),
+        )
+        // T-08-04 / T-10-15 body cap — layered before Extensions so the
+        // limit applies to /register, /hook, AND /mcp. MCP bodies should
+        // never approach this cap.
         .layer(DefaultBodyLimit::max(HOOK_BODY_MAX_BYTES))
         .layer(Extension(registry))
         .layer(Extension(rate_limiter))
         .layer(Extension(pool))
         .layer(Extension(waiters))
         .layer(Extension(app))
+        .layer(Extension(chat_sessions))
+        .layer(Extension(mcp_state))
 }
 
 /// Start the self-registration HTTP server on localhost.
@@ -543,10 +561,20 @@ pub async fn start_registration_server<R: tauri::Runtime>(
     waiters: Arc<WaiterRegistry>,
     app_handle: tauri::AppHandle<R>,
     preferred_port: u16,
+    chat_sessions: Arc<crate::chat_runtime::session_registry::LiveSessionRegistry>,
+    mcp_state: Arc<crate::mcp::McpState>,
 ) -> Result<u16, String> {
     let rate_limiter = Arc::new(RateLimiter::new());
 
-    let app = build_router(registry, pool, waiters, app_handle, rate_limiter);
+    let app = build_router(
+        registry,
+        pool,
+        waiters,
+        app_handle,
+        rate_limiter,
+        chat_sessions,
+        mcp_state,
+    );
 
     // Try preferred port first, fallback to OS-assigned
     let listener = match TcpListener::bind(format!("127.0.0.1:{preferred_port}")).await {
@@ -734,6 +762,25 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        // Phase 10 Plan 03: /mcp `tools/call request_user_input` writes a
+        // `system_note` row into `agent_events`. Seed the 006 schema so the
+        // insert succeeds in tests that exercise the full /mcp end-to-end.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS agent_events ( \
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                agent_id TEXT NOT NULL, \
+                session_id TEXT, \
+                event_type TEXT NOT NULL, \
+                payload_json TEXT NOT NULL, \
+                approval_request_id INTEGER REFERENCES approval_requests(id), \
+                sequence_number INTEGER, \
+                delivery_status TEXT, \
+                created_at TEXT NOT NULL DEFAULT (datetime('now')) \
+             )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         pool
     }
 
@@ -754,12 +801,19 @@ mod tests {
         let app = tauri::test::mock_app();
         let app_handle = app.handle().clone();
         let rate_limiter = Arc::new(RateLimiter::new());
+        // Phase 10 Plan 03: /mcp extension layers — each test spawns its own
+        // fresh registry / mcp_state so sessions never leak across tests.
+        let chat_sessions =
+            crate::chat_runtime::session_registry::LiveSessionRegistry::new_arc();
+        let mcp_state = crate::mcp::McpState::new_arc();
         let router = build_router(
             registry.clone(),
             pool.clone(),
             waiters.clone(),
             app_handle,
             rate_limiter,
+            chat_sessions,
+            mcp_state,
         );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -1147,5 +1201,129 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), 400);
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 10 Plan 03 — /mcp integration tests against the full
+    // build_router (same axum stack used in production). Verifies the new
+    // routes compose cleanly with the existing Extension layers and the
+    // body cap.
+    // -----------------------------------------------------------------
+
+    #[tokio::test]
+    async fn mcp_initialize_returns_session_header_on_real_router() {
+        let (base, _reg, _waiters, _pool) = spawn_hook_server().await;
+        let resp = reqwest::Client::new()
+            .post(format!("{base}/mcp"))
+            .header("X-AITC-Session", "claude-cc-1")
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "claude", "version": "test"}
+                }
+            }))
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let sid = resp
+            .headers()
+            .get("mcp-session-id")
+            .expect("Mcp-Session-Id header on initialize")
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(sid.len(), 36, "UUIDv4 hyphenated shape");
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["result"]["protocolVersion"], "2025-03-26");
+        assert_eq!(body["result"]["serverInfo"]["name"], "aitc-chat");
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_list_without_session_returns_404() {
+        let (base, _reg, _waiters, _pool) = spawn_hook_server().await;
+        let resp = reqwest::Client::new()
+            .post(format!("{base}/mcp"))
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list"
+            }))
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 404);
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_call_request_user_input_after_initialize_succeeds() {
+        let (base, _reg, _waiters, pool) = spawn_hook_server().await;
+        let client = reqwest::Client::new();
+
+        // 1. initialize → grab session id.
+        let init = client
+            .post(format!("{base}/mcp"))
+            .header("X-AITC-Session", "claude-cc-1")
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": "2025-03-26", "capabilities": {}}
+            }))
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .unwrap();
+        let sid = init
+            .headers()
+            .get("mcp-session-id")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        // 2. tools/call request_user_input.
+        let call = client
+            .post(format!("{base}/mcp"))
+            .header("Mcp-Session-Id", &sid)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "request_user_input",
+                    "arguments": {"prompt": "Confirm deployment?"}
+                }
+            }))
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(call.status(), 200);
+        let body: serde_json::Value = call.json().await.unwrap();
+        assert!(
+            body["result"]["content"].is_array(),
+            "expected result.content array; body was {body}"
+        );
+        assert_eq!(body["result"]["isError"], false);
+
+        // 3. Verify the transcript row exists.
+        let events = crate::db::events::list_events_for_agent(
+            &pool,
+            "claude-cc-1",
+            None,
+            10,
+        )
+        .await
+        .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "system_note");
+        assert_eq!(events[0].payload_json["prompt"], "Confirm deployment?");
     }
 }

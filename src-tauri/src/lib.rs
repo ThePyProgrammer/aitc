@@ -233,9 +233,19 @@ pub fn run() {
                 });
             }
 
-            // Start the self-registration + /hook server (HIST-01: needs
-            // pool for ensure_open_session; Phase 8: needs waiters + app
-            // handle for hook_handler).
+            // Start the self-registration + /hook + /mcp server (HIST-01:
+            // needs pool for ensure_open_session; Phase 8: needs waiters +
+            // app handle for hook_handler; Phase 10: needs
+            // LiveSessionRegistry + McpState for the MCP JSON-RPC handlers).
+            //
+            // Retrieve the two Arc<_> values that were registered on the
+            // Tauri builder via `.manage(...)` so the axum Extension layer
+            // shares the SAME instances the chat_runtime commands see via
+            // `State<Arc<_>>`.
+            let chat_sessions_for_server: Arc<chat_runtime::LiveSessionRegistry> =
+                app.state::<Arc<chat_runtime::LiveSessionRegistry>>().inner().clone();
+            let mcp_state_for_server: Arc<mcp::McpState> =
+                app.state::<Arc<mcp::McpState>>().inner().clone();
             let registry_clone = agent_registry.clone();
             let pool_for_server = pool.clone();
             let waiters_for_server = waiters.clone();
@@ -248,6 +258,8 @@ pub fn run() {
                     waiters_for_server,
                     app_for_server,
                     9417,
+                    chat_sessions_for_server,
+                    mcp_state_for_server,
                 )
                 .await
                 {
