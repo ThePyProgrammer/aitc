@@ -25,6 +25,7 @@
 // in drawNodes (Plan 04) — the separate HeatMapOverlay module was removed.
 
 import { useEffect, useMemo, useRef, useCallback, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Flame, AlertTriangle, Info } from 'lucide-react';
 import {
   useRadarStore,
@@ -146,20 +147,36 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const [degradedDismissed, setDegradedDismissed] = useState(false);
   const [overloadDismissed, setOverloadDismissed] = useState(false);
 
-  // Store-driven state (Plan 03 graph store + Phase 5 heat map).
-  const graphNodes = useRadarStore((s) => s.graphNodes);
-  const graphEdges = useRadarStore((s) => s.graphEdges);
-  const settledAt = useRadarStore((s) => s.settledAt);
-  const pinnedNodeIds = useRadarStore((s) => s.pinnedNodeIds);
-  const selectedAgentId = useRadarStore((s) => s.selectedAgentId);
-  const heatMapEnabled = useRadarStore((s) => s.heatMapEnabled);
-  const contentionScores = useRadarStore((s) => s.contentionScores);
-  const themeId = useRadarStore((s) => s.themeId);
+  // Store-driven state — single selector with shallow equality so only
+  // fields that actually changed trigger a re-render (was 9 separate
+  // selectors, each re-running on any store mutation).
+  const {
+    graphNodes,
+    graphEdges,
+    settledAt,
+    pinnedNodeIds,
+    selectedAgentId,
+    heatMapEnabled,
+    contentionScores,
+    themeId,
+    activeTrails,
+  } = useRadarStore(
+    useShallow((s) => ({
+      graphNodes: s.graphNodes,
+      graphEdges: s.graphEdges,
+      settledAt: s.settledAt,
+      pinnedNodeIds: s.pinnedNodeIds,
+      selectedAgentId: s.selectedAgentId,
+      heatMapEnabled: s.heatMapEnabled,
+      contentionScores: s.contentionScores,
+      themeId: s.themeId,
+      activeTrails: s.activeTrails,
+    })),
+  );
   const theme = useMemo(() => resolveTheme(themeId), [themeId]);
 
   const { viewport, setViewport, handlers, screenToWorld } = useCanvasZoomPan();
   const { quadtreeRef, simNodesRef, isSimulatingRef, markDirtyRef } = useGraphLayout();
-  const activeTrails = useRadarStore((s) => s.activeTrails);
 
   // D-22 conflict subscription — reads all alerts, filters to active
   // (non-dismissed) entries, and memoizes a Set of contended file paths for
