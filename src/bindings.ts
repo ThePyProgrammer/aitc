@@ -608,7 +608,7 @@ async listChatChannels() : Promise<Result<ChatChannel[], string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async clearAgentThread(agentId: string) : Promise<Result<null, string>> {
+async clearAgentThread(agentId: string) : Promise<Result<number, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("clear_agent_thread", { agentId }) };
 } catch (e) {
