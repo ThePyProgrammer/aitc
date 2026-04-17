@@ -502,16 +502,16 @@ export function drawSelectedNode(
   zoom: number,
 ): void {
   if (!node || node.x === undefined || node.y === undefined) return;
-  // Outer halo (ambient glow per UI-SPEC: 40px / zoom radial gradient at
-  // 10-15% opacity)
+  // Outer halo — solid fill at low alpha instead of a per-frame gradient.
+  // Visually similar (soft glow) but avoids creating a CanvasGradient
+  // object every frame.
   const haloR = 40 / zoom;
-  const grad = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, haloR);
-  grad.addColorStop(0, `${agentColor}26`); // ~15% alpha
-  grad.addColorStop(1, `${agentColor}00`);
-  ctx.fillStyle = grad;
+  ctx.globalAlpha = 0.12;
+  ctx.fillStyle = agentColor;
   ctx.beginPath();
   ctx.arc(node.x, node.y, haloR, 0, Math.PI * 2);
   ctx.fill();
+  ctx.globalAlpha = 1;
   // 1px white outer stroke at 80%
   ctx.strokeStyle = 'rgba(255,255,255,0.8)';
   ctx.lineWidth = 1 / zoom;
