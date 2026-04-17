@@ -1,0 +1,2 @@
+{"type":"system","subtype":"hook_started","hook_name":"SessionStart:startup","session_id":"0d836c4f-8546-4aeb-a994-6fb94ba800b7"}
+{"type":"system","subtype":"hook_response","hook_name":"SessionStart:startup","session_id":"0d836c4f-8546-4aeb-a994-6fb94ba800b7"}

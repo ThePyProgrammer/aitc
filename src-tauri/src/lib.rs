@@ -3,6 +3,7 @@ pub mod chat_runtime;
 pub mod comms;
 mod conflict;
 mod db;
+pub mod mcp;
 pub mod pipeline;
 pub mod claude_resources;
 mod repo_session;
@@ -86,6 +87,12 @@ pub fn run() {
             claude_resources::commands::stop_claude_resources_watch,
             claude_resources::commands::read_claude_md,
             claude_resources::commands::write_claude_md,
+            chat_runtime::commands::send_chat_message_to_agent,
+            chat_runtime::commands::list_agent_events,
+            chat_runtime::commands::list_chat_channels,
+            chat_runtime::commands::clear_agent_thread,
+            chat_runtime::commands::mark_agent_events_read,
+            chat_runtime::commands::relaunch_agent_session,
         ])
         .typ::<pipeline::events::FileEvent>()
         .typ::<pipeline::events::FileEventBatch>()
@@ -118,7 +125,12 @@ pub fn run() {
         .typ::<claude_resources::events::Category>()
         .typ::<claude_resources::events::Scope>()
         .typ::<claude_resources::events::ResourceMetadata>()
-        .typ::<claude_resources::commands::ReadClaudeMdResult>();
+        .typ::<claude_resources::commands::ReadClaudeMdResult>()
+        .typ::<chat_runtime::types::AgentEvent>()
+        .typ::<chat_runtime::types::ChatChannel>()
+        .typ::<chat_runtime::types::DeliveryUpdate>()
+        .typ::<chat_runtime::types::SessionStartedPayload>()
+        .typ::<chat_runtime::types::SessionEndedPayload>();
 
     #[cfg(debug_assertions)]
     specta_builder
@@ -145,6 +157,8 @@ pub fn run() {
         .manage(conflict::ConflictState::new(5000))
         .manage(system_load::SystemLoadState::new())
         .manage(claude_resources::pipeline_state::ClaudeResourcesState::new())
+        .manage(chat_runtime::LiveSessionRegistry::new_arc())
+        .manage(mcp::McpState::new_arc())
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             // System tray (D-13)

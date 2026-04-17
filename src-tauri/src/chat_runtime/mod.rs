@@ -5,12 +5,19 @@
 //! `agent_events` rows; stdin JSONL frames written FIFO for outbound messages
 //! (D-08 + D-10). MCP server on self_register host is the fallback transport.
 //!
-//! Wave 0 (Plan 01) provides the public type surface only. Plan 02 wires
-//! real submodules (launcher, parser, outbound, supervisor, commands,
-//! auto_resume, notifications, session_registry).
+//! Wave 0 (Plan 01) provides compiling skeletons. Plan 02 provides real logic.
 
+pub mod auto_resume;
+pub mod commands;
+pub mod launcher;
+pub mod notifications;
+pub mod outbound;
+pub mod parser;
+pub mod session_registry;
+pub mod supervisor;
 pub mod types;
 
+pub use session_registry::{LiveSession, LiveSessionRegistry};
 pub use types::{
     AgentEvent, ChatChannel, DeliveryUpdate, OutboundFrame, SessionEndedPayload,
     SessionStartedPayload, StreamEvent,

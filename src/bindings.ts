@@ -583,6 +583,54 @@ async writeClaudeMd(path: string, content: string, cwd: string | null) : Promise
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async sendChatMessageToAgent(agentId: string, content: string) : Promise<Result<AgentEvent, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("send_chat_message_to_agent", { agentId, content }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listAgentEvents(agentId: string, beforeId: number | null, limit: number | null) : Promise<Result<AgentEvent[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_agent_events", { agentId, beforeId, limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listChatChannels() : Promise<Result<ChatChannel[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_chat_channels") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async clearAgentThread(agentId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("clear_agent_thread", { agentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async markAgentEventsRead(agentId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mark_agent_events_read", { agentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async relaunchAgentSession(agentId: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("relaunch_agent_session", { agentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -596,6 +644,18 @@ async writeClaudeMd(path: string, content: string, cwd: string | null) : Promise
 
 /** user-defined types **/
 
+/**
+ * A single row out of the `agent_events` table (D-14). `payload_json` holds
+ * the shape keyed by `event_type` — see PATTERNS.md "payload_json shapes"
+ * for the per-event schema. Stored as `serde_json::Value` on the wire so
+ * specta maps it to an `unknown` TypeScript alias; the frontend switches
+ * on `event_type` to narrow.
+ */
+export type AgentEvent = { id: number; agentId: string; sessionId: string | null; eventType: string; payloadJson: JsonValue; approvalRequestId: number | null; sequenceNumber: number | null; createdAt: string; 
+/**
+ * Only populated on `user_text` outbound rows. NULL otherwise per D-10.
+ */
+deliveryStatus: string | null }
 /**
  * Metadata about an agent visible to the frontend and stored in the registry.
  */
@@ -641,6 +701,11 @@ export type Attribution = { kind: "pid"; value: number } | { kind: "ambiguous"; 
  */
 export type Category = "skill" | "agent" | "plugin" | "hook" | "command" | "settings" | "mcp" | "claudeMd"
 /**
+ * Rich master-list payload for the CHAT tab rail. Computed by
+ * `list_chat_channels` — Wave 0 just declares the shape.
+ */
+export type ChatChannel = { agentId: string; adapterType: string; status: string; archived: boolean; chatDuplex: boolean; lastEvent: AgentEvent | null; unreadCount: number; currentSessionId: string | null }
+/**
  * A chat message between user and agent.
  */
 export type ChatMessage = { id: number; agentId: string; direction: string; content: string; deliveryStatus: string; approvalRequestId: number | null; createdAt: string }
@@ -653,6 +718,11 @@ export type ConflictAlert = { id: string; filePath: string; agentAId: string; ag
  * File versions for a conflict: base (git HEAD), and current disk content.
  */
 export type ConflictFileVersions = { baseContent: string; agentAContent: string; agentBContent: string; filePath: string; agentAId: string; agentBId: string }
+/**
+ * Per-row delivery-status update; emitted on the `agent-delivery-updated`
+ * Tauri event as the stdin writer / MCP sink mutate outbound rows (D-10).
+ */
+export type DeliveryUpdate = { eventId: number; status: string }
 /**
  * Wire-format for the get_dependency_graph Tauri command (D-05).
  */
@@ -696,6 +766,7 @@ export type FileEventKind = { kind: "create" } | { kind: "modify" } | { kind: "r
  * Resolution choice for a single hunk in the merge UI.
  */
 export type HunkResolution = { hunkIndex: number; choice: string; customContent: string | null }
+export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 /**
  * Adapter-specific launch tuning. Currently only Claude Code consumes any of
  * these; other adapters ignore them. Kept as one serializable struct so the
@@ -793,6 +864,15 @@ export type ResourceMetadata = { kind: "skill"; tools: string[] | null; allowedT
  */
 export type Scope = "global" | "project"
 /**
+ * Payload for `agent-session-ended` — emitted when the long-lived subprocess
+ * exits (via terminate, crash, or `{type:"result"}` terminal envelope).
+ */
+export type SessionEndedPayload = { agentId: string; sessionId: string | null; 
+/**
+ * "completed" | "crashed" | "terminated" | "error"
+ */
+reason: string; exitCode: number | null }
+/**
  * A file record within a session.
  */
 export type SessionFileRecord = { id: number; sessionId: number; filePath: string; writeCount: number; lastWrittenAt: string }
@@ -800,6 +880,11 @@ export type SessionFileRecord = { id: number; sessionId: number; filePath: strin
  * An agent session record for history display.
  */
 export type SessionRecord = { id: number; agentId: string; agentType: string; status: string; startedAt: string; endedAt: string | null; fileCount: number }
+/**
+ * Payload for `agent-session-started` — wired in Plan 02 when the parser
+ * captures the stream-json `init` envelope's `session_id`.
+ */
+export type SessionStartedPayload = { agentId: string; sessionId: string }
 /**
  * Live system load snapshot.
  */
