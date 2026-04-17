@@ -33,6 +33,10 @@ pub struct ClaudePreToolUse {
     pub cwd: Option<String>,
     pub hook_event_name: Option<String>,
     pub transcript_path: Option<String>,
+    /// "default" | "acceptEdits" | "bypassPermissions" | "plan". Absent on
+    /// older Claude Code versions — deserializes to None, which means the
+    /// sidecar falls through to normal AITC gating.
+    pub permission_mode: Option<String>,
 }
 
 /// Payload that the sidecar POSTs to the AITC `/hook` endpoint.

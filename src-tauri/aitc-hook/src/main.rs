@@ -24,6 +24,13 @@ use aitc_hook::{
     resolve_port, AitcDecision, HookRequest,
 };
 
+/// Claude Code permission mode that opts out of AITC gating. Agents launched
+/// with `--dangerously-skip-permissions` have already told Claude Code "don't
+/// ask me anything" — AITC respects that by short-circuiting to allow without
+/// contacting the backend. Also the robust choice: bypass agents keep working
+/// even if AITC is offline.
+const BYPASS_PERMISSION_MODE: &str = "bypassPermissions";
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::from(0),
@@ -45,6 +52,15 @@ fn run() -> Result<(), String> {
         return Err("stdin parse: empty input".to_string());
     }
     let event = parse_claude_stdin(&raw)?;
+
+    // bypassPermissions fast path: the user has already told Claude Code not
+    // to prompt, so AITC doesn't either. Skip the HTTP round-trip entirely so
+    // these agents keep moving even when AITC is offline.
+    if event.permission_mode.as_deref() == Some(BYPASS_PERMISSION_MODE) {
+        let env = build_allow_envelope();
+        writeln!(io::stdout(), "{env}").map_err(|e| format!("stdout write: {e}"))?;
+        return Ok(());
+    }
 
     // 2. Resolve the AITC server port (or fail safe if unresolvable).
     let port = resolve_port().ok_or_else(|| "AITC unreachable: no port".to_string())?;
