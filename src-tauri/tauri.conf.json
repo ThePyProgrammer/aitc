@@ -15,6 +15,7 @@
         "label": "main",
         "visible": false,
         "decorations": false,
+        "fullscreen": true,
         "width": 1280,
         "height": 800,
         "minWidth": 1280,
