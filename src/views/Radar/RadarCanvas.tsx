@@ -139,6 +139,10 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const animFrameRef = useRef<number>(0);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  // Screen-space mouse position relative to the container — used to place the
+  // hover popover. Stored as a ref so it doesn't trigger extra re-renders;
+  // the popover reads this when hoveredNodeId changes.
+  const mousePosRef = useRef({ x: 0, y: 0 });
   const [degradedDismissed, setDegradedDismissed] = useState(false);
   const [overloadDismissed, setOverloadDismissed] = useState(false);
 
@@ -626,7 +630,9 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         world.y,
         NODE_HIT_RADIUS / Math.max(viewport.zoom, 0.1),
       );
-      setHoveredNodeId(found?.id ?? null);
+      const nextId = found?.id ?? null;
+      setHoveredNodeId(nextId);
+      mousePosRef.current = { x: sx, y: sy };
       onHoveredAgentChange?.(null, sx, sy);
     },
     [screenToWorld, viewport.zoom, onHoveredAgentChange, quadtreeRef],
@@ -664,6 +670,34 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     graphNodes.length >= DEGRADED_NODE_THRESHOLD &&
     graphNodes.length < OVERLOAD_NODE_THRESHOLD &&
     !degradedDismissed;
+
+  // ── Hover popover data ──
+  // Look up metadata for the hovered node so we can render a tooltip.
+  const hoveredNode = useMemo(() => {
+    if (!hoveredNodeId) return null;
+    return graphNodes.find((n) => n.id === hoveredNodeId) ?? null;
+  }, [hoveredNodeId, graphNodes]);
+
+  const hoveredContention = hoveredNodeId
+    ? contentionScores.get(hoveredNodeId) ?? 0
+    : 0;
+  const hoveredConflict = hoveredNodeId
+    ? activeConflictPaths.has(hoveredNodeId)
+    : false;
+
+  // Compute incoming/outgoing edge counts for the hovered node.
+  const hoveredEdgeCounts = useMemo(() => {
+    if (!hoveredNodeId) return { incoming: 0, outgoing: 0 };
+    let incoming = 0;
+    let outgoing = 0;
+    for (const e of graphEdges) {
+      const sId = typeof e.source === 'string' ? e.source : (e.source as { id: string }).id;
+      const tId = typeof e.target === 'string' ? e.target : (e.target as { id: string }).id;
+      if (sId === hoveredNodeId) outgoing++;
+      if (tId === hoveredNodeId) incoming++;
+    }
+    return { incoming, outgoing };
+  }, [hoveredNodeId, graphEdges]);
 
   return (
     <div
@@ -766,6 +800,59 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         <Flame size={16} strokeWidth={1.5} />
         HEAT_MAP
       </button>
+
+      {/* Hover popover — shows filename + metadata when a node is hovered. */}
+      {hoveredNode && (
+        <div
+          className="absolute z-30 pointer-events-none bg-surface-container border border-outline-variant/40 px-3 py-2 max-w-72 shadow-lg"
+          style={{
+            left: Math.min(mousePosRef.current.x + 12, canvasSize.width - 290),
+            top: Math.max(8, mousePosRef.current.y - 8),
+          }}
+        >
+          {/* Filename (basename) */}
+          <div className="font-mono text-xs text-on-surface font-bold truncate">
+            {hoveredNode.id.includes('/')
+              ? hoveredNode.id.slice(hoveredNode.id.lastIndexOf('/') + 1)
+              : hoveredNode.id}
+          </div>
+          {/* Full path */}
+          <div className="font-mono text-[10px] text-on-surface-variant/70 truncate mt-0.5">
+            {hoveredNode.id}
+          </div>
+          {/* Metadata row */}
+          <div className="flex items-center gap-3 mt-1.5 font-mono text-[10px] text-on-surface-variant">
+            <span>
+              DIR <span className="text-on-surface">{hoveredNode.dirKey || '(root)'}</span>
+            </span>
+            <span>
+              DEPTH <span className="text-on-surface">{hoveredNode.dirDepth}</span>
+            </span>
+          </div>
+          {/* Edge counts */}
+          <div className="flex items-center gap-3 mt-0.5 font-mono text-[10px] text-on-surface-variant">
+            <span>
+              IN <span className="text-on-surface">{hoveredEdgeCounts.incoming}</span>
+            </span>
+            <span>
+              OUT <span className="text-on-surface">{hoveredEdgeCounts.outgoing}</span>
+            </span>
+          </div>
+          {/* Contention + conflict badges */}
+          {(hoveredContention > 0 || hoveredConflict) && (
+            <div className="flex items-center gap-3 mt-1 font-headline text-[10px] uppercase tracking-widest">
+              {hoveredContention > 0 && (
+                <span className="text-error">
+                  CONTENTION {Math.round(hoveredContention * 100)}%
+                </span>
+              )}
+              {hoveredConflict && (
+                <span className="text-error font-bold">CONFLICT</span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
