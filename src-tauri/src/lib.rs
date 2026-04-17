@@ -159,6 +159,13 @@ pub fn run() {
         .manage(claude_resources::pipeline_state::ClaudeResourcesState::new())
         .manage(chat_runtime::LiveSessionRegistry::new_arc())
         .manage(mcp::McpState::new_arc())
+        // Phase 10: AITC self_register port. Seeded at the preferred port
+        // so launch_agent has a valid default even if a duplex launch fires
+        // before `start_registration_server` finishes binding; the server
+        // task below replaces the entry with the actual bound port on
+        // success. Tauri's .manage() replaces same-type entries, so the
+        // later `app_for_port.manage(AitcPort(port))` wins without a race.
+        .manage(agents::AitcPort(9417))
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             // System tray (D-13)
@@ -265,6 +272,10 @@ pub fn run() {
                 {
                     Ok(port) => {
                         tracing::info!(port, "AITC registration server started");
+                        // Phase 10 D-11: stash the actual bound port on Tauri
+                        // managed state so launch_agent + relaunch_agent_session
+                        // can splice it into the per-session MCP config URL.
+                        app_for_port.manage(agents::AitcPort(port));
                         // Phase 8 D-06: write ~/.aitc/port so the sidecar
                         // can discover us without AITC_PORT env. PortFileGuard
                         // is stashed on managed state so Drop fires on exit.

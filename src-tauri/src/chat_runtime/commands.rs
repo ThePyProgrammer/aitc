@@ -253,12 +253,69 @@ pub async fn mark_agent_events_read(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn relaunch_agent_session(agent_id: String) -> Result<(), String> {
-    let _ = agent_id;
-    // D-04: Plan 04 wires this through `agents::commands::launch_agent`
-    // which reactivates an archived session by name. The command is
-    // registered today so tauri-specta keeps the TS shim stable.
-    Err("relaunch_agent_session: Plan 04 wires this via agents::commands::launch_agent".into())
+pub async fn relaunch_agent_session(
+    agent_id: String,
+    pool: tauri::State<'_, sqlx::SqlitePool>,
+    sessions: tauri::State<'_, Arc<LiveSessionRegistry>>,
+    registry: tauri::State<'_, Arc<AgentRegistry>>,
+    pipeline: tauri::State<'_, crate::pipeline::pipeline_state::PipelineState>,
+    aitc_port: tauri::State<'_, crate::agents::AitcPort>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    // D-04: reactivate an archived session under the same agent_id so the
+    // existing agent_events transcript stays attached. Pull the prior
+    // adapter_type + cwd + intent from the registry, remove the stale
+    // LiveSession entry, then delegate to launch_agent_inner which will
+    // (a) generate a fresh subprocess with the SAME agent_id (forced via
+    // LaunchOptions.agent_id) and (b) register a new LiveSession.
+    let prior = registry
+        .get_agent(&agent_id)
+        .await
+        .ok_or_else(|| format!("unknown agent: {agent_id}"))?;
+    let adapter_type = prior.agent_type.clone();
+    let cwd = prior
+        .cwd
+        .clone()
+        .ok_or_else(|| "agent has no cwd (cannot relaunch)".to_string())?;
+    let intent = prior.intent.clone();
+    let cwd_str = cwd
+        .to_str()
+        .ok_or_else(|| "agent cwd is not valid UTF-8".to_string())?
+        .to_string();
+
+    // Drop the stale LiveSession entry first — supervisor already flipped
+    // archived=true, but this frees the mpsc slot so the writer task that
+    // was draining the prior receiver can exit cleanly.
+    sessions.remove(&agent_id).await;
+
+    let opts = crate::agents::adapter::LaunchOptions {
+        agent_id: Some(agent_id.clone()),
+        aitc_port: Some(aitc_port.inner().0),
+        ..Default::default()
+    };
+
+    crate::agents::commands::launch_agent_inner(
+        adapter_type,
+        cwd_str,
+        intent,
+        Some(opts),
+        registry.inner(),
+        pipeline.inner(),
+        pool.inner(),
+        sessions.inner(),
+        aitc_port.inner().0,
+        app_handle.clone(),
+    )
+    .await?;
+
+    if let Err(e) = app_handle.emit("agent-session-resumed", &agent_id) {
+        tracing::debug!(
+            agent_id = %agent_id,
+            err = %e,
+            "agent-session-resumed emit failed"
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -618,10 +675,9 @@ mod tests {
         assert_eq!(c_after.unread_count, 0);
     }
 
-    #[tokio::test]
-    async fn relaunch_agent_session_stub_defers_to_plan_04() {
-        let result = relaunch_agent_session("A-1".to_string()).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Plan 04"));
-    }
+    // `relaunch_agent_session` test is intentionally omitted here: its body
+    // requires `tauri::State<'_, _>` for SqlitePool + LiveSessionRegistry +
+    // AgentRegistry + PipelineState + AitcPort simultaneously, which can't
+    // be fabricated outside a running Tauri runtime. The underlying
+    // `launch_agent_inner` has integration coverage in agents::commands::tests.
 }

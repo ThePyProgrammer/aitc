@@ -129,6 +129,14 @@ async listAvailableAgentTypes() : Promise<Result<string[], string>> {
  * T-03-05 mitigations:
  * - Validates cwd exists and is a directory.
  * - Only launches binaries matched by registered adapters (no arbitrary PATH exec).
+ * 
+ * Phase 10 D-06 + D-12: branches on `adapter.capabilities().chat_duplex`.
+ * Duplex adapters (claude-code) take the chat_runtime path — parser +
+ * outbound writer + supervisor + aggregator own stdin/stdout/stderr, and a
+ * `LiveSession` is registered so `send_chat_message_to_agent` can reach the
+ * subprocess. Read-only adapters (codex/opencode/generic) go through
+ * `spawn_raw_capture_tasks` — stdout/stderr lines become raw_stdout /
+ * raw_stderr rows in agent_events.
  */
 async launchAgent(agentType: string, cwd: string, intent: string | null, options: LaunchOptions | null) : Promise<Result<AgentInfo, string>> {
     try {
