@@ -782,7 +782,22 @@ acceptEdits: boolean;
  * Claude Code: adds `--dangerously-skip-permissions` which disables the
  * permission prompt entirely. Takes precedence over `accept_edits`.
  */
-dangerouslySkipPermissions: boolean }
+dangerouslySkipPermissions: boolean; 
+/**
+ * Phase 10: the AITC-assigned agent_id for this launch. Needed by
+ * duplex adapters (claude-code) so they can write the per-session MCP
+ * config to `.claude/aitc-mcp-<agent_id>.json` BEFORE spawning. Other
+ * adapters ignore it. `None` means "generate inside the command layer";
+ * `Some(id)` forces a specific id (used by relaunch_agent_session to
+ * preserve transcript continuity for an archived agent — D-04).
+ */
+agentId?: string | null; 
+/**
+ * Phase 10: AITC self_register port (defaults to 9417). Duplex adapters
+ * splice this into the MCP config URL so Claude's `--mcp-config` points
+ * at the running /mcp handler.
+ */
+aitcPort?: number | null }
 /**
  * Per-state notification preferences.
  * 

@@ -26,7 +26,17 @@ pub struct LaunchLiveSessionResult {
 /// Build the argv vector for a chattable Claude Code subprocess. Factored out
 /// of `launch_live_session` so tests can assert the exact argv shape without
 /// actually spawning.
-pub(crate) fn build_argv(intent: &str, mcp_config_path: Option<&Path>) -> Vec<String> {
+///
+/// `extra_flags` — Plan 04 extension point. Flags appended AFTER the
+/// stream-json baseline (`--input-format`, `--output-format`, `--verbose`,
+/// `--include-partial-messages`) and the optional `--mcp-config` pair, but
+/// BEFORE the positional `intent`. Used by `ClaudeCodeAdapter::launch` to
+/// pass `--dangerously-skip-permissions` or `--permission-mode acceptEdits`.
+pub(crate) fn build_argv(
+    intent: &str,
+    mcp_config_path: Option<&Path>,
+    extra_flags: Option<&[&str]>,
+) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "--input-format".into(),
         "stream-json".into(),
@@ -40,6 +50,11 @@ pub(crate) fn build_argv(intent: &str, mcp_config_path: Option<&Path>) -> Vec<St
         args.push(p.to_string_lossy().into_owned());
         args.push("--strict-mcp-config".into());
     }
+    if let Some(flags) = extra_flags {
+        for f in flags {
+            args.push((*f).to_string());
+        }
+    }
     args.push(intent.into());
     args
 }
@@ -48,6 +63,10 @@ pub(crate) fn build_argv(intent: &str, mcp_config_path: Option<&Path>) -> Vec<St
 ///
 /// `aitc_port` is injected as `AITC_PORT` env (Phase 3 precedent) so the
 /// `/register` + `/hook` + `/mcp` sidecar routes remain addressable.
+///
+/// `extra_flags` — Plan 04 passes permission-mode flags here (e.g.
+/// `--dangerously-skip-permissions`) so the adapter can still honor the
+/// `LaunchOptions` bypass chips without duplicating argv construction.
 pub async fn launch_live_session(
     program: &str,
     intent: &str,
@@ -55,8 +74,9 @@ pub async fn launch_live_session(
     aitc_port: u16,
     mcp_config_path: Option<&Path>,
     env_vars: Option<Vec<(&str, &str)>>,
+    extra_flags: Option<&[&str]>,
 ) -> Result<LaunchLiveSessionResult, String> {
-    let args = build_argv(intent, mcp_config_path);
+    let args = build_argv(intent, mcp_config_path, extra_flags);
     let mut cmd = tokio::process::Command::new(program);
     cmd.args(args.iter().map(String::as_str))
         .current_dir(cwd)
@@ -97,7 +117,7 @@ mod tests {
 
     #[test]
     fn launch_live_session_argv_includes_stream_json_flags() {
-        let argv = build_argv("do the thing", None);
+        let argv = build_argv("do the thing", None, None);
         // Exact ordering — the stream-json flag set appears first, then
         // --verbose + --include-partial-messages, then the positional intent.
         assert_eq!(
@@ -117,7 +137,7 @@ mod tests {
     #[test]
     fn launch_live_session_with_mcp_config_includes_flag_pair() {
         let path = PathBuf::from("/tmp/aitc-mcp.json");
-        let argv = build_argv("task", Some(&path));
+        let argv = build_argv("task", Some(&path), None);
         assert!(argv.iter().any(|a| a == "--mcp-config"));
         assert!(argv.iter().any(|a| a == "/tmp/aitc-mcp.json"));
         assert!(argv.iter().any(|a| a == "--strict-mcp-config"));
@@ -136,9 +156,40 @@ mod tests {
 
     #[test]
     fn launch_live_session_no_mcp_config_omits_flag_pair() {
-        let argv = build_argv("task", None);
+        let argv = build_argv("task", None, None);
         assert!(!argv.iter().any(|a| a == "--mcp-config"));
         assert!(!argv.iter().any(|a| a == "--strict-mcp-config"));
+    }
+
+    #[test]
+    fn launch_live_session_extra_flags_appear_before_intent_and_after_mcp_pair() {
+        let path = PathBuf::from("/tmp/aitc-mcp.json");
+        let flags = ["--dangerously-skip-permissions"];
+        let argv = build_argv("task", Some(&path), Some(&flags));
+        let intent_pos = argv.iter().position(|a| a == "task").unwrap();
+        let strict_pos = argv
+            .iter()
+            .position(|a| a == "--strict-mcp-config")
+            .unwrap();
+        let dangerous_pos = argv
+            .iter()
+            .position(|a| a == "--dangerously-skip-permissions")
+            .unwrap();
+        assert!(strict_pos < dangerous_pos, "extra flags come after mcp pair");
+        assert!(
+            dangerous_pos < intent_pos,
+            "extra flags come before positional intent"
+        );
+        assert_eq!(argv.last().unwrap(), "task");
+    }
+
+    #[test]
+    fn launch_live_session_permission_mode_pair_preserved() {
+        let flags = ["--permission-mode", "acceptEdits"];
+        let argv = build_argv("task", None, Some(&flags));
+        let pm_pos = argv.iter().position(|a| a == "--permission-mode").unwrap();
+        let value_pos = argv.iter().position(|a| a == "acceptEdits").unwrap();
+        assert_eq!(value_pos, pm_pos + 1);
     }
 
     // Spawn a real subprocess via the real launcher — pipes stdio so the test
@@ -186,6 +237,7 @@ mod tests {
             "nothing",
             &tmp,
             9417,
+            None,
             None,
             None,
         )

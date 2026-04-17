@@ -117,6 +117,14 @@ mod tests {
     }
 
     #[test]
+    fn capabilities_inherits_default_read_only() {
+        // D-12: Codex inherits the default (chat_duplex: false). Outbound
+        // chat messages surface as `delivery_status = "unsupported"` rows.
+        let adapter = CodexAdapter;
+        assert!(!adapter.capabilities().chat_duplex);
+    }
+
+    #[test]
     fn codex_extracts_intent_from_args() {
         let args = vec![
             "codex".to_string(),

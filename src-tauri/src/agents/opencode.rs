@@ -109,6 +109,13 @@ mod tests {
     }
 
     #[test]
+    fn capabilities_inherits_default_read_only() {
+        // D-12: OpenCode inherits the default (chat_duplex: false).
+        let adapter = OpenCodeAdapter;
+        assert!(!adapter.capabilities().chat_duplex);
+    }
+
+    #[test]
     fn opencode_extracts_intent_from_p_flag() {
         let args = vec![
             "opencode".to_string(),

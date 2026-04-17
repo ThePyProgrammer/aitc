@@ -1,10 +1,22 @@
 //! Claude Code adapter (built-in).
 //!
-//! Implements `AgentAdapter` for the Claude Code CLI agent. Launch and
-//! terminate wired via `launcher.rs`. Intent detection uses hooks-based
-//! infrastructure per D-08.
+//! Implements `AgentAdapter` for the Claude Code CLI agent.
+//!
+//! Phase 10 (D-06): `launch` now spawns a LONG-LIVED
+//! `claude --input-format stream-json --output-format stream-json --verbose
+//! --include-partial-messages [--mcp-config <path> --strict-mcp-config]
+//! <intent>` subprocess with stdin/stdout/stderr all piped. The command layer
+//! (agents/commands.rs) takes ownership of the pipes and hands them to the
+//! chat_runtime parser + outbound writer + supervisor. `terminate` is still
+//! wired via `launcher::terminate_process`.
+//!
+//! Capabilities (D-02): `chat_duplex = true`. Codex / OpenCode / Generic
+//! inherit the default `chat_duplex = false` and take the read-only
+//! raw-stdout-capture path.
 
-use crate::agents::adapter::{AgentAdapter, AgentState, LaunchOptions};
+use crate::agents::adapter::{
+    AdapterCapabilities, AgentAdapter, AgentState, LaunchOptions,
+};
 use crate::agents::launcher;
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -63,49 +75,25 @@ impl AgentAdapter for ClaudeCodeAdapter {
         intent: Option<String>,
         options: LaunchOptions,
     ) -> Result<(u32, tokio::process::Child), String> {
-        // `claude --print` is non-interactive: it expects a prompt as a
-        // positional argument (or on stdin) and exits once the response is
-        // streamed. Without one the process exits immediately, which used to
-        // flip the agent to `error` right after launch. Require an intent so
-        // the failure surfaces at launch time instead.
+        // D-06: long-lived stream-json subprocess. The intent becomes the
+        // INITIAL prompt in the stream-json session; the supervisor keeps
+        // the subprocess alive for follow-up turns driven by the stdin
+        // writer (Plan 02 `spawn_outbound_writer`). Require the intent so
+        // the launch failure surfaces at launch time instead of on first
+        // silent exit.
         let prompt = intent.ok_or_else(|| {
             "Claude Code launches require an INTENT_LABEL. The intent is \
-             forwarded to `claude --print` as the prompt; without it the \
-             CLI exits immediately with no work to do."
+             forwarded to claude as the initial prompt for the long-lived \
+             stream-json session."
                 .to_string()
         })?;
 
-        // `--output-format stream-json` is only accepted alongside `--verbose`
-        // in non-interactive mode; without it claude exits 1 with
-        // "requires --verbose". Adding the flag matches the documented
-        // streaming usage.
-        let mut args: Vec<String> = vec![
-            "--print".into(),
-            "--output-format".into(),
-            "stream-json".into(),
-            "--verbose".into(),
-        ];
-
-        // Permission tuning. `dangerously_skip_permissions` wins if both are
-        // set since it's the strictly-looser option -- applying both would be
-        // contradictory.
-        if options.dangerously_skip_permissions {
-            args.push("--dangerously-skip-permissions".into());
-        } else if options.accept_edits {
-            args.push("--permission-mode".into());
-            args.push("acceptEdits".into());
-        }
-
-        args.push(prompt);
-
-        // D-01 + D-23: install settings.local.json hook UNLESS the user
-        // explicitly opted into a bypass chip. A bypass hands full trust to
-        // Claude for that launch, so installing the AITC hook would
-        // contradict the user's intent. We resolve the sidecar's absolute
-        // path from the `AITC_SIDECAR_PATH` env var that `lib.rs` setup()
-        // stashes after `tauri_plugin_shell::sidecar("aitc-hook")`. Missing
-        // env var => skip silently (tests without a Tauri runtime, or a
-        // bundle built without the sidecar); launch continues unhooked.
+        // Phase 8 hook install: preserved verbatim from the pre-Plan-04 path.
+        // A bypass chip (dangerously_skip_permissions / accept_edits) hands
+        // full trust to Claude for that launch, so installing the AITC hook
+        // would contradict the user's intent. AITC_SIDECAR_PATH is set by
+        // lib.rs::setup after `tauri_plugin_shell::sidecar("aitc-hook")`;
+        // missing env var => skip silently (dev/test path).
         if !options.dangerously_skip_permissions && !options.accept_edits {
             match std::env::var("AITC_SIDECAR_PATH") {
                 Ok(sidecar_abs) if !sidecar_abs.is_empty() => {
@@ -131,15 +119,77 @@ impl AgentAdapter for ClaudeCodeAdapter {
             }
         }
 
-        let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
-        launcher::launch_detached(
+        // Plan 10 / D-11: write the per-session MCP config BEFORE spawning,
+        // so `claude --mcp-config <path>` can read it at startup. We need
+        // the agent_id and aitc_port — both come in via LaunchOptions from
+        // the command layer (which generates the agent_id up front).
+        // A missing agent_id is a hard error: the command layer always
+        // populates it for a claude_code launch; absence means we were
+        // called incorrectly. A missing port defaults to 9417 (dev default).
+        let aitc_port = options.aitc_port.unwrap_or(9417);
+        let mcp_config_path = match options.agent_id.as_deref() {
+            Some(id) => match crate::mcp::session_config::write_session_mcp_config(
+                &cwd, id, aitc_port,
+            ) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    tracing::warn!(
+                        cwd = %cwd.display(),
+                        agent_id = %id,
+                        error = %e,
+                        "write_session_mcp_config failed; launching without MCP server"
+                    );
+                    None
+                }
+            },
+            None => {
+                tracing::warn!(
+                    cwd = %cwd.display(),
+                    "claude_code::launch called without agent_id in LaunchOptions; \
+                     per-session MCP config skipped"
+                );
+                None
+            }
+        };
+
+        // Permission tuning. `dangerously_skip_permissions` wins if both are
+        // set since it's the strictly-looser option -- applying both would be
+        // contradictory.
+        let mut flag_storage: Vec<String> = Vec::new();
+        if options.dangerously_skip_permissions {
+            flag_storage.push("--dangerously-skip-permissions".into());
+        } else if options.accept_edits {
+            flag_storage.push("--permission-mode".into());
+            flag_storage.push("acceptEdits".into());
+        }
+        let flag_refs: Vec<&str> = flag_storage.iter().map(String::as_str).collect();
+        let extra_flags: Option<&[&str]> = if flag_refs.is_empty() {
+            None
+        } else {
+            Some(&flag_refs)
+        };
+
+        // D-06: long-lived stream-json subprocess via `launch_live_session`.
+        // Returns `LaunchLiveSessionResult { pid, child, mcp_config_path }`
+        // — the Child has all three stdio pipes piped; the command layer
+        // takes ownership of them.
+        let result = crate::chat_runtime::launcher::launch_live_session(
             "claude",
-            &args_ref,
+            &prompt,
             &cwd,
+            aitc_port,
+            mcp_config_path.as_deref(),
             None,
-            9417, // Default port; caller should override via env
+            extra_flags,
         )
-        .await
+        .await?;
+        Ok((result.pid, result.child))
+    }
+
+    fn capabilities(&self) -> AdapterCapabilities {
+        // D-01 + D-02: Claude Code is the only v1 adapter with bidirectional
+        // chat. Routed through the long-lived stream-json path.
+        AdapterCapabilities { chat_duplex: true }
     }
 
     async fn get_state(&self, pid: u32) -> AgentState {
@@ -182,6 +232,13 @@ mod tests {
     fn adapter_type_returns_claude_code() {
         let adapter = ClaudeCodeAdapter;
         assert_eq!(adapter.adapter_type(), "claude-code");
+    }
+
+    #[test]
+    fn capabilities_reports_chat_duplex_true() {
+        // D-01 + D-02: Claude Code is the only v1 duplex adapter.
+        let adapter = ClaudeCodeAdapter;
+        assert!(adapter.capabilities().chat_duplex);
     }
 
     #[test]

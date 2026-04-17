@@ -234,6 +234,15 @@ protocol = "custom"
     }
 
     #[test]
+    fn capabilities_inherits_default_read_only() {
+        // D-12: GenericAdapter inherits the default (chat_duplex: false).
+        // TOML-configured adapters stay read-only until a future Plan
+        // extends the TOML schema with a `chat_duplex = true` opt-in.
+        let adapter = GenericAdapter::from_toml(SAMPLE_TOML).unwrap();
+        assert!(!adapter.capabilities().chat_duplex);
+    }
+
+    #[test]
     fn rejects_invalid_regex() {
         let bad_toml = r#"
 name = "bad"

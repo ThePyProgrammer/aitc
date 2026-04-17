@@ -56,6 +56,42 @@ pub struct LaunchOptions {
     /// Claude Code: adds `--dangerously-skip-permissions` which disables the
     /// permission prompt entirely. Takes precedence over `accept_edits`.
     pub dangerously_skip_permissions: bool,
+    /// Phase 10: the AITC-assigned agent_id for this launch. Needed by
+    /// duplex adapters (claude-code) so they can write the per-session MCP
+    /// config to `.claude/aitc-mcp-<agent_id>.json` BEFORE spawning. Other
+    /// adapters ignore it. `None` means "generate inside the command layer";
+    /// `Some(id)` forces a specific id (used by relaunch_agent_session to
+    /// preserve transcript continuity for an archived agent — D-04).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// Phase 10: AITC self_register port (defaults to 9417). Duplex adapters
+    /// splice this into the MCP config URL so Claude's `--mcp-config` points
+    /// at the running /mcp handler.
+    #[serde(default)]
+    pub aitc_port: Option<u16>,
+}
+
+/// Capability flags reported by an adapter at launch time. Consumed by
+/// `agents::commands::launch_agent` to route the spawned `Child` through
+/// either the long-lived stream-json runtime (Plan 02) or the simple
+/// raw-stdout/stderr capture path (D-12). Add more flags here as future
+/// adapters expose new behaviors.
+#[derive(Debug, Clone, Copy)]
+pub struct AdapterCapabilities {
+    /// When true, the adapter supports bidirectional chat via the Phase 10
+    /// long-lived stream-json runtime: `launch` returns a `Child` with all
+    /// three stdio pipes piped, and the command layer hands those pipes to
+    /// parser + outbound writer + supervisor. When false, the adapter is
+    /// transcript-only (outbound messages are rejected with
+    /// `delivery_status='unsupported'`; `Child` stdout/stderr are captured
+    /// as raw line events).
+    pub chat_duplex: bool,
+}
+
+impl Default for AdapterCapabilities {
+    fn default() -> Self {
+        AdapterCapabilities { chat_duplex: false }
+    }
 }
 
 /// Metadata about an agent visible to the frontend and stored in the registry.
@@ -109,6 +145,13 @@ pub trait AgentAdapter: Send + Sync {
 
     /// Terminate an agent process by PID.
     async fn terminate(&self, pid: u32) -> Result<(), String>;
+
+    /// Adapter capability flags. Default returns `chat_duplex=false` so the
+    /// existing read-only adapters (Codex/OpenCode/Generic) inherit the
+    /// conservative behavior; Claude Code overrides to `true` (D-01, D-02).
+    fn capabilities(&self) -> AdapterCapabilities {
+        AdapterCapabilities::default()
+    }
 }
 
 #[cfg(test)]
@@ -159,6 +202,22 @@ mod tests {
         assert!(!AgentState::Error.can_transition_to(&AgentState::Waiting));
         assert!(!AgentState::Error.can_transition_to(&AgentState::Conflict));
         assert!(!AgentState::Error.can_transition_to(&AgentState::Error));
+    }
+
+    #[test]
+    fn adapter_capabilities_default_is_read_only() {
+        let caps = AdapterCapabilities::default();
+        assert!(!caps.chat_duplex);
+    }
+
+    #[test]
+    fn adapter_capabilities_is_copy_and_clone() {
+        let c = AdapterCapabilities { chat_duplex: true };
+        let d = c; // copy
+        let e = c.clone(); // clone
+        assert!(d.chat_duplex);
+        assert!(e.chat_duplex);
+        assert!(c.chat_duplex);
     }
 
     #[test]

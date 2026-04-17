@@ -20,11 +20,41 @@
 
 #![allow(dead_code)]
 
+use regex::Regex;
+use std::sync::OnceLock;
 use tokio::io::AsyncBufReadExt;
 use tokio::process::{ChildStderr, ChildStdout};
 use tokio::sync::mpsc;
 
 use super::types::{StreamEvent, MAX_STREAM_JSON_LINE_BYTES};
+
+/// D-23 regex-based fallback for detecting `@user` mentions inside assistant
+/// text. Word-bounded (`[^\w]` on both sides or string edge) so substrings
+/// like `@username` or `foo_@user_bar` don't trip a notification. Pitfall 5
+/// (RESEARCH.md) — tests cover the substring rejection cases.
+fn at_user_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?:^|[^\w])@user(?:[^\w]|$)").expect("valid @user regex")
+    })
+}
+
+/// Returns true if `text` contains a word-bounded `@user` token.
+pub fn is_awaiting_user_mention(text: &str) -> bool {
+    at_user_regex().is_match(text)
+}
+
+/// Truncate `s` to at most `max` chars (char count, not bytes — safe on
+/// UTF-8). Appends `…` when truncating. Used for notification bodies where
+/// the OS clamps the payload length anyway.
+fn truncate_for_notification(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let keep = max.saturating_sub(1);
+        format!("{}…", s.chars().take(keep).collect::<String>())
+    }
+}
 
 /// Spawn the stdout reader task. Reads stream-json NDJSON lines and emits
 /// `StreamEvent` variants on `sink`. Terminates when stdout closes (EOF) and
@@ -409,6 +439,267 @@ pub fn spawn_raw_stderr_reader(
     })
 }
 
+/// Plan 04: drain `StreamEvent`s from the parser + stderr reader, write
+/// matching `agent_events` rows, and emit Tauri events. This is the single
+/// owner of the DB + emit side effects (aggregator pattern from Plan 02
+/// decisions). When an `AssistantText` contains `@user` it ALSO fires the
+/// OS notification via `dispatch_chat_notification` (D-23).
+///
+/// Runs until the source `mpsc::Receiver` closes (parser + stderr tasks
+/// finish). The caller is responsible for also spawning a supervisor task
+/// that waits on `child.wait()` and emits the `session_boundary` row on exit.
+pub fn spawn_event_aggregator<R: tauri::Runtime>(
+    rx: mpsc::Receiver<StreamEvent>,
+    agent_id: String,
+    pool: sqlx::SqlitePool,
+    sessions: std::sync::Arc<super::session_registry::LiveSessionRegistry>,
+    app_handle: tauri::AppHandle<R>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(run_event_aggregator(rx, agent_id, pool, sessions, app_handle))
+}
+
+async fn run_event_aggregator<R: tauri::Runtime>(
+    mut rx: mpsc::Receiver<StreamEvent>,
+    agent_id: String,
+    pool: sqlx::SqlitePool,
+    sessions: std::sync::Arc<super::session_registry::LiveSessionRegistry>,
+    app_handle: tauri::AppHandle<R>,
+) {
+    use tauri::Emitter;
+
+    while let Some(event) = rx.recv().await {
+        match event {
+            StreamEvent::SessionStarted { session_id } => {
+                // Stamp the session_id on the live-session entry so subsequent
+                // outbound frames carry it on their agent_events row and
+                // auto_resume can reference it.
+                sessions.bind_session_id(&agent_id, session_id.clone()).await;
+                let payload = super::types::SessionStartedPayload {
+                    agent_id: agent_id.clone(),
+                    session_id: session_id.clone(),
+                };
+                if let Err(e) = app_handle.emit("agent-session-started", &payload) {
+                    tracing::debug!(agent_id = %agent_id, err = %e, "session-started emit");
+                }
+            }
+            StreamEvent::AssistantDelta { delta } => {
+                // Delta-only — emit a lightweight event so the UI can
+                // progressively reveal the text. Authoritative DB write
+                // happens on the AssistantText flush below.
+                if let Err(e) = app_handle.emit(
+                    "agent-assistant-delta",
+                    &serde_json::json!({ "agentId": agent_id, "delta": delta }),
+                ) {
+                    tracing::debug!(agent_id = %agent_id, err = %e, "delta emit");
+                }
+            }
+            StreamEvent::AssistantText { content, model } => {
+                // D-23: check for word-bounded @user BEFORE the DB write so a
+                // slow DB doesn't delay the notification. catch_unwind inside
+                // dispatch_chat_notification makes this safe even in tests.
+                if is_awaiting_user_mention(&content) {
+                    super::notifications::dispatch_chat_notification(
+                        &app_handle,
+                        &agent_id,
+                        &truncate_for_notification(&content, 80),
+                        Some(&agent_id),
+                    );
+                }
+                let session_id = sessions.session_id_for(&agent_id).await;
+                let payload = serde_json::json!({
+                    "content": content,
+                    "model": model,
+                });
+                match crate::db::events::insert_agent_event(
+                    &pool,
+                    &agent_id,
+                    session_id.as_deref(),
+                    "assistant_text",
+                    &payload,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                {
+                    Ok(row) => {
+                        if let Err(e) = app_handle.emit("agent-event-appended", &row) {
+                            tracing::debug!(agent_id = %agent_id, err = %e, "event-appended emit");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(agent_id = %agent_id, err = %e, "assistant_text insert");
+                    }
+                }
+            }
+            StreamEvent::ToolUse {
+                tool_name,
+                tool_input,
+                tool_use_id,
+                approval_request_id,
+            } => {
+                let session_id = sessions.session_id_for(&agent_id).await;
+                let payload = serde_json::json!({
+                    "toolName": tool_name,
+                    "toolInput": tool_input,
+                    "toolUseId": tool_use_id,
+                });
+                match crate::db::events::insert_agent_event(
+                    &pool,
+                    &agent_id,
+                    session_id.as_deref(),
+                    "tool_use",
+                    &payload,
+                    approval_request_id,
+                    None,
+                    None,
+                )
+                .await
+                {
+                    Ok(row) => {
+                        let _ = app_handle.emit("agent-event-appended", &row);
+                    }
+                    Err(e) => tracing::warn!(agent_id = %agent_id, err = %e, "tool_use insert"),
+                }
+            }
+            StreamEvent::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+            } => {
+                let session_id = sessions.session_id_for(&agent_id).await;
+                let payload = serde_json::json!({
+                    "toolUseId": tool_use_id,
+                    "content": content,
+                    "isError": is_error,
+                });
+                match crate::db::events::insert_agent_event(
+                    &pool,
+                    &agent_id,
+                    session_id.as_deref(),
+                    "tool_result",
+                    &payload,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                {
+                    Ok(row) => {
+                        let _ = app_handle.emit("agent-event-appended", &row);
+                    }
+                    Err(e) => tracing::warn!(agent_id = %agent_id, err = %e, "tool_result insert"),
+                }
+            }
+            StreamEvent::TurnComplete {
+                terminal_reason,
+                is_error,
+            } => {
+                // Flip the most recent user_text row's delivery_status to
+                // "consumed" — the turn that just ended was the assistant's
+                // response to that message.
+                let session_id = sessions.session_id_for(&agent_id).await;
+                if let Ok(Some(last_user_id)) = crate::db::events::find_last_user_text_id(
+                    &pool,
+                    &agent_id,
+                    session_id.as_deref(),
+                )
+                .await
+                {
+                    let _ = crate::db::events::update_event_delivery_status(
+                        &pool,
+                        last_user_id,
+                        "consumed",
+                    )
+                    .await;
+                    let _ = app_handle.emit(
+                        "agent-delivery-updated",
+                        &super::types::DeliveryUpdate {
+                            event_id: last_user_id,
+                            status: "consumed".into(),
+                        },
+                    );
+                }
+                let payload = serde_json::json!({
+                    "terminalReason": terminal_reason,
+                    "isError": is_error,
+                });
+                if let Err(e) = app_handle.emit("agent-turn-complete", &payload) {
+                    tracing::debug!(agent_id = %agent_id, err = %e, "turn-complete emit");
+                }
+            }
+            StreamEvent::RawStdout { line } => {
+                let session_id = sessions.session_id_for(&agent_id).await;
+                let payload = serde_json::json!({ "line": line });
+                match crate::db::events::insert_agent_event(
+                    &pool,
+                    &agent_id,
+                    session_id.as_deref(),
+                    "raw_stdout",
+                    &payload,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                {
+                    Ok(row) => {
+                        let _ = app_handle.emit("agent-event-appended", &row);
+                    }
+                    Err(e) => tracing::warn!(agent_id = %agent_id, err = %e, "raw_stdout insert"),
+                }
+            }
+            StreamEvent::RawStderr { line } => {
+                let session_id = sessions.session_id_for(&agent_id).await;
+                let payload = serde_json::json!({ "line": line });
+                match crate::db::events::insert_agent_event(
+                    &pool,
+                    &agent_id,
+                    session_id.as_deref(),
+                    "raw_stderr",
+                    &payload,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                {
+                    Ok(row) => {
+                        let _ = app_handle.emit("agent-event-appended", &row);
+                    }
+                    Err(e) => tracing::warn!(agent_id = %agent_id, err = %e, "raw_stderr insert"),
+                }
+            }
+            StreamEvent::SystemNote { text } => {
+                let session_id = sessions.session_id_for(&agent_id).await;
+                let payload = serde_json::json!({ "text": text });
+                match crate::db::events::insert_agent_event(
+                    &pool,
+                    &agent_id,
+                    session_id.as_deref(),
+                    "system_note",
+                    &payload,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                {
+                    Ok(row) => {
+                        let _ = app_handle.emit("agent-event-appended", &row);
+                    }
+                    Err(e) => tracing::warn!(agent_id = %agent_id, err = %e, "system_note insert"),
+                }
+            }
+            StreamEvent::StdoutClosed => {
+                // Reader hit EOF; the supervisor's wait() will emit the
+                // session_boundary row. Nothing to do here.
+                tracing::debug!(agent_id = %agent_id, "stdout closed; aggregator draining");
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -662,5 +953,41 @@ mod tests {
         // Close write side so reader exits cleanly.
         drop(write_half);
         let _ = reader.await;
+    }
+
+    #[test]
+    fn is_awaiting_user_mention_matches_bounded_at_user() {
+        // Positive cases: @user with non-word char boundary (or edge).
+        assert!(is_awaiting_user_mention("@user can you verify"));
+        assert!(is_awaiting_user_mention("Please help me @user"));
+        assert!(is_awaiting_user_mention("are you ok @user?"));
+        assert!(is_awaiting_user_mention("Hey @user, confirm this."));
+        assert!(is_awaiting_user_mention("multi line\n@user\nlast"));
+        assert!(is_awaiting_user_mention("@user"));
+    }
+
+    #[test]
+    fn is_awaiting_user_mention_rejects_substring_matches() {
+        // Negative cases (Pitfall 5): @user that's part of a longer word
+        // identifier must NOT trigger a notification.
+        assert!(!is_awaiting_user_mention("@username"));
+        assert!(!is_awaiting_user_mention("foo@user123"));
+        assert!(!is_awaiting_user_mention("foo_@user_bar"));
+        assert!(!is_awaiting_user_mention("send email to admin@example.com"));
+        assert!(!is_awaiting_user_mention("no mention here"));
+        assert!(!is_awaiting_user_mention(""));
+    }
+
+    #[test]
+    fn truncate_for_notification_short_string_unchanged() {
+        assert_eq!(truncate_for_notification("hi", 10), "hi");
+        assert_eq!(truncate_for_notification("", 10), "");
+    }
+
+    #[test]
+    fn truncate_for_notification_long_string_ellipsized() {
+        let out = truncate_for_notification("abcdefghijk", 5);
+        assert_eq!(out.chars().count(), 5);
+        assert!(out.ends_with('…'));
     }
 }
