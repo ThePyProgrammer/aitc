@@ -160,6 +160,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     contentionScores,
     themeId,
     activeTrails,
+    parentChildMap,
+    dirsWithOwnFiles,
   } = useRadarStore(
     useShallow((s) => ({
       graphNodes: s.graphNodes,
@@ -171,6 +173,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       contentionScores: s.contentionScores,
       themeId: s.themeId,
       activeTrails: s.activeTrails,
+      parentChildMap: s.parentChildMap,
+      dirsWithOwnFiles: s.dirsWithOwnFiles,
     })),
   );
   const theme = useMemo(() => resolveTheme(themeId), [themeId]);
@@ -281,23 +285,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     return m;
   }, [graphNodes]);
 
-  // Parent→child map and dirs-with-own-files set for hull label collapsing.
-  const { parentChildMap, dirsWithOwnFiles } = useMemo(() => {
-    const pcm = new Map<string, Set<string>>();
-    const dwof = new Set<string>();
-    for (const n of graphNodes) {
-      dwof.add(n.dirKey); // Each dirKey that hosts at least one file.
-      const parts = n.dirKey === '' ? [] : n.dirKey.split('/');
-      for (let i = 0; i < parts.length; i++) {
-        const parent = i === 0 ? '' : parts.slice(0, i).join('/');
-        const child = parts.slice(0, i + 1).join('/');
-        const set = pcm.get(parent) ?? new Set<string>();
-        set.add(child);
-        pcm.set(parent, set);
-      }
-    }
-    return { parentChildMap: pcm, dirsWithOwnFiles: dwof };
-  }, [graphNodes]);
+  // parentChildMap + dirsWithOwnFiles now come from the store (computed
+  // once in fetchGraph) instead of a per-render useMemo.
 
   // Per-agent current-file + dot-state refs. Updated by the pipeline
   // subscription effect below; read by the rAF loop via stateRef.

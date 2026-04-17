@@ -114,6 +114,11 @@ interface RadarStore {
   pinnedNodeIds: Set<string>;
   activeTrails: ActiveTrail[];
   forceConfig: ForceConfig;
+  /** Pre-computed from graphNodes on fetchGraph — avoids 20k string ops
+   *  per render via useMemo. Maps parent dir → set of child dirs. */
+  parentChildMap: Map<string, Set<string>>;
+  /** Dirs that directly contain at least one file node. */
+  dirsWithOwnFiles: Set<string>;
   /** Currently selected graph color theme id. Persisted in localStorage
    *  under THEME_STORAGE_KEY. Always a valid key in THEMES (invalid values
    *  are coerced to DEFAULT_THEME_ID on write). */
@@ -168,6 +173,8 @@ export const useRadarStore = create<RadarStore>((set) => ({
   activeTrails: [],
   forceConfig: { ...DEFAULT_FORCE_CONFIG },
   themeId: readPersistedThemeId(),
+  parentChildMap: new Map<string, Set<string>>(),
+  dirsWithOwnFiles: new Set<string>(),
 
   /**
    * D-03 + D-05: fetch tree index + dependency graph in parallel, derive
@@ -198,7 +205,31 @@ export const useRadarStore = create<RadarStore>((set) => ({
       const validEdges: GraphEdge[] = edges
         .filter((e) => knownIds.has(e.from) && knownIds.has(e.to))
         .map((e) => ({ source: e.from, target: e.to, kind: e.kind }));
-      set({ graphNodes: nodes, graphEdges: validEdges, settledAt: null });
+
+      // Pre-compute parentChildMap + dirsWithOwnFiles once here instead
+      // of per-render via useMemo. Eliminates ~20k slice/join string ops
+      // from the React render path for a 5k-node graph.
+      const pcm = new Map<string, Set<string>>();
+      const dwof = new Set<string>();
+      for (const n of nodes) {
+        dwof.add(n.dirKey);
+        const parts = n.dirKey === '' ? [] : n.dirKey.split('/');
+        for (let i = 0; i < parts.length; i++) {
+          const parent = i === 0 ? '' : parts.slice(0, i).join('/');
+          const child = parts.slice(0, i + 1).join('/');
+          const s = pcm.get(parent) ?? new Set<string>();
+          s.add(child);
+          pcm.set(parent, s);
+        }
+      }
+
+      set({
+        graphNodes: nodes,
+        graphEdges: validEdges,
+        settledAt: null,
+        parentChildMap: pcm,
+        dirsWithOwnFiles: dwof,
+      });
     } catch {
       // Best-effort: leave existing slots as-is on failure.
     }
