@@ -89,6 +89,7 @@ Recent decisions affecting current work:
 - Phase 14 added: Multi-layer offscreen canvas rendering (static graph cached, only agent layer redraws at 60fps)
 - Phase 15 added: Enhanced ATC agent overlay (6-point trails, data blocks, leader lines, 3-tier TCAS conflict escalation, velocity vectors)
 - Phase 16 added: Typed edge system + temporal coupling + Louvain community detection
+- Phase 17 added: Conflict-triggered PreToolUse gating — replace tool-category gating with file-conflict gating. Full pitch + 3 design questions in 17-CONTEXT.md. Builds on Phase 08.
 
 ### Pending Todos
 
