@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod chat_runtime;
 pub mod comms;
 mod conflict;
 mod db;

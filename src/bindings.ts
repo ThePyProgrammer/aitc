@@ -143,6 +143,13 @@ async launchAgent(agentType: string, cwd: string, intent: string | null, options
  * 
  * T-03-06 mitigation: Only terminates processes tracked in the registry.
  * Will not kill arbitrary PIDs.
+ * 
+ * Phase 8 D-10 force-deny: signals every pending hook waiter for this
+ * agent with `HookDecision::Deny("agent terminated by user")` BEFORE the
+ * OS kill. This prevents the EPIPE race where the sidecar dies mid-read
+ * and Claude hangs waiting for a response that will never come. Also
+ * clears the agent's always-allow set and session bindings so a
+ * reconnection doesn't resurrect stale state.
  */
 async terminateAgent(agentId: string) : Promise<Result<null, string>> {
     try {
@@ -171,6 +178,47 @@ async updateAgentIntent(agentId: string, intent: string) : Promise<Result<null, 
 async getAgentLogs(agentId: string) : Promise<Result<string[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_agent_logs", { agentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Accept the passive-detected Claude hook consent prompt for `repo_cwd`:
+ * records the decision in `app_settings` AND installs the AITC PreToolUse
+ * hook into `<repo_cwd>/.claude/settings.local.json`.
+ */
+async acceptPassiveHookConsent(repoCwd: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("accept_passive_hook_consent", { repoCwd }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Decline the passive-detected Claude hook consent prompt for `repo_cwd`:
+ * records the decision so we never re-prompt. Does NOT install the hook.
+ */
+async declinePassiveHookConsent(repoCwd: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("decline_passive_hook_consent", { repoCwd }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Resolve the absolute path of the `aitc-hook` sidecar binary at runtime.
+ * 
+ * Tauri v2 stages sidecars next to the main executable with the target-triple
+ * suffix stripped, so `ShellExt::sidecar("aitc-hook")` is the canonical way to
+ * resolve the path (dev builds use `target/debug/aitc-hook`; bundled releases
+ * use the staged copy in the app's exec dir).
+ */
+async resolveSidecarPath() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resolve_sidecar_path") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -258,10 +306,20 @@ async listApprovalRequests() : Promise<Result<ApprovalRequest[], string>> {
 },
 /**
  * Approve a pending request.
+ * 
+ * Phase 8 semantics: signals the pending /hook waiter (if any) with
+ * `HookDecision::Allow`. Pitfall 8 guards via `rows_affected()` — if the row
+ * already resolved (e.g. AbandonGuard flipped it to `abandoned`) we skip the
+ * signal and just re-emit `approval-resolved` so the UI re-syncs.
+ * 
+ * `always_allow_for_session=true` inserts (agent_id, tool_name) into the
+ * in-memory always-allow set so subsequent /hook calls bypass row creation
+ * (D-22). The set is cleared on terminate_agent + process restart — never
+ * persisted to disk.
  */
-async approveRequest(id: number) : Promise<Result<null, string>> {
+async approveRequest(id: number, alwaysAllowForSession: boolean | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("approve_request", { id }) };
+    return { status: "ok", data: await TAURI_INVOKE("approve_request", { id, alwaysAllowForSession }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -269,10 +327,15 @@ async approveRequest(id: number) : Promise<Result<null, string>> {
 },
 /**
  * Deny a pending request.
+ * 
+ * Phase 8 semantics: signals the pending /hook waiter with
+ * `HookDecision::Deny(reason)`. `reason=None` falls back to
+ * `"denied by user"`. Pitfall 8 guard: only flip and signal if the row is
+ * still `pending`.
  */
-async denyRequest(id: number) : Promise<Result<null, string>> {
+async denyRequest(id: number, reason: string | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("deny_request", { id }) };
+    return { status: "ok", data: await TAURI_INVOKE("deny_request", { id, reason }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -292,10 +355,18 @@ async askMoreInfo(id: number, question: string) : Promise<Result<null, string>> 
 },
 /**
  * Approve a request with edited content.
+ * 
+ * Phase 8 semantics: derives a Claude-compatible `updated_input` JSON from
+ * the stored `tool_input_json`, replacing the tool-specific content field
+ * (`new_string` for Edit/MultiEdit, `content` for Write, `new_source` for
+ * NotebookEdit) with `edited_content`. Signals the waiter with
+ * `HookDecision::AllowWithEdits(updated_input)`.
+ * 
+ * Pitfall 8 guard: only flip + signal if the row is still `pending`.
  */
-async approveWithEdits(id: number, editedContent: string) : Promise<Result<null, string>> {
+async approveWithEdits(id: number, editedContent: string, alwaysAllowForSession: boolean | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("approve_with_edits", { id, editedContent }) };
+    return { status: "ok", data: await TAURI_INVOKE("approve_with_edits", { id, editedContent, alwaysAllowForSession }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -546,8 +617,12 @@ export type AgentState = "running" | "idle" | "waiting" | "conflict" | "error"
 export type ApprovalHistoryRecord = { id: number; sessionId: number | null; agentId: string | null; requestType: string; filePath: string | null; status: string; createdAt: string; resolvedAt: string | null; responseNote: string | null }
 /**
  * An approval request from an agent (enriched with Phase 4 fields).
+ * 
+ * Phase 8 extension: `tool_name`, `tool_input_json`, `session_id` carry the
+ * Claude Code PreToolUse context for pretool_use rows. These are `Option`
+ * because write_access rows (Phase 4 protected-path trigger) don't have them.
  */
-export type ApprovalRequest = { id: number; agentId: string; requestType: string; filePath: string | null; diffContent: string | null; status: string; urgency: string; responseNote: string | null; editedContent: string | null; createdAt: string; resolvedAt: string | null }
+export type ApprovalRequest = { id: number; agentId: string; requestType: string; filePath: string | null; diffContent: string | null; status: string; urgency: string; responseNote: string | null; editedContent: string | null; createdAt: string; resolvedAt: string | null; toolName: string | null; toolInputJson: string | null; sessionId: string | null }
 /**
  * Which process we believe authored the file event.
  * 
@@ -675,14 +750,14 @@ export type ProcessInfo = { pid: number; name: string; cwd: string | null; exe: 
  */
 export type ProtectedPath = { id: number; globPattern: string; createdAt: string }
 /**
- * A persisted conflict resolution record.
- */
-export type ResolutionRecord = { id: number; conflictEventId: number | null; filePath: string; agentAId: string; agentBId: string; resolutionType: string; hunkResolutions: string; notificationStatus: string; resolvedAt: string }
-/**
  * Return shape for `read_claude_md`: file content + editability flag so
  * the frontend knows whether to render a read-only preview or an editor.
  */
 export type ReadClaudeMdResult = { content: string; editable: boolean; path: string }
+/**
+ * A persisted conflict resolution record.
+ */
+export type ResolutionRecord = { id: number; conflictEventId: number | null; filePath: string; agentAId: string; agentBId: string; resolutionType: string; hunkResolutions: string; notificationStatus: string; resolvedAt: string }
 /**
  * A discovered Claude resource. Identity is `id` (stable across rescans);
  * `path` is informational and may change if the file moves.
