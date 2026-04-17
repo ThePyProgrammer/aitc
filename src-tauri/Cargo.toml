@@ -64,6 +64,11 @@ dirs = "6"
 tempfile = "3"
 walkdir = "2"
 
+# Phase 10 Plan 03: UUIDv4 for MCP Mcp-Session-Id header (MCP spec 2025-03-26
+# V3 Session Management). Already pulled in transitively by tauri-utils — we
+# just want direct-import access with the v4 feature.
+uuid = { version = "1", features = ["v4"] }
+
 # Phase 8: PreToolUse hook integration dependencies
 tauri-plugin-shell = "2"
 
