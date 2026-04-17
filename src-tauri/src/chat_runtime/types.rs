@@ -11,6 +11,14 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+/// Maximum outbound user message size at the Tauri command boundary. Oversized
+/// payloads are rejected with Err before any DB write (T-10-09 mitigation).
+pub const MAX_CHAT_MESSAGE_BYTES: usize = 256 * 1024;
+
+/// Maximum per-line cap for stream-json parser. Lines longer than this are
+/// skipped with a `tracing::warn!` (T-10-07 DoS mitigation).
+pub const MAX_STREAM_JSON_LINE_BYTES: usize = 1_048_576;
+
 /// A single row out of the `agent_events` table (D-14). `payload_json` holds
 /// the shape keyed by `event_type` — see PATTERNS.md "payload_json shapes"
 /// for the per-event schema. Stored as `serde_json::Value` on the wire so
