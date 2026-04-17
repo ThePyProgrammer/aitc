@@ -19,7 +19,8 @@
         "height": 800,
         "minWidth": 1280,
         "minHeight": 800,
-        "url": "index.html"
+        "url": "index.html",
+        "zoomHotkeysEnabled": false
       },
       {
         "label": "splashscreen",
@@ -29,7 +30,8 @@
         "decorations": false,
         "resizable": false,
         "center": true,
-        "transparent": false
+        "transparent": false,
+        "zoomHotkeysEnabled": false
       }
     ],
     "security": {

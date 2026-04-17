@@ -292,6 +292,24 @@ pub fn run() {
                 }
             });
 
+            // Lock webview zoom to 1.0 — WebKitGTK (Linux) handles
+            // Ctrl+scroll zoom at the native layer before JavaScript sees
+            // the event, so we monitor the `zoom-level` property and
+            // immediately revert any change. This is a no-op on other
+            // platforms (cfg-gated).
+            #[cfg(target_os = "linux")]
+            {
+                use webkit2gtk::WebViewExt;
+                let _ = window.with_webview(|webview| {
+                    let wv: webkit2gtk::WebView = webview.inner().clone();
+                    wv.connect_zoom_level_notify(move |wv| {
+                        if (wv.zoom_level() - 1.0).abs() > 0.001 {
+                            wv.set_zoom_level(1.0);
+                        }
+                    });
+                });
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())

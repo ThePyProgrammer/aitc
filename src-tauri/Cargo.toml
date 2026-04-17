@@ -67,6 +67,12 @@ walkdir = "2"
 # Phase 8: PreToolUse hook integration dependencies
 tauri-plugin-shell = "2"
 
+# Linux-only: lock webview zoom level via WebKitGTK's native API.
+# webkit2gtk is already a transitive dep of tauri (via wry) so this
+# only pins the version for our direct import — no extra C library.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "=2.0.1"
+
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"
