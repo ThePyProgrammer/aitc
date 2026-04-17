@@ -202,10 +202,10 @@ Plans:
 **Goal:** Ship a first-class CHAT tab inside Communications Hub driven by a long-lived `claude --input-format stream-json` subprocess per chattable agent, a new `agent_events` transcript table, an MCP server hosted on the existing self-register axum port (get_pending_user_messages + request_user_input tools), FIFO stdin outbound with delivery-status lifecycle, auto-resume fallback via `claude --resume --print`, read-only stdout/stderr capture for Codex/OpenCode/Generic, and full deletion of the Phase 4 embedded chat surface (ChatThread, ChatInput, MiniChatCard). Tab state URL-synced; unread badges on Sidebar + CHAT tab + per-agent rows; OS notifications only on @user / awaiting-user signals.
 **Requirements**: No new REQ-IDs; scope driven by CONTEXT.md decisions D-01..D-24. COMM-04 (freeform text messages to agents) carries forward from Phase 4 and is addressed implicitly by the new surface.
 **Depends on:** Phase 9
-**Plans:** 6 plans
+**Plans:** 1/6 plans executed
 
 Plans:
-- [ ] 10-01-PLAN.md — Wave 0: DB migration 006 (agent_events + one-shot chat_messages migration), backend scaffolds (chat_runtime/, mcp/, db/events.rs), 7 stream-json fixtures, DeliveryStatus `consumed` variant, MasterDetailShell width props, frontend component + store stubs
+- [x] 10-01-PLAN.md — Wave 0: DB migration 006 (agent_events + one-shot chat_messages migration), backend scaffolds (chat_runtime/, mcp/, db/events.rs), 7 stream-json fixtures, DeliveryStatus `consumed` variant, MasterDetailShell width props, frontend component + store stubs
 - [ ] 10-02-PLAN.md — Wave 1 chat_runtime core: session_registry, db/events CRUD, stream-json parser (with @250ms idle flush), FIFO outbound writer, launcher live-session, supervisor, auto_resume, Tauri commands (send/list/clear/markRead/relaunch)
 - [ ] 10-03-PLAN.md — Wave 1 MCP server: Streamable HTTP POST/GET/DELETE /mcp on self_register host, two-tool surface (get_pending_user_messages + request_user_input), per-session .claude/aitc-mcp-{id}.json atomic writer
 - [ ] 10-04-PLAN.md — Wave 2 integration: AgentAdapter::capabilities trait + ClaudeCodeAdapter long-lived rewrite (MCP config + stream-json), dispatch_chat_notification body + @user regex in parser, codex/opencode raw_stdout capture, Phase 4 send_chat_message/list_chat_messages/update_message_delivery_status DELETED
