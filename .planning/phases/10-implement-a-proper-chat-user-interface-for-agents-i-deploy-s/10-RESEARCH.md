@@ -1029,27 +1029,25 @@ pub async fn send_chat_message_to_agent<R: tauri::Runtime>(
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All four open items are resolved below. Each resolution is authoritative for Phase 10 execution. Re-opens require a new RESEARCH delta before modifying plans.
 
 1. **Does the Claude Code `--verbose` stream continue to inline `Notification`-class hook events when they fire mid-session (e.g., idle_prompt), or only at SessionStart?**
    - What we know: Empirically, SessionStart `hook_started`/`hook_response` lines appear in `--verbose` output at startup. The `--include-hook-events` flag also exists for broader hook surfacing.
-   - What's unclear: Whether mid-session `Notification` hooks surface in stdout, or whether AITC still needs to install a file-based hook for them.
-   - Recommendation: Plan 02 includes a 5-minute smoke: run a long-session `claude -p --input-format stream-json --output-format stream-json --include-hook-events`, provoke a tool use that requires permission (without `--dangerously-skip-permissions`), confirm whether the permission-prompt `Notification` appears in stdout. If yes, AITC can skip hook install for chat entirely. If no, install `Notification` hook via the existing `hook_install.rs` path (merge-safe upsert) with the sidecar forwarding the event to a new `/hook/notification` route.
+   - RESOLVED: Plan 02 executes a 5-minute smoke during Wave 1 development (long-session `claude -p --input-format stream-json --output-format stream-json --include-hook-events`, provoke a permission-prompt tool call without `--dangerously-skip-permissions`) to verify `Notification` events appear in stdout. If they do, AITC's `chat_runtime::parser` handles them inline and NO file-based hook install is needed for chat. If they do NOT, `Notification` hook is installed via `hook_install.rs` (merge-safe upsert) with the sidecar forwarding to a new `/hook/notification` route. Default assumption for planning: `--include-hook-events` surfaces them inline (matches SessionStart precedent) — Plan 02's smoke test is a confirm-or-correct step, not a scope blocker. If the smoke flips the assumption, Plan 04 absorbs the hook install as an additive task.
 
 2. **Does `--strict-mcp-config` completely suppress the user's existing `.mcp.json` and `~/.claude.json` MCP servers, or only override them by name?**
    - What we know: Docs say "Only use MCP servers from `--mcp-config`, ignoring all other MCP configurations." [CITED: CLI reference]
-   - What's unclear: Edge case where a plugin-provided MCP server shares a name with `aitc-chat`.
-   - Recommendation: Use a unique name (`aitc-chat` is unlikely to collide) and treat the docs statement as authoritative.
+   - RESOLVED: Treat the docs statement as authoritative — `--strict-mcp-config` suppresses all other sources. Plan 02 uses the unique MCP server name `aitc-chat` (no plausible collision) and passes `--strict-mcp-config` on every launch. No additional runtime check; if a user plugin collides (unlikely), Plan 04 auto-terminate and log `MCP_NAME_COLLISION` as a Claude's-Discretion error path.
 
 3. **What exactly triggers `terminal_reason:"completed"` vs other terminal reasons?**
    - What we know: `completed` fires on clean turn end with `stop_reason:"end_turn"`. Presumably other reasons exist (`max_turns`, `error`, user abort).
-   - What's unclear: Full enum of `terminal_reason` values.
-   - Recommendation: Parse defensively — treat any `{type:"result"}` as a TurnComplete signal regardless of reason, surface the reason string in the UI for non-success cases (`SESSION_ENDED · error` etc.).
+   - RESOLVED: Parse defensively. `chat_runtime::parser` treats ANY `{type:"result"}` envelope as a `TurnComplete` event regardless of `terminal_reason` value. The `terminal_reason` string is passed through verbatim to `agent_events.payload_json` for UI surfacing (`SESSION_ENDED · <reason>` per 10-UI-SPEC Session Boundary copywriting). No enum exhaustiveness is required in the Rust side — `String` with `_ =>` fallback on any reason-based UI switch.
 
 4. **How does MCP session teardown behave when the Claude subprocess exits unexpectedly (without sending DELETE /mcp)?**
    - What we know: The MCP spec says clients SHOULD send DELETE when leaving; it's not mandatory.
-   - What's unclear: AITC's MCP state will accumulate orphaned sessions over many Claude launches.
-   - Recommendation: Implement a 15-minute idle sweep: if an MCP session receives no requests for 15 min and the associated Claude subprocess has exited, garbage-collect its state. Low priority for v1.
+   - RESOLVED: Low-priority cleanup. v1 ships without the 15-minute idle sweep; orphan MCP sessions accumulate but are bounded by the number of Claude launches per AITC session (small — single-digit typical). Plan 03 does NOT implement the sweep. If orphan accumulation becomes a problem in practice, add the sweep in a follow-up Phase 11+ task. Recorded as a deferred operational cleanup in 10-CONTEXT.md (already covered by "Supervisor/restart policy" Claude's-Discretion line).
 
 ---
 
