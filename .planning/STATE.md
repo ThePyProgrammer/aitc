@@ -112,6 +112,7 @@ Recent decisions affecting current work:
 - Phase 15 added: Enhanced ATC agent overlay (6-point trails, data blocks, leader lines, 3-tier TCAS conflict escalation, velocity vectors)
 - Phase 16 added: Typed edge system + temporal coupling + Louvain community detection
 - Phase 17 added: Conflict-triggered PreToolUse gating — replace tool-category gating with file-conflict gating. Full pitch + 3 design questions in 17-CONTEXT.md. Builds on Phase 08.
+- Phase 11.1 inserted after Phase 11 (2026-04-21): Fix zoom-scroll lag in RadarCanvas — wheel-event rAF coalescing + investigate folder-hull caching + audit Zustand viewport writeback cascade. URGENT — surfaced during Phase 11 manual smoke. Not a Phase 11 regression; performance-only scope; no visual change.
 
 ### Pending Todos
 

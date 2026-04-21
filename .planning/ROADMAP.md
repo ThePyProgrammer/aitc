@@ -229,6 +229,22 @@ Plans:
 
 **Verification status:** Passed (2026-04-21). User-confirmed manual smoke: worker loads cleanly in Tauri prod build, visual invariance preserved, force-config sliders "damn responsive" (live D-31 proxy witness — sim is off main thread). Zoom-scroll lag surfaced during manual smoke; not a Phase 11 regression (hot-path gate short-circuits when sim is settled); carried to Phase 11.1.
 
+### Phase 11.1: Fix zoom-scroll lag in RadarCanvas (INSERTED)
+
+**Goal:** Make wheel-driven zoom in/out on the Radar feel smooth on a settled graph. Surfaced during Phase 11 manual smoke: scrolling the wheel to zoom causes significant UI lag. Not a Phase 11 regression — the hot-path gate short-circuits when `isSimulatingRef.current === false`, so the render loop is byte-identical to Phase 7. Fix is scoped as performance-only; no visual change; no new capability.
+
+**Likely causes (to investigate during plan phase):**
+- (a) Wheel events fire at 120–240Hz on modern trackpads, driving React re-renders faster than rAF can consume → coalesce wheel events through rAF.
+- (b) `drawFolderHulls` recomputes convex hulls per frame even when positions are static → cache hulls keyed on `settledAt` / a positions-generation counter.
+- (c) `storeSetViewport(viewport)` round-trip triggers Zustand subscribers (minimap, force-config panel?) to re-render on every wheel event → audit subscriber list and move to a ref-based publication pattern if the cost shows up.
+
+**Requirements**: No new REQ-IDs (perf refactor of VIZN-04 delivery).
+**Depends on:** Phase 11
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 11.1 to break down)
+
 ### Phase 12: Add IPC bridge nodes and cross-language boundary visualization — parse tauri-specta bindings.ts for the command surface, cross-reference invoke() callers with #[tauri::command] handlers, render bridge nodes on a visible frontend/backend boundary line
 
 **Goal:** [To be planned]
