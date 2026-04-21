@@ -10,7 +10,14 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Maximum number of agents the registry will accept (T-03-03 mitigation).
-const MAX_AGENTS: usize = 100;
+///
+/// Raised 100 → 1000 pending Phase 18 (passive-scan flooding). The original
+/// 100 was set when passive detection was young and the worst case was a
+/// couple of PASSIVE-{pid} entries per repo. Phase 10's long-lived sessions
+/// + any developer running multiple claude CLIs machine-wide overflow it
+/// within seconds of boot. 1000 is a cheap safety net — HashMap handles it
+/// trivially — and Phase 18 will properly scope passive registration.
+const MAX_AGENTS: usize = 1000;
 
 /// Maximum stdout ring buffer lines per agent.
 const MAX_STDOUT_LINES: usize = 1000;
