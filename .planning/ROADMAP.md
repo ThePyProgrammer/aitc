@@ -307,10 +307,13 @@ Plans:
 
 ### Phase 18: Fix passive-scan registry flooding. AgentRegistry hits its MAX_AGENTS=100 cap within seconds of startup because passive_bridge.bridge_tick registers a PASSIVE-{pid} for every claude/codex/opencode-named process on the machine — including unrelated interactive CLI sessions in other terminals, plus short-lived subprocesses that Phase 10 long-lived stream-json runtime spawns (MCP request handlers, aitc-hook fires, node helpers). Once capped, new KAGENT launches fail with 'Registry at capacity (100)'. Need to scope passive registration to only processes that actually matter: PIDs that self-registered via /register, or PIDs whose cwd is inside the active watched repo AND command-line matches a narrow AITC-compatible shape, or a hybrid where noisy subprocess children do not get their own registry entry (only the parent claude/codex does). Also raise MAX_AGENTS ceiling as a safety net. Pre-existing bug from Phase 3 (T-03-03 throttle) / Phase 6 (passive_bridge). Phase 10 amplified it with 4 long-lived sessions.
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Scope `passive_bridge::bridge_tick` to drop subprocess children whose parent is itself an in-scope allowlisted candidate (D-01/D-02 hybrid filter: cwd-in-repo + parent-PID-in-candidate-set), formalize `MAX_AGENTS = 1000` as an intentional emergency ceiling with an explanatory doc comment (D-03), and expose a read-only `get_registry_stats` Tauri command backed by a new `capacity_hits_since_start: AtomicU64` on `AgentRegistry` for post-hoc debugging (D-04). Preserve AGNT-03 (externally-launched agents with non-candidate shell parents still register).
+**Requirements**: AGNT-03 (preservation-class — filter must not break external agent detection)
 **Depends on:** Phase 17
-**Plans:** 0 plans
+**Plans:** 4 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 18 to break down)
+- [ ] 18-01-PLAN.md — Wave 1: parent-PID in-candidate-set filter inside `bridge_tick` + `cand_with_parent` helper + 5 new unit/regression tests (parent-drops-children, orphaned-child-registers, child-of-cwd-filtered-parent-promoted, 1+50 flood regression, AGNT-03 preservation). Core fix. (D-01, D-02, D-05, AGNT-03)
+- [ ] 18-02-PLAN.md — Wave 1: `capacity_hits_since_start: AtomicU64` field on `AgentRegistry` + increment on `upsert_agent`'s at-capacity branch + `RegistryStats` struct with specta derives + `snapshot_stats()` method + 2 unit tests. (D-03, D-04, D-05)
+- [ ] 18-03-PLAN.md — Wave 2: `get_registry_stats` Tauri command in `agents/commands.rs` + registration in `lib.rs` `collect_commands!` + `RegistryStats` type registration + verified `src/bindings.ts` regen. Depends on 18-02. (D-04)
+- [ ] 18-04-PLAN.md — Wave 2: rewrite `MAX_AGENTS` doc comment with D-03 rationale (why 1000, why not 100, why not configurable) + forward-pointer to 18-02's `capacity_hits_since_start`. Depends on 18-02 (same file, different region). (D-03)
