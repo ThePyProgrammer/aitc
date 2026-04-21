@@ -240,10 +240,12 @@ Plans:
 
 **Requirements**: No new REQ-IDs (perf refactor of VIZN-04 delivery).
 **Depends on:** Phase 11
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 11.1-01-PLAN.md — Wave 1: wheel rAF coalescer + useRafCoalesced hook + defensive viewport writeback throttle + settledAt-keyed hullCache + drawFolderHulls rewrite + radarPerfDebug rolling-p95 diagnostic (D-01..D-19; VIZN-04 perf delivery)
+- [x] 11.1-01-PLAN.md — Wave 1: wheel rAF coalescer + useRafCoalesced hook + defensive viewport writeback throttle + settledAt-keyed hullCache + drawFolderHulls rewrite + radarPerfDebug rolling-p95 diagnostic (D-01..D-19; VIZN-04 perf delivery)
+
+**Verification status:** Code-complete 2026-04-21 (commits `16c663a` / `969db53` / `b367489` / `cb218e2`). Verifier confirmed 19/19 D-XX witnesses pass; 0 new test regressions; workers untouched (`git diff HEAD~5 -- src/workers/` empty). Pending manual wheel-zoom smoke in the Tauri prod build (`localStorage.radarPerfDebug = '1'` to capture numeric evidence).
 
 ### Phase 12: Add IPC bridge nodes and cross-language boundary visualization — parse tauri-specta bindings.ts for the command surface, cross-reference invoke() callers with #[tauri::command] handlers, render bridge nodes on a visible frontend/backend boundary line
 
