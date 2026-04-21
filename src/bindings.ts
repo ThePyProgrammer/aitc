@@ -69,6 +69,24 @@ async getDependencyGraph() : Promise<Result<DependencyEdgeDto[], string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Get the IPC bridge surface (commands + handlers + callers) for the active
+ * watch. Returns an empty vec if no watch is active.
+ * 
+ * Bridges use repo-relative forward-slash paths (matching `get_tree_index`
+ * convention, commit `a1b15b6`).
+ * 
+ * CPU-heavy parsing runs on `tauri::async_runtime::spawn_blocking` so the main
+ * async runtime stays responsive during the <100ms build target (D-35).
+ */
+async getIpcBridges() : Promise<Result<IpcBridgeDto[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_ipc_bridges") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getLaunchCwd() : Promise<Result<string | null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_launch_cwd") };
@@ -689,6 +707,7 @@ export type ApprovalRequest = { id: number; agentId: string; requestType: string
  * surface the disambiguation rather than pick wrong.
  */
 export type Attribution = { kind: "pid"; value: number } | { kind: "ambiguous"; value: number[] } | { kind: "unattributed" }
+export type CallShape = "literal" | "typed"
 /**
  * D-01: four UI categories (Skills, Agents, Plugins, Configuration). The
  * "Configuration" UI tab bundles Hook + Command + Settings + Mcp; the
@@ -728,7 +747,15 @@ from: string;
  * Repo-relative forward-slash path of imported file.
  */
 to: string; kind: EdgeKind }
-export type EdgeKind = "import" | "reexport" | "typeOnly" | "dynamicImport" | "use" | "modDecl" | "fromImport" | "importStmt"
+export type EdgeKind = "import" | "reexport" | "typeOnly" | "dynamicImport" | "use" | "modDecl" | "fromImport" | "importStmt" | 
+/**
+ * Phase 12 D-27: caller file → bridge node (frontend invoke call-site).
+ */
+"invokes" | 
+/**
+ * Phase 12 D-27: bridge node → Rust handler file.
+ */
+"handles"
 /**
  * A single debounced, attributed filesystem event.
  */
@@ -759,6 +786,52 @@ export type FileEventKind = { kind: "create" } | { kind: "modify" } | { kind: "r
  * Resolution choice for a single hunk in the merge UI.
  */
 export type HunkResolution = { hunkIndex: number; choice: string; customContent: string | null }
+/**
+ * Wire-format for the get_ipc_bridges Tauri command (D-06).
+ */
+export type IpcBridgeDto = { 
+/**
+ * camelCase name from bindings.ts (e.g. "startWatch").
+ */
+commandName: string; 
+/**
+ * snake_case Rust fn name (e.g. "start_watch").
+ */
+rustName: string; 
+/**
+ * Repo-relative forward-slash path to the Rust handler file. Empty
+ * string if no handler was found (dangling command — D-09).
+ */
+handlerFile: string; 
+/**
+ * 1-indexed line number of the `fn` declaration. 0 if dangling.
+ */
+handlerLine: number; 
+/**
+ * Aggregated frontend call-sites (sorted by (file, line)).
+ */
+callerFiles: IpcCallSite[]; 
+/**
+ * Truncated "(args) → return" summary for the tooltip (≤ 200 chars).
+ */
+signatureSummary: string; 
+/**
+ * True if the command signature contains a `TAURI_CHANNEL<…>` arg.
+ */
+hasChannelArg: boolean }
+export type IpcCallSite = { 
+/**
+ * Repo-relative forward-slash path of the caller file.
+ */
+file: string; 
+/**
+ * 1-indexed line number of the call-site.
+ */
+line: number; 
+/**
+ * Which call-site shape produced this hit.
+ */
+shape: CallShape }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 /**
  * Adapter-specific launch tuning. Currently only Claude Code consumes any of
