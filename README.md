@@ -1,141 +1,161 @@
-# AI Traffic Controller (AITC)
+# 🛩️ AI Traffic Controller (AITC)
 
-> A single-operator cockpit for running multiple coding AI agents on one codebase — like air traffic control for aircraft in an airspace.
+> You have four coding agents running in four different terminals and last Tuesday two of them deleted the same file at the same time and now you're here.
 
-AITC watches agents work, visualises them on a spatial map of the codebase, flags it when two of them reach for the same file, and is the one place you approve or deny everything they want to do. Built for the solo developer who runs Claude Code, Codex, OpenCode, and a handful of other coding agents in parallel and needs to stay ahead of them without juggling five terminals.
+So there's this joke where you're a developer in 2026 and your whole job is opening Claude Code in one tab, Codex in another, OpenCode in a third, and pretending you know what any of them are doing. This is the tool for that.
 
-## Core capabilities
+AITC is **air traffic control for coding agents**. They're the little planes, your repo is the airspace, you're the dude in the tower with the bad coffee and the radar scope. When two agents start circling the same runway (read: file), a big red thing happens and you press a button.
 
-- **Live agent manifest** — every active coding agent (launched by AITC or externally) with ID, protocol, current file, and state (Running / Idle / Waiting / Conflict / Error).
-- **Force-directed codebase graph** — nodes are source files, edges are `import` / `dependency` relationships extracted with `tree-sitter`, filesystem proximity acts as gravity, and agents trail 10s fading comets along the edges as they work.
-- **Real-time conflict detection** — two agents writing the same file inside the conflict window triggers a visual alert, an OS notification, and a row in the Requests queue.
-- **3-way merge UI** — resolve overlapping edits hunk-by-hunk with agent intent shown alongside each diff. Backed by a backup manager so a bad merge is always reversible.
-- **Claude Code PreToolUse hook integration** — every gated Claude Code tool call blocks on an AITC approval row until you approve, deny, or approve-with-edits. `--dangerously-skip-permissions` agents bypass AITC and move freely (commit `06fbf1e`). Fail-safe deny on AITC outage.
-- **Communications Hub** — approval queue with file paths and diff previews, per-agent chat driven by a long-lived `claude --input-format stream-json` process, OS notifications deep-linked to the specific request.
-- **Arsenal** — single pane over `~/.claude/` and `<cwd>/.claude/` showing installed skills, agents, plugins, hooks, commands, and MCP servers. Inline editor for the two `CLAUDE.md` files.
-- **Session history** — virtualized tables for past agent sessions, resolved conflicts, and approval decisions.
-- **File heat map** — cross-agent contention overlay on the codebase graph.
+Also it was supposed to be a weekend project and now it's seventeen phases long. You know how it goes.
 
-## Architecture (one minute version)
+## what does it actually do
+
+- **👀 Tower Control** — a live manifest of every agent that's currently doing a crime to your codebase. ID, protocol, current file, state (`RUNNING` / `IDLE` / `WAITING` / `CONFLICT` / `ERROR` / `vibing`). Launch new ones, reap old ones, watch them work.
+- **🛰️ Airspace Radar** — a force-directed graph of your source files with `import` edges pulled by tree-sitter and filesystem proximity acting as gravity. Agents leave 10-second fading comet trails behind them as they scurry between files. Yes it looks cool. That's the whole point. Why else would you build this.
+- **💥 Conflict detection** — two agents write the same file inside the conflict window? instant visual, OS notification, new row in the queue. "Why are you both in `auth.rs`" energy.
+- **🧩 3-way merge UI** — the merge editor you wish you had at work. Agent A's change on the left, Agent B's on the right, the base in the middle, each agent's *intent* shown next to the hunk so you remember why these crimes were committed. BackupManager has your back if you merge badly.
+- **🛂 Claude Code PreToolUse hooks** — every gated tool call from a Claude Code agent freezes until you approve it in the Requests queue. (Or deny. Or approve-with-edits. You have options.) `--dangerously-skip-permissions` agents get a free pass and move around unbothered — see commit `06fbf1e`, the angry-developer hotfix. If AITC crashes, the hook fails closed so nothing can ship behind your back.
+- **💬 Comms Hub** — an approval queue with diffs + a per-agent chat tab backed by a long-lived `claude --input-format stream-json` process. Finally, a way to yell at the agent that doesn't involve the system logs.
+- **🎒 Arsenal** — a single pane over `~/.claude/` and `<cwd>/.claude/` so you know exactly which Skills, Agents, Plugins, Hooks, Commands, and MCP servers Claude currently has access to. Inline editor for both `CLAUDE.md` files because you know you're going to edit them.
+- **🔥 File heat map** — a contention overlay showing which files have been the main character this week.
+- **🗂️ Session history** — virtualized tables of past sessions, conflicts, approvals. Git blame, but for vibes.
+
+## architecture, such as it is
+
+Tauri v2 shell + React frontend + a frankly too-ambitious Rust backend, because "I just wanted a little tray app" and then Rust happened.
 
 ```
 ┌─ React frontend (Vite + Tailwind v4 + Zustand) ─────────────────┐
 │  Views: Radar · TowerControl · Comms · Conflicts · History ·    │
 │         Arsenal                                                 │
-│  IPC: tauri-specta-generated TypeScript bindings                │
+│  IPC: tauri-specta TS bindings (we do not manually sync types.  │
+│       we tried. it was bad.)                                    │
 └──────────┬──────────────────────────────────────────────────────┘
-           │ invoke() / Channel<T> (streamed events)
+           │ invoke() / Channel<T>
 ┌──────────▼─────────────────────────────── Rust backend ────────┐
 │  pipeline/    notify 8 + notify-debouncer-full 0.7              │
 │               file events → debounce → PID attribution → batch  │
-│  agents/      AgentRegistry, AgentAdapter trait,                │
+│  agents/      AgentRegistry + AgentAdapter trait;               │
 │               adapters: claude_code · codex · opencode · generic│
 │               self_register axum server (/register, /hook)      │
 │               aitc-hook sidecar (Claude Code PreToolUse)        │
 │  conflicts/   sliding window per-file conflict detection        │
 │  comms/       approval rows, protected paths, chat runtime,     │
-│               MCP server (/mcp on the same axum port)           │
+│               MCP server bolted onto the same axum port because │
+│               it was there                                      │
 │  claude_resources/  scanner + parser for ~/.claude & .claude/   │
-│  db/          sqlx + SQLite (schema migrations 001..006)        │
+│  db/          sqlx + SQLite (migrations 001..006)               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Tech choices and their rationale live in [`CLAUDE.md`](CLAUDE.md).
+Why each of those: see [`CLAUDE.md`](CLAUDE.md). Short version: it's Tauri because Electron is 30x bigger, it's Rust because I wanted `notify` and `sysinfo`, it's Zustand because Redux was gonna make me sad.
 
-## Getting started
+## running it locally
+
+You need Rust (stable), Node 20+, and whatever [Tauri v2 tells you to install](https://v2.tauri.app/start/prerequisites/) for your OS. Then:
 
 ```bash
-# 1. Prereqs: Rust (stable), Node 20+, and the Tauri v2 system deps for your OS
-#    https://v2.tauri.app/start/prerequisites/
-
 npm install
 
-# 2. Dev (launches Vite + Tauri with HMR on both sides)
+# dev — HMR on both the React side AND the Rust side
 npm run tauri dev
 
-# 3. Production build
+# prod build, for when you want to hand someone a scary-looking binary
 npm run tauri build
 
-# 4. Run the test suites
-npm test                                # Vitest frontend
-cargo test --manifest-path src-tauri/Cargo.toml   # Rust backend
-cargo test --manifest-path src-tauri/Cargo.toml -p aitc-hook   # hook sidecar
+# tests
+npm test                                                             # frontend
+cargo test --manifest-path src-tauri/Cargo.toml                      # backend
+cargo test --manifest-path src-tauri/Cargo.toml -p aitc-hook         # hook sidecar
 ```
 
-The dev build writes its backend HTTP port to `~/.aitc/port` on startup; the `aitc-hook` sidecar and any external integrations read from there.
+The dev build writes its backend HTTP port to `~/.aitc/port`. The `aitc-hook` sidecar reads it from there. If that file is missing or stale, the hook fails closed and your agent will look at you like 🤨.
 
-## Project layout
+## where everything lives
 
 ```
-src/                     React frontend
-  views/                   Radar, TowerControl, CommsHub, Conflicts, History, Arsenal
-  stores/                  Zustand stores (agentStore, conflictStore, radarStore, …)
-  components/ui/           StatusBadge, Button, and other design-system primitives
-  styles/                  Tailwind v4 theme, fonts, animations
+src/                     frontend
+  views/                   Radar · TowerControl · CommsHub · Conflicts · History · Arsenal
+  stores/                  Zustand stores, one per domain
+  components/ui/           design-system primitives (StatusBadge, Button, ...)
+  styles/                  Tailwind v4 + Command Horizon theme + phosphor animations
 src-tauri/
   src/
-    pipeline/              File watcher + process snapshot + event batching
-    agents/                AgentRegistry, adapters, self-register axum server
-    conflicts/             Conflict detection engine
-    comms/                 Approval workflow, chat runtime, MCP server
+    pipeline/              the file watcher + process snapshot machinery
+    agents/                registry, adapters, self-register server
+    conflicts/             the sliding-window conflict engine
+    comms/                 approvals, chat runtime, MCP server
     claude_resources/      Arsenal scanner/parser
     db/migrations/         SQLite schema (001..006)
-  aitc-hook/               Claude Code PreToolUse sidecar binary (separate crate)
-.planning/                 GSD workflow artifacts (ROADMAP, phase plans, state)
+  aitc-hook/               the Claude Code PreToolUse sidecar (its own crate)
+.planning/                 GSD artifacts — this is where the spec actually lives
 wireframes/                Command Horizon design-system source
 ```
 
-## Build Plan
+## the build plan, featuring scope creep
 
-AITC is built phase-by-phase via [GSD](.planning/) — 17 phases so far, each with its own `.planning/phases/NN-*/` directory (research · context · plan(s) · verification). Phases execute strictly in numeric order; every phase depends on its predecessor. Phases 11-17 were added after the v1.0 foundation shipped to capture radar polish (11-16) and a late-arriving rethink of the gating model (17).
+Built phase-by-phase through [GSD](.planning/). Started as "oh I'll ship six phases, a cute little tower + radar + merge UI app." Now there are seventeen. Phases 11-17 were added *after* v1.0 shipped because once you have a functional ATC radar you cannot stop asking what if the radar was cooler. Classic.
+
+Each phase has a `.planning/phases/NN-*/` folder with research · context · plan(s) · verification artefacts. Phases run strictly in numeric order — each one depends on the one before. No cheating.
 
 ```
-Wave 0 — Radar foundation (v1.0)
-  ├── 1  Foundation + App Shell              → (none)         ✅ shipped
-  ├── 2  Real-Time Data Pipeline             → 1              ✅ shipped (2026-04-10)
-  ├── 3  Agent Management + Conflict Detect  → 2              ✅ shipped
-  ├── 4  Core UI Views                       → 3              ✅ shipped
-  ├── 5  Conflict Resolution + History       → 4              ✅ shipped
-  └── 6  Pipeline Activation + Wiring        → 5              ✅ shipped (gap closure)
+Wave 0 — "ok let's actually ship v1"
+  ├── 1  Foundation + App Shell              → (none)     ✅ shipped
+  ├── 2  Real-Time Data Pipeline             → 1          ✅ shipped (2026-04-10)
+  ├── 3  Agents + Conflict Detection         → 2          ✅ shipped
+  ├── 4  Core UI Views                       → 3          ✅ shipped
+  ├── 5  Conflict Resolution + History       → 4          ✅ shipped
+  └── 6  Pipeline Activation (gap closure)   → 5          ✅ shipped
 
-Wave 1 — Controller surfaces
-  ├── 7  Graph-based Codebase Map            → 6              ✅ shipped (replaces treemap)
-  ├── 8  Claude Code PreToolUse Hooks        → 7              ✅ shipped
-  ├── 9  Arsenal (skills/agents/config)      → 8              ✅ shipped
-  └── 10 First-class Chat UI                 → 9              🟡 5/6 plans (10-06 pending)
+Wave 1 — "wait, I want more surfaces"
+  ├── 7  Graph-based Codebase Map            → 6          ✅ shipped (RIP treemap, 2026)
+  ├── 8  Claude Code PreToolUse Hooks        → 7          ✅ shipped
+  ├── 9  Arsenal (skills / agents / config)  → 8          ✅ shipped
+  └── 10 First-class Chat UI                 → 9          🟡 5/6 plans (just 10-06 left — frontend polish + UAT)
 
-Wave 2 — Radar performance polish
-  ├── 11 d3-force in a WebWorker             → 10             ⏳ planning
-  ├── 12 IPC bridge nodes + boundary viz     → 11             ⏳ planning
-  ├── 13 4-level semantic zoom               → 12             ⏳ planning
-  ├── 14 Multi-layer offscreen canvas        → 13             ⏳ planning
-  ├── 15 Enhanced ATC agent overlay          → 14             ⏳ planning
-  └── 16 Typed edges + Louvain communities   → 15             ⏳ planning
+Wave 2 — "the radar should be sicker"
+  ├── 11 d3-force in a WebWorker             → 10         ⏳ planning  ← you are here
+  ├── 12 IPC bridge nodes + boundary viz     → 11         ⏳ planning
+  ├── 13 4-level semantic zoom               → 12         ⏳ planning
+  ├── 14 Multi-layer offscreen canvas        → 13         ⏳ planning
+  ├── 15 Enhanced ATC agent overlay (TCAS)   → 14         ⏳ planning
+  └── 16 Typed edges + Louvain communities   → 15         ⏳ planning
 
-Wave 3 — Gating model rethink
-  └── 17 Conflict-triggered PreToolUse gate  → 16             ⏳ drafted (see 17-CONTEXT.md)
+Wave 3 — "actually the whole gating model is wrong"
+  └── 17 Conflict-triggered gate             → 16         ⏳ drafted (17-CONTEXT.md)
 ```
 
-**Status (as of 2026-04-21):** Waves 0 and 1 are substantively complete — all of the v1.0 radar foundation (Phases 1-6) shipped, Phase 7's graph map replaced the treemap, Phase 8 shipped Claude Code hook integration, and Phase 9 shipped Arsenal. Phase 10's chat rewrite is in-flight (4 of 6 plans executed; 10-05 just completed, 10-06 Wave 4 frontend + UAT remains). Waves 2 and 3 are planning-stage — next critical-path unlock is Phase 11, which moves d3-force off the main thread so Wave 2's subsequent visual work has headroom.
+**Status (2026-04-21):** Waves 0 and 1 are basically done. All of v1.0 shipped. Phase 7 replaced the original squarified-treemap radar with the force-directed graph (RIP, you served us well). Phase 8 shipped the Claude Code hook plumbing. Phase 9 shipped Arsenal. Phase 10 (Chat UI) is 5/6 — just the Wave 4 frontend + UAT pass remaining.
 
-Source of truth: [`.planning/STATE.md`](.planning/STATE.md) (execution state) + [`.planning/ROADMAP.md`](.planning/ROADMAP.md) (phase narrative + plan manifest). Both files are updated automatically by the GSD workflow; do not hand-edit phase check boxes.
+Wave 2 is where the scope creep lives. Next up is **Phase 11** (move `d3-force` to a WebWorker with transferable `Float32Array` position buffers) because right now the main thread locks up on repos with 10k+ files and that's funny for exactly one demo.
 
-## Agent adapters
+Wave 3 is **Phase 17** (conflict-triggered gating), added 2026-04-21 after I got too annoyed with the current "every Edit/Write/Bash prompts you" model and yelled at Claude about it. See [`17-CONTEXT.md`](.planning/phases/17-conflict-triggered-pretooluse-gating-replace-tool-category-g/17-CONTEXT.md) for the three unresolved design questions.
 
-Adding a new coding agent is a matter of implementing `AgentAdapter` in `src-tauri/src/agents/` and registering it. Current adapters:
+Ground truth: [`.planning/STATE.md`](.planning/STATE.md) + [`.planning/ROADMAP.md`](.planning/ROADMAP.md). GSD updates them automatically. Please do not hand-edit the checkboxes, you will make me sad.
 
-| Adapter | File | Launch | Observe | PreToolUse hook | Chat |
-|---|---|---|---|---|---|
-| `claude_code` | `agents/claude_code.rs` | yes (long-lived `stream-json`) | yes (self-register + PID scan) | yes (via `aitc-hook`) | yes (stdin JSONL + MCP) |
-| `codex` | `agents/codex.rs` | yes | yes | — | read-only stdout/stderr capture |
-| `opencode` | `agents/opencode.rs` | yes | yes | — | read-only stdout/stderr capture |
-| `generic` | `agents/generic.rs` | — | yes (PASSIVE-{pid}) | — | — |
+## agent adapters (the "plug any coding AI into the tower" part)
 
-The `AgentAdapter` trait exposes `capabilities()` so the frontend can gate UI per-agent — `chat_duplex`, `pretool_hook_install`, and so on.
+Adding a new coding agent: implement `AgentAdapter` in `src-tauri/src/agents/`, register it, done. Current lineup:
 
-## Links
+| Adapter | Launch? | Observe? | PreToolUse hook? | Chat? |
+|---|---|---|---|---|
+| `claude_code` | ✅ long-lived `stream-json` | ✅ self-register + PID scan | ✅ via `aitc-hook` | ✅ stdin JSONL + MCP |
+| `codex` | ✅ | ✅ | — | read-only stdout/stderr capture |
+| `opencode` | ✅ | ✅ | — | read-only stdout/stderr capture |
+| `generic` | — | ✅ (auto-creates `PASSIVE-{pid}`) | — | — |
 
-- [`CLAUDE.md`](CLAUDE.md) — project overview + technology stack rationale
-- [`.planning/PROJECT.md`](.planning/PROJECT.md) — original requirements, key decisions, out-of-scope notes
+The trait exposes `capabilities()` so the frontend can hide UI bits per-agent (Codex doesn't get a chat box, no Generic in the deploy menu, etc).
+
+## further reading
+
+- [`CLAUDE.md`](CLAUDE.md) — the actual project brief + why we picked every dep
+- [`.planning/PROJECT.md`](.planning/PROJECT.md) — original requirements, key decisions, out-of-scope
 - [`.planning/ROADMAP.md`](.planning/ROADMAP.md) — full phase + plan manifest
-- [`wireframes/`](wireframes/) — Command Horizon design system source
+- [`wireframes/`](wireframes/) — the Command Horizon design system, whence all the phosphor green
+- [`src-tauri/aitc-hook/`](src-tauri/aitc-hook/) — the sidecar binary, in case you want to see a fail-safe-deny contract up close
+
+## is this production ready
+
+lol. lmao even.
+
+It runs, though. For one developer (me). On Linux (my machine). Mostly. And apparently on Windows if you're brave. Welcome aboard, controller.
