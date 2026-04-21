@@ -7,6 +7,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { LaunchOptions } from '../bindings';
+import { useChatStore } from './chatStore';
 
 export interface AgentInfo {
   id: string;
@@ -59,6 +60,12 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       options: options ?? null,
     });
     set((s) => ({ agents: [...s.agents, agent] }));
+    // chatStore's channel list is populated reactively from stream-json events
+    // (agent-session-started etc.), which don't fire until Claude produces
+    // its first envelope — seconds after launch, or never if the subprocess
+    // hangs. Kick a fetch now so the CHAT tab's master list surfaces the
+    // new agent immediately, in parity with Tower.
+    void useChatStore.getState().fetchChannels();
     return agent;
   },
 
