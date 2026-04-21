@@ -2,23 +2,21 @@
 
 > You have four coding agents running in four different terminals and last Tuesday two of them deleted the same file at the same time and now you're here.
 
-So there's this joke where you're a developer in 2026 and your whole job is opening Claude Code in one tab, Codex in another, OpenCode in a third, and pretending you know what any of them are doing. This is the tool for that.
+So there's this joke where you're a developer in 2026 and your whole job is opening multiple agents of Claude Code, Codex, OpenCode and more in different tabs and pretending you know what any of them are doing. This is the tool for that.
 
-AITC is **air traffic control for coding agents**. They're the little planes, your repo is the airspace, you're the dude in the tower with the bad coffee and the radar scope. When two agents start circling the same runway (read: file), a big red thing happens and you press a button.
-
-Also it was supposed to be a weekend project and now it's seventeen phases long. You know how it goes.
+AITC is **air traffic control for coding agents**. They're the little planes, your repo is the airspace, you're the fella in the control room staring at the radar scope. When two agents start circling the same runway (read: file), a big red thing happens and you press a button.
 
 ## what does it actually do
 
-- **👀 Tower Control** — a live manifest of every agent that's currently doing a crime to your codebase. ID, protocol, current file, state (`RUNNING` / `IDLE` / `WAITING` / `CONFLICT` / `ERROR` / `vibing`). Launch new ones, reap old ones, watch them work.
-- **🛰️ Airspace Radar** — a force-directed graph of your source files with `import` edges pulled by tree-sitter and filesystem proximity acting as gravity. Agents leave 10-second fading comet trails behind them as they scurry between files. Yes it looks cool. That's the whole point. Why else would you build this.
-- **💥 Conflict detection** — two agents write the same file inside the conflict window? instant visual, OS notification, new row in the queue. "Why are you both in `auth.rs`" energy.
-- **🧩 3-way merge UI** — the merge editor you wish you had at work. Agent A's change on the left, Agent B's on the right, the base in the middle, each agent's *intent* shown next to the hunk so you remember why these crimes were committed. BackupManager has your back if you merge badly.
-- **🛂 Claude Code PreToolUse hooks** — every gated tool call from a Claude Code agent freezes until you approve it in the Requests queue. (Or deny. Or approve-with-edits. You have options.) `--dangerously-skip-permissions` agents get a free pass and move around unbothered — see commit `06fbf1e`, the angry-developer hotfix. If AITC crashes, the hook fails closed so nothing can ship behind your back.
-- **💬 Comms Hub** — an approval queue with diffs + a per-agent chat tab backed by a long-lived `claude --input-format stream-json` process. Finally, a way to yell at the agent that doesn't involve the system logs.
-- **🎒 Arsenal** — a single pane over `~/.claude/` and `<cwd>/.claude/` so you know exactly which Skills, Agents, Plugins, Hooks, Commands, and MCP servers Claude currently has access to. Inline editor for both `CLAUDE.md` files because you know you're going to edit them.
-- **🔥 File heat map** — a contention overlay showing which files have been the main character this week.
-- **🗂️ Session history** — virtualized tables of past sessions, conflicts, approvals. Git blame, but for vibes.
+- **👀 Tower Control**: a live manifest of every agent that's currently doing a crime to your codebase. ID, protocol, current file, state (`RUNNING` / `IDLE` / `WAITING` / `CONFLICT` / `ERROR` / `vibing`). Launch new ones, reap old ones, watch them work.
+- **🛰️ Airspace Radar**: a force-directed graph of your source files with `import` edges pulled by tree-sitter and filesystem proximity acting as gravity. Agents leave 10-second fading comet trails behind them as they scurry between files. Yes it looks cool. That's the whole point. Why else would I build this.
+- **💥 Conflict detection**: two agents write the same file inside the conflict window? instant visual, OS notification, new row in the queue. "Why are you both in `auth.rs`" energy.
+- **🧩 3-way merge UI**: the merge editor you wish you had at work. Agent A's change on the left, Agent B's on the right, the base in the middle, each agent's *intent* shown next to the hunk so you remember why these crimes were committed. BackupManager has your back if you merge badly.
+- **🛂 Claude Code PreToolUse hooks**: every gated tool call from a Claude Code agent freezes until you approve it in the Requests queue. (Or deny. Or approve-with-edits. You have options.) `--dangerously-skip-permissions` agents get a free pass and move around unbothered (see commit `06fbf1e`, the angry-developer hotfix). If AITC crashes, the hook fails closed so nothing can ship behind your back.
+- **💬 Comms Hub**: an approval queue with diffs + a per-agent chat tab backed by a long-lived `claude --input-format stream-json` process. Finally, a way to yell at the agent that doesn't involve the system logs.
+- **🎒 Arsenal**: a single pane over `~/.claude/` and `<cwd>/.claude/` so you know exactly which Skills, Agents, Plugins, Hooks, Commands, and MCP servers Claude currently has access to. Inline editor for both `CLAUDE.md` files because you know you're going to edit them.
+- **🔥 File heat map**: a contention overlay showing which files have been the main character this week.
+- **🗂️ Session history**: virtualized tables of past sessions, conflicts, approvals. Git blame, but for vibes.
 
 ## architecture, such as it is
 
@@ -32,7 +30,7 @@ Tauri v2 shell + React frontend + a frankly too-ambitious Rust backend, because 
 │       we tried. it was bad.)                                    │
 └──────────┬──────────────────────────────────────────────────────┘
            │ invoke() / Channel<T>
-┌──────────▼─────────────────────────────── Rust backend ────────┐
+┌──────────▼─────────────────────────────── Rust backend ─────────┐
 │  pipeline/    notify 8 + notify-debouncer-full 0.7              │
 │               file events → debounce → PID attribution → batch  │
 │  agents/      AgentRegistry + AgentAdapter trait;               │
@@ -48,16 +46,16 @@ Tauri v2 shell + React frontend + a frankly too-ambitious Rust backend, because 
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Why each of those: see [`CLAUDE.md`](CLAUDE.md). Short version: it's Tauri because Electron is 30x bigger, it's Rust because I wanted `notify` and `sysinfo`, it's Zustand because Redux was gonna make me sad.
+Why each of those: see [`CLAUDE.md`](CLAUDE.md). Short version: it's Tauri because Electron is 30x bigger, it's Rust because I wanted `notify` and `sysinfo`, it's Zustand because Redux is old and Claude Code recommended Zustand.
 
 ## running it locally
 
-You need Rust (stable), Node 20+, and whatever [Tauri v2 tells you to install](https://v2.tauri.app/start/prerequisites/) for your OS. Then:
+You'll need Rust (stable), Node 20+, and whatever [Tauri v2 tells you to install](https://v2.tauri.app/start/prerequisites/) for your OS. Then:
 
 ```bash
 npm install
 
-# dev — HMR on both the React side AND the Rust side
+# dev: HMR on both the React side AND the Rust side
 npm run tauri dev
 
 # prod build, for when you want to hand someone a scary-looking binary
@@ -88,7 +86,7 @@ src-tauri/
     claude_resources/      Arsenal scanner/parser
     db/migrations/         SQLite schema (001..006)
   aitc-hook/               the Claude Code PreToolUse sidecar (its own crate)
-.planning/                 GSD artifacts — this is where the spec actually lives
+.planning/                 GSD artifacts: this is where the spec actually lives
 wireframes/                Command Horizon design-system source
 ```
 
@@ -96,10 +94,10 @@ wireframes/                Command Horizon design-system source
 
 Built phase-by-phase through [GSD](.planning/). Started as "oh I'll ship six phases, a cute little tower + radar + merge UI app." Now there are seventeen. Phases 11-17 were added *after* v1.0 shipped because once you have a functional ATC radar you cannot stop asking what if the radar was cooler. Classic.
 
-Each phase has a `.planning/phases/NN-*/` folder with research · context · plan(s) · verification artefacts. Phases run strictly in numeric order — each one depends on the one before. No cheating.
+Each phase has a `.planning/phases/NN-*/` folder with research · context · plan(s) · verification artefacts. Phases run strictly in numeric order: each one depends on the one before. No cheating.
 
 ```
-Wave 0 — "ok let's actually ship v1"
+Wave 0: "ok let's actually ship v1"
   ├── 1  Foundation + App Shell              → (none)     ✅ shipped
   ├── 2  Real-Time Data Pipeline             → 1          ✅ shipped (2026-04-10)
   ├── 3  Agents + Conflict Detection         → 2          ✅ shipped
@@ -107,25 +105,25 @@ Wave 0 — "ok let's actually ship v1"
   ├── 5  Conflict Resolution + History       → 4          ✅ shipped
   └── 6  Pipeline Activation (gap closure)   → 5          ✅ shipped
 
-Wave 1 — "wait, I want more surfaces"
+Wave 1: "wait, I want more surfaces"
   ├── 7  Graph-based Codebase Map            → 6          ✅ shipped (RIP treemap, 2026)
   ├── 8  Claude Code PreToolUse Hooks        → 7          ✅ shipped
   ├── 9  Arsenal (skills / agents / config)  → 8          ✅ shipped
-  └── 10 First-class Chat UI                 → 9          🟡 5/6 plans (just 10-06 left — frontend polish + UAT)
+  └── 10 First-class Chat UI                 → 9          🟡 5/6 plans (just 10-06 left: frontend polish + UAT)
 
-Wave 2 — "the radar should be sicker"
-  ├── 11 d3-force in a WebWorker             → 10         ⏳ planning  ← you are here
+Wave 2: "the radar should be sicker"
+  ├── 11 d3-force in a WebWorker             → 10         ⏳ planning  ← we are here
   ├── 12 IPC bridge nodes + boundary viz     → 11         ⏳ planning
   ├── 13 4-level semantic zoom               → 12         ⏳ planning
   ├── 14 Multi-layer offscreen canvas        → 13         ⏳ planning
   ├── 15 Enhanced ATC agent overlay (TCAS)   → 14         ⏳ planning
   └── 16 Typed edges + Louvain communities   → 15         ⏳ planning
 
-Wave 3 — "actually the whole gating model is wrong"
+Wave 3: "actually the whole gating model is wrong"
   └── 17 Conflict-triggered gate             → 16         ⏳ drafted (17-CONTEXT.md)
 ```
 
-**Status (2026-04-21):** Waves 0 and 1 are basically done. All of v1.0 shipped. Phase 7 replaced the original squarified-treemap radar with the force-directed graph (RIP, you served us well). Phase 8 shipped the Claude Code hook plumbing. Phase 9 shipped Arsenal. Phase 10 (Chat UI) is 5/6 — just the Wave 4 frontend + UAT pass remaining.
+**Status (2026-04-21):** Waves 0 and 1 are basically done. All of v1.0 shipped. Phase 7 replaced the original squarified-treemap radar with the force-directed graph (RIP, you served us well). Phase 8 shipped the Claude Code hook plumbing. Phase 9 shipped Arsenal. Phase 10 (Chat UI) is 5/6: just the Wave 4 frontend + UAT pass remaining.
 
 Wave 2 is where the scope creep lives. Next up is **Phase 11** (move `d3-force` to a WebWorker with transferable `Float32Array` position buffers) because right now the main thread locks up on repos with 10k+ files and that's funny for exactly one demo.
 
@@ -148,12 +146,20 @@ The trait exposes `capabilities()` so the frontend can hide UI bits per-agent (C
 
 ## further reading
 
-- [`CLAUDE.md`](CLAUDE.md) — the actual project brief + why we picked every dep
-- [`.planning/PROJECT.md`](.planning/PROJECT.md) — original requirements, key decisions, out-of-scope
-- [`.planning/ROADMAP.md`](.planning/ROADMAP.md) — full phase + plan manifest
-- [`wireframes/`](wireframes/) — the Command Horizon design system, whence all the phosphor green
-- [`src-tauri/aitc-hook/`](src-tauri/aitc-hook/) — the sidecar binary, in case you want to see a fail-safe-deny contract up close
+- [`CLAUDE.md`](CLAUDE.md): the actual project brief + why we picked every dep
+- [`.planning/PROJECT.md`](.planning/PROJECT.md): original requirements, key decisions, out-of-scope
+- [`.planning/ROADMAP.md`](.planning/ROADMAP.md): full phase + plan manifest
+- [`wireframes/`](wireframes/): the Command Horizon design system built by Google Stitch, whence all the phosphor green
+- [`src-tauri/aitc-hook/`](src-tauri/aitc-hook/): the sidecar binary, in case you want to see a fail-safe-deny contract up close
 
 ## is this production ready
 
-It runs, though. For one developer (me). On Linux (my machine). Mostly. And apparently on Windows if you're brave. Welcome aboard, controller.
+Uhhhhhhhhh... probably not?
+
+It runs, though. On my Linux machine at least. Mostly. And apparently on Windows (UNVERIFIED CLAIM, PROCEED WITH CAUTION!). Welcome aboard, controller.
+
+## credits
+
+I had this idea when I read [this LinkedIn post](https://www.linkedin.com/posts/dr-oliver-borchers-043a48b9_cursor-3-just-left-vs-code-completely-rewritten-share-7447171765312786433-3TO3) that suggested the logical progression for an IDE like Cursor was to move from being a "co-pilot" to an "air traffic control system". After discussing with [@Ethan-Chew](https://github.com/Ethan-Chew), it sounded like a pretty cool idea to implement over the weekend.
+
+Now it's seventeen phases long so...
