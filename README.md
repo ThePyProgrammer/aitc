@@ -112,7 +112,8 @@ Wave 1: "wait, I want more surfaces"
   └── 10 First-class Chat UI                 → 9          🟡 6/6 coded — UAT sign-off pending on 10-06 checkpoint
 
 Wave 2: "the radar should be sicker"
-  ├── 11 d3-force in a WebWorker             → 10         🟡 3/4 plans (11-04 pending)  ← we are here
+  ├── 11   d3-force in a WebWorker           → 10         ✅ shipped (2026-04-21)
+  ├── 11.1 Fix zoom-scroll lag (INSERTED)    → 11         ⏳ planning  ← we are here
   ├── 12 IPC bridge nodes + boundary viz     → 11         ⏳ planning
   ├── 13 4-level semantic zoom               → 12         ⏳ planning
   ├── 14 Multi-layer offscreen canvas        → 13         ⏳ planning
@@ -125,7 +126,7 @@ Wave 3: "actually the whole gating model is wrong"
 
 **Status (2026-04-21):** Waves 0 and 1 are basically done. All of v1.0 shipped. Phase 7 replaced the original squarified-treemap radar with the force-directed graph (RIP, you served us well). Phase 8 shipped the Claude Code hook plumbing. Phase 9 shipped Arsenal. Phase 10 (Chat UI) has **all 6 plans coded** — blocked only on the Plan 06 Task 3 human-verify UAT checkpoint (see `10-06-CHECKPOINT.md`).
 
-Wave 2 is where the scope creep lives and we're already in it — **Phase 11** (move `d3-force` to a WebWorker with transferable `Float32Array` position buffers) is 3/4 plans in; plan 11-04 remains (RadarCanvas hot-path optimisation + benchmark harness + prod-build smoke). Wave 2 exists because right now the main thread locks up on repos with 10k+ files and that's funny for exactly one demo.
+Wave 2 is where the scope creep lives and we're in it. **Phase 11** shipped 2026-04-21 — d3-force now runs in a dedicated Worker with transferable `Float32Array` position buffers, prod build passed smoke, force-config sliders are "damn responsive" per the operator. Manual UAT surfaced a zoom-scroll lag on settled graphs, filed as **Phase 11.1** (INSERTED) — the hot-path gate short-circuits correctly when the sim is settled, so the render loop is byte-identical to Phase 7 and this is a pre-existing issue that Phase 11's perf surfacing merely exposed. Suspects: wheel events firing at 120–240Hz on trackpads outrunning rAF, `drawFolderHulls` recomputing convex hulls per frame even on static positions, and the Zustand viewport-writeback cascade. Scope is performance-only; no visual change; no new capability.
 
 Wave 3 is **Phase 17** (conflict-triggered gating), added 2026-04-21 after I got too annoyed with the current "every Edit/Write/Bash prompts you" model and yelled at Claude about it. See [`17-CONTEXT.md`](.planning/phases/17-conflict-triggered-pretooluse-gating-replace-tool-category-g/17-CONTEXT.md) for the three unresolved design questions.
 
