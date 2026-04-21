@@ -35,9 +35,8 @@ import {
 import { usePipelineStore } from '../../stores/pipelineStore';
 import { useAgentStore } from '../../stores/agentStore';
 import { useConflictStore } from '../../stores/conflictStore';
-import { useCanvasZoomPan, type CanvasViewport } from '../../hooks/useCanvasZoomPan';
+import { useCanvasZoomPan } from '../../hooks/useCanvasZoomPan';
 import { useGraphLayout } from '../../hooks/useGraphLayout';
-import { useRafCoalesced } from '../../hooks/useRafCoalesced';
 import {
   drawFolderHulls,
   drawEdges,
@@ -268,17 +267,16 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   }, [settledAt, graphNodes, canvasSize, setViewport]);
 
   // Sync viewport back to store so minimap / debug tools can observe.
-  // Phase 11.1 (D-06): rAF-coalesce the writeback as defense-in-depth.
-  // D-01 already caps `viewport` mutations at 1/frame via useCanvasZoomPan's
-  // wheel coalescer; this guards any future caller (keyboard zoom, fit-to-
-  // view, resize-induced recomputation, etc.) that bypasses that path.
+  // Phase 11.1 revision: the rAF-coalesced writeback added ~16ms of
+  // latency between the main canvas redraw and the minimap catching up,
+  // making minimap feel perpetually one frame behind during wheel-zoom.
+  // Direct write here — React's commit phase is already batched to at
+  // most one run per setViewport, so this is one zustand set per frame
+  // in the steady state.
   const storeSetViewport = useRadarStore((s) => s.setViewport);
-  const enqueueViewportWriteback = useRafCoalesced<CanvasViewport>((vp) => {
-    storeSetViewport(vp);
-  });
   useEffect(() => {
-    enqueueViewportWriteback(() => viewport);
-  }, [viewport, enqueueViewportWriteback]);
+    storeSetViewport(viewport);
+  }, [viewport, storeSetViewport]);
 
   // Bootstrap: fetch graph once. Also re-fetch when the pipeline watcher
   // starts (pipelineStore.isWatching flips true) — the initial mount may
@@ -445,6 +443,23 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [activeTrails]);
+
+  // Phase 11.1 fix — Tauri v2 WebKitGTK blanks the canvas backing store
+  // when the window loses focus; on refocus rAF resumes but nothing in
+  // our dirty-flag deps has changed, so the render loop early-returns
+  // and nodes appear to have "disappeared". Force a dirty mark on any
+  // visibility/focus event so the next rAF repaints.
+  useEffect(() => {
+    const markDirty = () => {
+      dirtyRef.current = true;
+    };
+    window.addEventListener('focus', markDirty);
+    document.addEventListener('visibilitychange', markDirty);
+    return () => {
+      window.removeEventListener('focus', markDirty);
+      document.removeEventListener('visibilitychange', markDirty);
+    };
+  }, []);
 
   // ResizeObserver → canvasSize.
   useEffect(() => {
