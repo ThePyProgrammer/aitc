@@ -539,10 +539,14 @@ async fn run_event_aggregator<R: tauri::Runtime>(
                 approval_request_id,
             } => {
                 let session_id = sessions.session_id_for(&agent_id).await;
+                // Payload keys match Claude's own stream-json shape (snake_case).
+                // Frontend ToolUseCard + ToolResultCard read these names
+                // verbatim; writing camelCase here leaves the UI with an
+                // UNKNOWN tool badge and no input summary.
                 let payload = serde_json::json!({
-                    "toolName": tool_name,
-                    "toolInput": tool_input,
-                    "toolUseId": tool_use_id,
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "tool_use_id": tool_use_id,
                 });
                 match crate::db::events::insert_agent_event(
                     &pool,
@@ -569,9 +573,9 @@ async fn run_event_aggregator<R: tauri::Runtime>(
             } => {
                 let session_id = sessions.session_id_for(&agent_id).await;
                 let payload = serde_json::json!({
-                    "toolUseId": tool_use_id,
+                    "tool_use_id": tool_use_id,
                     "content": content,
-                    "isError": is_error,
+                    "is_error": is_error,
                 });
                 match crate::db::events::insert_agent_event(
                     &pool,
