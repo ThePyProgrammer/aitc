@@ -440,3 +440,17 @@ describe('radarStore theme persistence', () => {
   });
 });
 void sampleTree;
+
+// Phase 12 Wave 0 scaffold. Wave 2 flips `.todo` → real `it(...)` bodies.
+// Witnesses V-12-15 / V-12-16 + D-10 / D-14 / D-21 / D-30 structural invariants.
+describe('Phase 12 bridge integration', () => {
+  it.todo('V-12-15: GraphNode.kind discriminator round-trips through fetchGraph (bridges have kind=bridge, files have kind=file|undefined)');
+  it.todo('V-12-15: bridge GraphNodes carry commandName/handlerFile/hasChannelArg/callerFiles fields');
+  it.todo('V-12-16: fetchGraph runs three invoke calls via Promise.all (get_tree_index + get_dependency_graph + get_ipc_bridges)');
+  it.todo('V-12-16: get_ipc_bridges failure leaves existing bridges+nodes+edges intact (best-effort merge)');
+  it.todo('D-10: default kind=file applied when legacy nodes have undefined kind');
+  it.todo('D-21: selectedBridgeId slot + selectBridge action work (null round-trip)');
+  it.todo('D-14: alphabetic x-spread assigns fx deterministically across [-GRAPH_HALF_WIDTH, +GRAPH_HALF_WIDTH]');
+  it.todo('D-14: x-spread cache keyed on lastBridgeSetHash — unchanged command set → stable fx values');
+  it.todo('D-30: ForceConfig.boundaryStrength defaults to 0.15 (DEFAULT_FORCE_CONFIG); setForceConfig({boundaryStrength:0.3}) round-trips');
+});

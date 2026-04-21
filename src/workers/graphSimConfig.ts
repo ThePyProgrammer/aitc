@@ -33,3 +33,8 @@ export const QUADTREE_REBUILD_TICK_INTERVAL = 10;
 // RESEARCH §Pitfall 1 — seeds simulation.randomSource(mulberry32(seed))
 // so worker and tests produce byte-identical initial positions.
 export const INITIAL_POSITION_SEED = 0x5eedf04c;
+
+// Phase 12 (D-29, D-14) — boundary force tuning.
+export const BOUNDARY_STRENGTH_DEFAULT = 0.15;
+export const BOUNDARY_DEADBAND = 5;          // world-space; ±5 around y=0 is a no-op
+export const GRAPH_HALF_WIDTH = 1600;        // world-space; bridge x-spread extent

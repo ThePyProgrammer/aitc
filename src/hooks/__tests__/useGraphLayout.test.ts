@@ -434,3 +434,12 @@ describe('useGraphLayout — Phase 11 Worker client', () => {
     expect(w.postedMessages.some((m) => m.type === 'pin')).toBe(true);
   });
 });
+
+// Phase 12 Wave 0 scaffold. Wave 2 flips `.todo` → real `it(...)` bodies.
+// Witness V-12-20 + D-37 worker-protocol guard.
+describe('Phase 12 boundaryStrength + kind/language propagation', () => {
+  it.todo('V-12-20: boundaryStrength changes trigger updateConfig worker message with the new strength');
+  it.todo('V-12-20: boundaryStrength change alpha-restarts the sim');
+  it.todo('kind + language fields propagate onto InitMessage.nodes[] via the payload map');
+  it.todo('D-37: kind/language NOT sent through updateConfig (only through init/topology) — Pitfall 2 guard');
+});
