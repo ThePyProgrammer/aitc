@@ -484,4 +484,19 @@ mod tests {
             "subprocess child pid=102 must be dropped by parent-PID filter"
         );
     }
+
+    #[tokio::test]
+    async fn orphaned_child_with_no_parent_registers() {
+        // A candidate with parent=None (orphaned, or PID-1 reparented on
+        // POSIX, or parent exited between snapshot refreshes) must NOT be
+        // dropped by the parent-PID filter. The None-branch of the filter
+        // returns true to keep the candidate.
+        let reg = Arc::new(AgentRegistry::new());
+        let snap = seeded_snapshot(vec![cand(111, "claude-code")]);
+        bridge_tick(&reg, &snap, None, None, None).await.unwrap();
+        assert!(
+            reg.get_agent("PASSIVE-111").await.is_some(),
+            "orphaned candidate (parent=None) must register"
+        );
+    }
 }
