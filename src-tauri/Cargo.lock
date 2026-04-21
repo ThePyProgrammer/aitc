@@ -67,6 +67,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "shlex",
  "specta",
  "specta-typescript",
  "sqlx",
