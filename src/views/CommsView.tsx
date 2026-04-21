@@ -145,7 +145,7 @@ export function CommsView() {
 
   return (
     <div
-      className="flex flex-col h-[calc(100vh-56px)] bg-surface"
+      className="flex flex-col h-[calc(100vh-56px)] overflow-hidden bg-surface"
       style={{ animation: 'phosphor-in 150ms ease' }}
     >
       <div className="px-6 pt-4 pb-0">

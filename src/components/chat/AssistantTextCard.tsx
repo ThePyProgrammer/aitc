@@ -16,6 +16,12 @@ import { StreamingCursor } from './StreamingCursor';
 
 export interface AssistantTextCardProps {
   event: AgentEvent;
+  /**
+   * When the immediately-preceding row is also an assistant_text chunk,
+   * suppress the `CLAUDE` role label so a multi-chunk streaming turn reads
+   * as one continuous block instead of repeating the label every row.
+   */
+  isContinuation?: boolean;
 }
 
 // Word-bounded @user regex — matches @user when it's not part of a longer
@@ -52,7 +58,10 @@ function renderContent(content: string): React.ReactNode[] {
   return parts;
 }
 
-export function AssistantTextCard({ event }: AssistantTextCardProps) {
+export function AssistantTextCard({
+  event,
+  isContinuation = false,
+}: AssistantTextCardProps) {
   const payload =
     (event.payloadJson as {
       content?: string;
@@ -65,14 +74,20 @@ export function AssistantTextCard({ event }: AssistantTextCardProps) {
   // on-surface-variant. The cursor + label only render during streaming.
   const bodyColor = streaming ? 'text-on-surface' : 'text-on-surface-variant';
 
+  // Multi-chunk streaming often produces adjacent assistant_text rows —
+  // we only want the `CLAUDE` label once per turn. The `border-t` row
+  // separator also collapses so the chunks visually coalesce.
+  const wrapperClass = isContinuation
+    ? 'w-full px-5 pb-3'
+    : 'w-full px-5 py-3 border-t border-outline-variant/10';
+
   return (
-    <div
-      data-testid="assistant-text-card"
-      className="w-full px-5 py-3 border-t border-outline-variant/10"
-    >
-      <div className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/70 mb-1">
-        CLAUDE
-      </div>
+    <div data-testid="assistant-text-card" className={wrapperClass}>
+      {!isContinuation && (
+        <div className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/70 mb-1">
+          CLAUDE
+        </div>
+      )}
       <p className={`font-mono text-sm ${bodyColor} whitespace-pre-wrap leading-relaxed`}>
         {renderContent(content)}
         {streaming && <StreamingCursor />}

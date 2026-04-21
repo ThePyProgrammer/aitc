@@ -1,7 +1,10 @@
 // Phase 10 — discriminated-union dispatcher keyed by event_type (D-13).
 // Unknown event types fall through to SystemNoteCard (forward-compat).
+//
+// `prevEvent` enables continuation-aware rendering: AssistantTextCard
+// suppresses its role label when the row immediately above is another
+// assistant_text chunk, so multi-chunk streaming turns read as one block.
 
-import type { FC } from 'react';
 import type { AgentEvent } from '../../stores/chatStore';
 import { UserMessageCard } from './UserMessageCard';
 import { AssistantTextCard } from './AssistantTextCard';
@@ -14,21 +17,34 @@ import { SystemNoteCard } from './SystemNoteCard';
 
 export interface EventCardProps {
   event: AgentEvent;
+  prevEvent?: AgentEvent;
 }
 
-const RENDERERS: Record<string, FC<EventCardProps>> = {
-  user_text: UserMessageCard,
-  assistant_text: AssistantTextCard,
-  tool_use: ToolUseCard,
-  approval_link: ApprovalLinkCard,
-  tool_result: ToolResultCard,
-  session_boundary: SessionBoundary,
-  raw_stdout: RawStreamCard,
-  raw_stderr: RawStreamCard,
-  system_note: SystemNoteCard,
-};
-
-export function EventCard({ event }: EventCardProps) {
-  const Renderer = RENDERERS[event.eventType] ?? SystemNoteCard;
-  return <Renderer event={event} />;
+export function EventCard({ event, prevEvent }: EventCardProps) {
+  switch (event.eventType) {
+    case 'user_text':
+      return <UserMessageCard event={event} />;
+    case 'assistant_text':
+      return (
+        <AssistantTextCard
+          event={event}
+          isContinuation={prevEvent?.eventType === 'assistant_text'}
+        />
+      );
+    case 'tool_use':
+      return <ToolUseCard event={event} />;
+    case 'approval_link':
+      return <ApprovalLinkCard event={event} />;
+    case 'tool_result':
+      return <ToolResultCard event={event} />;
+    case 'session_boundary':
+      return <SessionBoundary event={event} />;
+    case 'raw_stdout':
+    case 'raw_stderr':
+      return <RawStreamCard event={event} />;
+    case 'system_note':
+      return <SystemNoteCard event={event} />;
+    default:
+      return <SystemNoteCard event={event} />;
+  }
 }

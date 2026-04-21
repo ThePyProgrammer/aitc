@@ -150,6 +150,7 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
         >
           {virtualizer.getVirtualItems().map((vi) => {
             const event = events[vi.index];
+            const prevEvent = vi.index > 0 ? events[vi.index - 1] : undefined;
             return (
               <div
                 key={event.id}
@@ -163,7 +164,7 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
                   transform: `translateY(${vi.start}px)`,
                 }}
               >
-                <EventCard event={event} />
+                <EventCard event={event} prevEvent={prevEvent} />
               </div>
             );
           })}

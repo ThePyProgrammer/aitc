@@ -106,8 +106,11 @@ export function ChatInput({
         style={{
           minHeight: '40px',
           maxHeight: '120px',
+          // Secondary cyan caret matches the rest of the ATC palette.
+          // The browser already blinks the caret natively — applying the
+          // `blink-cursor` animation to the textarea itself made the typed
+          // text oscillate opacity along with the cursor, so we don't.
           caretColor: '#00cffc',
-          animation: 'blink-cursor 1s step-end infinite',
         }}
         rows={1}
       />
