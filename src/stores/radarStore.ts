@@ -341,7 +341,18 @@ export const useRadarStore = create<RadarStore>((set, get) => ({
     })),
 
   setViewport: (v) =>
-    set((s) => ({ viewport: { ...s.viewport, ...v } })),
+    set((s) => {
+      // Phase 11.1 post-ship defense: drop any non-finite fields from the
+      // partial. A single NaN / ±Infinity in viewport corrupts every frame
+      // — canvas2d's ctx.setTransform silently no-ops on non-finite input,
+      // so the user sees a blank canvas with no error. Fall back to the
+      // current store value for any axis whose incoming value isn't finite.
+      const merged = { ...s.viewport, ...v };
+      const zoom = Number.isFinite(merged.zoom) ? merged.zoom : s.viewport.zoom;
+      const panX = Number.isFinite(merged.panX) ? merged.panX : s.viewport.panX;
+      const panY = Number.isFinite(merged.panY) ? merged.panY : s.viewport.panY;
+      return { viewport: { zoom, panX, panY } };
+    }),
 
   selectAgent: (id) => set({ selectedAgentId: id }),
 

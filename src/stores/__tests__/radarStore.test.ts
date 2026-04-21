@@ -325,6 +325,40 @@ describe('radarStore', () => {
 // `src/hooks/__tests__/useGraphLayout.test.ts` and the force+layout
 // property tests landed in Plan 03.
 
+// Phase 11.1 post-ship defense — silent-blank-canvas regression. A single
+// non-finite value in viewport state propagates through ctx.setTransform as
+// a silent no-op, blanking the canvas with no console error and no recovery
+// path (NaN+x=NaN; panning, zoom-out, force-edit all stay NaN). These tests
+// lock the store-level guard so a future refactor cannot strip it.
+describe('setViewport — defense against non-finite values', () => {
+  beforeEach(() => {
+    useRadarStore.getState().reset();
+  });
+
+  it('drops NaN zoom and keeps the previous value', () => {
+    useRadarStore.setState({ viewport: { zoom: 2, panX: 10, panY: 20 } });
+    useRadarStore.getState().setViewport({ zoom: NaN });
+    expect(useRadarStore.getState().viewport).toEqual({ zoom: 2, panX: 10, panY: 20 });
+  });
+
+  it('drops Infinity panX/panY independently', () => {
+    useRadarStore.setState({ viewport: { zoom: 2, panX: 10, panY: 20 } });
+    useRadarStore.getState().setViewport({ panX: Infinity, panY: -Infinity });
+    expect(useRadarStore.getState().viewport).toEqual({ zoom: 2, panX: 10, panY: 20 });
+  });
+
+  it('accepts legitimate zeros and negative pans', () => {
+    useRadarStore.getState().setViewport({ zoom: 0.5, panX: -100, panY: 0 });
+    expect(useRadarStore.getState().viewport).toEqual({ zoom: 0.5, panX: -100, panY: 0 });
+  });
+
+  it('partial valid + partial non-finite applies only the valid fields', () => {
+    useRadarStore.setState({ viewport: { zoom: 2, panX: 10, panY: 20 } });
+    useRadarStore.getState().setViewport({ zoom: 3, panX: NaN });
+    expect(useRadarStore.getState().viewport).toEqual({ zoom: 3, panX: 10, panY: 20 });
+  });
+});
+
 describe('installRadarPipelineBridge', () => {
   beforeEach(() => {
     vi.useFakeTimers();
