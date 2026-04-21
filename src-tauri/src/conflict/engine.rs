@@ -152,6 +152,44 @@ impl ConflictEngine {
     pub fn sweep_empty_files(&mut self) {
         self.recent_writes.retain(|_, v| !v.is_empty());
     }
+
+    /// Phase 17 D-14 (with D-14b amendment): check whether any OTHER live
+    /// agent wrote to `path` within `window_ms` of `now_ms`. Pure read; no
+    /// state mutation, no sweep.
+    ///
+    /// D-14b amendment (17-RESEARCH §1 "Staleness of the engine's window"):
+    /// caller passes `window_ms` explicitly instead of reading `self.window`.
+    /// The pipeline's `conflict_task` bakes `ConflictState::get_window_ms()`
+    /// into `ConflictEngine::new()` at task start, so runtime window changes
+    /// don't reach `self.window`. The hook path routes around that staleness
+    /// by reading fresh `ConflictState::get_window_ms()` per request.
+    ///
+    /// Returns the most recent matching record's `agent_id` (reverse iteration
+    /// over the per-path `records` vec), or `None` if no qualifying record
+    /// exists. D-05 self-exclusion: records whose `agent_id == except_agent_id`
+    /// are skipped.
+    pub fn could_conflict_with(
+        &self,
+        path: &std::path::Path,
+        except_agent_id: &str,
+        now_ms: i64,
+        window_ms: i64,
+    ) -> Option<String> {
+        let records = self.recent_writes.get(path)?;
+        let found = records
+            .iter()
+            .rev()
+            .find(|r| r.agent_id != except_agent_id && now_ms - r.timestamp_ms <= window_ms)
+            .map(|r| r.agent_id.clone());
+        tracing::trace!(
+            kind = "conflict_query",
+            path = ?path,
+            except_agent = except_agent_id,
+            found = ?found,
+            "could_conflict_with"
+        );
+        found
+    }
 }
 
 #[cfg(test)]
@@ -429,5 +467,128 @@ mod tests {
         );
         assert_eq!(alerts3[0].agent_a_pid, 200);
         assert_eq!(alerts3[0].agent_b_pid, 300);
+    }
+
+    /// Phase 17 coverage for `ConflictEngine::could_conflict_with` — the
+    /// pure-read query surface the hook path uses to gate PreToolUse tools.
+    /// Test names are locked by VALIDATION.md contract rows; do not rename.
+    mod phase17 {
+        use super::*;
+
+        #[test]
+        fn could_conflict_with_returns_other_agent() {
+            let mut engine = ConflictEngine::new(Duration::from_secs(5));
+            let file = PathBuf::from("/repo/foo.rs");
+            let batch = make_batch(vec![(file.clone(), 1000, Attribution::Pid(100))]);
+            engine.process_batch(&batch);
+            let found = engine.could_conflict_with(&file, "PID-200", 3000, 5000);
+            assert_eq!(found.as_deref(), Some("PID-100"));
+        }
+
+        #[test]
+        fn could_conflict_with_excludes_self() {
+            let mut engine = ConflictEngine::new(Duration::from_secs(5));
+            let file = PathBuf::from("/repo/foo.rs");
+            let batch = make_batch(vec![(file.clone(), 1000, Attribution::Pid(100))]);
+            engine.process_batch(&batch);
+            // Query with the SAME agent id as the writer — must return None.
+            let found = engine.could_conflict_with(&file, "PID-100", 3000, 5000);
+            assert!(found.is_none(), "D-05 self-exclusion failed: got {found:?}");
+        }
+
+        #[test]
+        fn could_conflict_with_respects_window() {
+            let mut engine = ConflictEngine::new(Duration::from_secs(5));
+            let file = PathBuf::from("/repo/foo.rs");
+            let batch = make_batch(vec![(file.clone(), 1000, Attribution::Pid(100))]);
+            engine.process_batch(&batch);
+            // Query 6s later with a 5s window — outside boundary.
+            let found = engine.could_conflict_with(&file, "PID-200", 7000, 5000);
+            assert!(found.is_none(), "D-03 window failed: got {found:?}");
+        }
+
+        #[test]
+        fn could_conflict_with_no_record_returns_none() {
+            let engine = ConflictEngine::new(Duration::from_secs(5));
+            let found = engine.could_conflict_with(
+                &PathBuf::from("/untouched.rs"),
+                "PID-200",
+                3000,
+                5000,
+            );
+            assert!(found.is_none());
+        }
+
+        #[test]
+        fn could_conflict_with_returns_most_recent() {
+            let mut engine = ConflictEngine::new(Duration::from_secs(10));
+            let file = PathBuf::from("/repo/foo.rs");
+            // Seed TWO writes in order: PID-100 at t=1000, PID-200 at t=2000.
+            let batch1 = make_batch(vec![(file.clone(), 1000, Attribution::Pid(100))]);
+            let batch2 = make_batch(vec![(file.clone(), 2000, Attribution::Pid(200))]);
+            engine.process_batch(&batch1);
+            engine.process_batch(&batch2);
+            // Query as a third agent at t=3000 — must return the latest (PID-200).
+            let found = engine.could_conflict_with(&file, "PID-300", 3000, 10000);
+            assert_eq!(found.as_deref(), Some("PID-200"));
+        }
+
+        /// T-17-04 opt-in perf test: measures p99 `could_conflict_with`
+        /// latency under a 100-concurrent-call burst while `process_batch`
+        /// runs in a tight background loop. `#[ignore]` by default — run
+        /// manually via:
+        /// ```text
+        /// cargo test --package aitc --lib \
+        ///     conflict::engine::tests::phase17::lock_contention_under_burst \
+        ///     -- --ignored --nocapture
+        /// ```
+        /// Canonical home per Plan 05's cross-reference; stub lives here
+        /// so Plan 05 can point to a grep-stable symbol during its own
+        /// test wiring (VALIDATION.md "latency" row).
+        #[ignore]
+        #[tokio::test]
+        async fn lock_contention_under_burst() {
+            use std::sync::Arc;
+            let engine = Arc::new(tokio::sync::Mutex::new(
+                ConflictEngine::new(Duration::from_secs(5)),
+            ));
+            // Spawn a background writer doing process_batch in a tight loop.
+            let writer_engine = engine.clone();
+            let writer = tokio::spawn(async move {
+                for i in 0..1000 {
+                    let path = PathBuf::from(format!("/repo/burst_{}.rs", i % 50));
+                    let batch = make_batch(vec![(path, i as i64, Attribution::Pid(12345))]);
+                    let mut eng = writer_engine.lock().await;
+                    eng.process_batch(&batch);
+                    drop(eng);
+                    tokio::task::yield_now().await;
+                }
+            });
+            // Issue 100 concurrent could_conflict_with calls; record elapsed per call.
+            let mut handles = Vec::with_capacity(100);
+            for i in 0..100 {
+                let e = engine.clone();
+                handles.push(tokio::spawn(async move {
+                    let path = PathBuf::from(format!("/repo/burst_{}.rs", i % 50));
+                    let t0 = std::time::Instant::now();
+                    let eng = e.lock().await;
+                    let _ = eng.could_conflict_with(&path, "PID-99999", 100_000, 5000);
+                    t0.elapsed()
+                }));
+            }
+            let mut timings: Vec<Duration> = Vec::with_capacity(100);
+            for h in handles {
+                timings.push(h.await.unwrap());
+            }
+            writer.await.ok();
+            timings.sort();
+            let p99 = timings[98]; // 99th percentile of 100 samples
+            eprintln!("T-17-04 lock_contention_under_burst p99 = {:?}", p99);
+            assert!(
+                p99 < Duration::from_millis(10),
+                "p99 lock-wait exceeded 10ms: {:?}",
+                p99
+            );
+        }
     }
 }
