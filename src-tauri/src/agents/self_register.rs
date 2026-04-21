@@ -628,6 +628,9 @@ mod tests {
     use crate::agents::registry::AgentRegistry;
     use sqlx::sqlite::SqlitePoolOptions;
     use std::sync::Arc;
+    // Phase 17 Plan 04: `app_handle.manage(...)` in spawn_hook_server needs
+    // the `tauri::Manager` trait in scope.
+    use tauri::Manager;
 
     async fn make_pool() -> sqlx::SqlitePool {
         let pool = SqlitePoolOptions::new()
