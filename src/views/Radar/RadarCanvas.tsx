@@ -30,7 +30,6 @@ import { Flame, AlertTriangle, Info } from 'lucide-react';
 import {
   useRadarStore,
   getAgentColor,
-  installRadarPipelineBridge,
   type GraphNode,
 } from '../../stores/radarStore';
 import { usePipelineStore } from '../../stores/pipelineStore';
