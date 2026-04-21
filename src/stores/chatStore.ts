@@ -390,3 +390,24 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       error: null,
     }),
 }));
+
+// Phase 19 D-02.2 — pair a tool_use event with its tool_result by
+// tool_use_id. Linear scan; events array is paginated (50/page) so cost is
+// bounded. Pure export (two inputs don't fit the totalUnread zero-arg shape).
+// Consumers wire via `useChatStore((s) =>
+//   selectToolUseWithResult(s.eventsByAgent[agentId] ?? [], toolUseId))`.
+export function selectToolUseWithResult(
+  events: AgentEvent[],
+  toolUseId: string,
+): { toolUse: AgentEvent | null; toolResult: AgentEvent | null } {
+  let toolUse: AgentEvent | null = null;
+  let toolResult: AgentEvent | null = null;
+  for (const e of events) {
+    const payload =
+      (e.payloadJson as { tool_use_id?: string } | null) ?? {};
+    if (payload.tool_use_id !== toolUseId) continue;
+    if (e.eventType === 'tool_use') toolUse = e;
+    else if (e.eventType === 'tool_result') toolResult = e;
+  }
+  return { toolUse, toolResult };
+}

@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { useChatStore, type AgentEvent, type ChatChannel } from '../chatStore';
+import {
+  useChatStore,
+  selectToolUseWithResult,
+  type AgentEvent,
+  type ChatChannel,
+} from '../chatStore';
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -448,16 +453,45 @@ function mkToolResult(
   };
 }
 
-describe('selectToolUseWithResult (Plan 04 target — D-02.2)', () => {
+describe('selectToolUseWithResult (D-02.2 — V-19-08)', () => {
   // V-19-08: returns { toolUse, toolResult } when both exist;
   //          returns { toolUse, toolResult: null } when only tool_use present;
   //          ignores events with mismatched tool_use_id.
-  it.todo('pairs tool_use and tool_result by tool_use_id');
-  it.todo('returns toolResult: null when no paired tool_result exists');
-  it.todo('ignores events with mismatched tool_use_id');
-});
+  it('pairs tool_use and tool_result by tool_use_id', () => {
+    const toolUse = mkToolUse(5, 'toolu_01');
+    const toolResult = mkToolResult(6, 'toolu_01', false);
+    useChatStore.setState({ eventsByAgent: { a: [toolUse, toolResult] } });
+    const { toolUse: tu, toolResult: tr } = selectToolUseWithResult(
+      useChatStore.getState().eventsByAgent['a'] ?? [],
+      'toolu_01',
+    );
+    expect(tu?.id).toBe(5);
+    expect(tr?.id).toBe(6);
+    expect(tr?.eventType).toBe('tool_result');
+  });
 
-// Reference unused factories so TypeScript does not trip noUnusedLocals
-// while the `.todo` placeholders have no bodies. Plan 04 consumes them.
-void mkToolUse;
-void mkToolResult;
+  it('returns toolResult: null when no paired tool_result exists', () => {
+    const toolUse = mkToolUse(10, 'toolu_02');
+    useChatStore.setState({ eventsByAgent: { a: [toolUse] } });
+    const result = selectToolUseWithResult(
+      useChatStore.getState().eventsByAgent['a'] ?? [],
+      'toolu_02',
+    );
+    expect(result.toolUse?.id).toBe(10);
+    expect(result.toolResult).toBeNull();
+  });
+
+  it('ignores events with mismatched tool_use_id', () => {
+    const toolUseA = mkToolUse(20, 'toolu_a');
+    const toolResultB = mkToolResult(21, 'toolu_b', false);
+    useChatStore.setState({
+      eventsByAgent: { a: [toolUseA, toolResultB] },
+    });
+    const result = selectToolUseWithResult(
+      useChatStore.getState().eventsByAgent['a'] ?? [],
+      'toolu_a',
+    );
+    expect(result.toolUse?.id).toBe(20);
+    expect(result.toolResult).toBeNull();
+  });
+});
