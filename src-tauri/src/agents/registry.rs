@@ -184,6 +184,47 @@ impl AgentRegistry {
             .collect()
     }
 
+    /// Phase 18 D-04: read-only diagnostic snapshot of registry state.
+    ///
+    /// Single read-lock acquisition + one atomic load. Does NOT contend
+    /// with `upsert_agent`'s write path (T-18-02). Load the atomic BEFORE
+    /// the read lock so any concurrent upsert failure this call races
+    /// with is reflected in the NEXT call, not this one —
+    /// monotonic-lagging semantics, never "from the future"
+    /// (see 18-RESEARCH.md Pitfall 7).
+    ///
+    /// Counts are derived by ID prefix (`PASSIVE-*`, `KAGENT-*`) and by
+    /// `launched_by_aitc = true`. `launched_count` is orthogonal — a
+    /// launched agent has a `KAGENT-` ID and `launched_by_aitc = true`,
+    /// so it appears in BOTH `kagent_count` and `launched_count`. That
+    /// is intentional; the counts answer different questions.
+    pub async fn snapshot_stats(&self) -> RegistryStats {
+        let capacity_hits_since_start =
+            self.capacity_hits_since_start.load(Ordering::Relaxed);
+        let agents = self.agents.read().await;
+        let total_agents = agents.len() as u32;
+        let mut passive_count = 0u32;
+        let mut kagent_count = 0u32;
+        let mut launched_count = 0u32;
+        for (id, managed) in agents.iter() {
+            if id.starts_with("PASSIVE-") {
+                passive_count += 1;
+            } else if id.starts_with("KAGENT-") {
+                kagent_count += 1;
+            }
+            if managed.launched_by_aitc {
+                launched_count += 1;
+            }
+        }
+        RegistryStats {
+            total_agents,
+            passive_count,
+            kagent_count,
+            launched_count,
+            capacity_hits_since_start,
+        }
+    }
+
     /// Update an agent's state. Logs a warning if the transition is invalid
     /// per the state machine, but applies it anyway.
     pub async fn update_state(&self, id: &str, state: AgentState) {
