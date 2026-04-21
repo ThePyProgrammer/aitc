@@ -30,6 +30,13 @@ export interface ApprovalRequest {
   toolName: string | null;
   toolInputJson: unknown | null;
   sessionId: string | null;
+  // Phase 17 D-21: populated when the row was gated due to a file conflict or
+  // a protected-path glob match. Legacy rows (pre-migration-007) have both
+  // null; non-conflict future gate reasons may also leave conflictWithAgentId
+  // null. The defensive `| string | null` on gateReason tolerates a future
+  // backend value the frontend doesn't recognize without breaking typing.
+  conflictWithAgentId?: string | null;
+  gateReason?: 'file_conflict' | 'protected_path' | 'unknown' | string | null;
 }
 
 interface CommsStore {
