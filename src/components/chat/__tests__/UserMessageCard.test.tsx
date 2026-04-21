@@ -25,12 +25,18 @@ describe('UserMessageCard', () => {
     expect(screen.getByText('hello world')).toBeInTheDocument();
   });
 
-  it('renders the self-end and surface-container classes', () => {
+  it('renders as a full-width row with subtle YOU tint (codey flat-row style)', () => {
     render(<UserMessageCard event={mk()} />);
     const card = screen.getByTestId('user-message-card');
-    expect(card.className).toContain('self-end');
-    // surface-container fill lives on the inner bubble, not the flex-column wrapper.
-    expect(card.innerHTML).toContain('bg-surface-container');
+    // Full-width row (no bubble / no self-end).
+    expect(card.className).toContain('w-full');
+    expect(card.className).not.toContain('self-end');
+    // Subtle fill distinguishes the user row from plain assistant rows.
+    expect(card.className).toContain('bg-surface-container');
+    // Row separator used instead of bubble chrome.
+    expect(card.className).toContain('border-t');
+    // "YOU" role label.
+    expect(card.textContent ?? '').toContain('YOU');
   });
 
   it('renders a timestamp (Data-sm)', () => {

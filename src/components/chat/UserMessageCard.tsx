@@ -1,6 +1,9 @@
-// Phase 10 — `user_text` bubble (D-13). self-end, surface-container fill.
+// Phase 10 — `user_text` full-width row (no bubble).
 // Renders the message content, a compact timestamp, and the delivery-status
 // lifecycle icon (queued → delivered → consumed, or unsupported) per D-10.
+//
+// Style match: codey's PlaygroundPage `MessageRow` (full-width,
+// `border-t` separators, small role label, no chat-bubble chrome).
 
 import type { AgentEvent } from '../../stores/chatStore';
 import { DeliveryStatus } from '../ui/DeliveryStatus';
@@ -31,23 +34,26 @@ export function UserMessageCard({ event }: UserMessageCardProps) {
   return (
     <div
       data-testid="user-message-card"
-      className="self-end flex flex-col max-w-[80%]"
+      className="w-full px-5 py-3 border-t border-outline-variant/10 bg-surface-container/30"
     >
-      <div className="bg-surface-container px-3 py-2">
-        <p className="font-mono text-sm text-on-surface whitespace-pre-wrap">
-          {content}
-        </p>
-      </div>
-      <div className="flex items-center justify-end gap-2 mt-1">
+      <div className="flex items-center gap-3 mb-1">
+        <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/70">
+          YOU
+        </span>
         {timestamp && (
-          <span className="font-mono text-[10px] text-on-surface-variant">
+          <span className="font-mono text-[10px] text-on-surface-variant/50">
             {timestamp}
           </span>
         )}
         {event.deliveryStatus && (
-          <DeliveryStatus status={event.deliveryStatus} />
+          <span className="ml-auto">
+            <DeliveryStatus status={event.deliveryStatus} />
+          </span>
         )}
       </div>
+      <p className="font-mono text-sm text-on-surface whitespace-pre-wrap">
+        {content}
+      </p>
     </div>
   );
 }

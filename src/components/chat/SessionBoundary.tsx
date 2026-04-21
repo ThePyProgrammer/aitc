@@ -63,7 +63,7 @@ export function SessionBoundary({ event }: SessionBoundaryProps) {
   return (
     <div
       data-testid="session-boundary"
-      className="h-10 flex items-center gap-3 font-headline text-[10px] uppercase tracking-widest text-on-surface-variant"
+      className="h-10 px-5 flex items-center gap-3 font-headline text-[10px] uppercase tracking-widest text-on-surface-variant"
     >
       <span className="flex-1 border-t border-outline-variant/20" />
       <span>{label}</span>

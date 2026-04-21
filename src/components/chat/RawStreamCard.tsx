@@ -40,7 +40,7 @@ export function RawStreamCard({ event }: RawStreamCardProps) {
   return (
     <pre
       data-testid={isStderr ? 'raw-stream-stderr' : 'raw-stream-stdout'}
-      className={`self-start max-w-[90%] bg-surface-container-lowest px-3 py-1 font-mono text-xs whitespace-pre-wrap ${
+      className={`w-full px-5 py-1 font-mono text-xs whitespace-pre-wrap bg-surface-container-lowest/40 ${
         isStderr ? 'text-error' : 'text-on-surface-variant'
       }`}
     >

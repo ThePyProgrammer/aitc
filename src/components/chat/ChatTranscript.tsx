@@ -139,7 +139,7 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
         ref={scrollRef}
         data-testid="chat-transcript"
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-4"
+        className="flex-1 overflow-y-auto"
       >
         <div
           style={{
@@ -162,7 +162,6 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
                   width: '100%',
                   transform: `translateY(${vi.start}px)`,
                 }}
-                className="flex flex-col py-1"
               >
                 <EventCard event={event} />
               </div>

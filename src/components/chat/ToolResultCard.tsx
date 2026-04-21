@@ -20,8 +20,11 @@ export function ToolResultCard({ event }: ToolResultCardProps) {
   return (
     <div
       data-testid="tool-result-card"
-      className="self-start max-w-[80%] bg-surface-container-high px-3 py-2 border-l border-outline-variant/20 font-mono text-xs text-on-surface-variant"
+      className="w-full px-5 py-2 border-t border-outline-variant/10 font-mono text-xs text-on-surface-variant/70"
     >
+      <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/50 mr-2">
+        RESULT
+      </span>
       {preview.slice(0, 200)}
     </div>
   );

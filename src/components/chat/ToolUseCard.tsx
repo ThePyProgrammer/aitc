@@ -1,16 +1,17 @@
-// Phase 10 — `tool_use` card (D-13, D-16).
-// Collapsed by default as a 36px-tall one-liner showing:
-//   [ToolBadge] summary [ChevronDown] [→ APPROVAL_{id}]
-// Click to expand — renders the Phase 8 ToolPreview registry body inline.
-// When approvalRequestId is set, a secondary-colored pill navigates to
-// /comms?tab=requests&request={id}.
+// Phase 10 — `tool_use` inline row (D-13, D-16).
+// Quiet single-line row that blends with the transcript flow. Collapsed:
+//   TOOL · {TOOL_NAME} {summary} [→ APPROVAL_{id}]   ▾
+// Click to expand — renders the Phase 8 ToolPreview registry body below.
+//
+// Style match: codey's full-width row pattern. No bubble chrome, no
+// self-start/max-width; the row fills the panel edge-to-edge so tool events
+// don't visually compete with assistant/user text.
 
 import { useState, useCallback } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import type { AgentEvent } from '../../stores/chatStore';
-import { ToolBadge } from '../ui/ToolBadge';
 import { ToolPreview } from '../../views/CommsHub/ToolPreview';
 
 export interface ToolUseCardProps {
@@ -74,46 +75,49 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
     <motion.div
       layout
       data-testid="tool-use-card"
-      className={`self-start max-w-[80%] w-full ${
-        expanded
-          ? 'bg-surface-container-highest'
-          : 'bg-surface-container-high'
-      } overflow-hidden`}
-      transition={{ duration: 0.15, ease: 'easeOut' }}
-      onClick={() => setExpanded((prev) => !prev)}
-      role="button"
-      tabIndex={0}
+      className="w-full border-t border-outline-variant/10"
+      transition={{ duration: 0.12, ease: 'easeOut' }}
     >
-      <div className="min-h-[36px] flex items-center gap-2 px-3 py-1">
-        <ToolBadge toolName={toolName} />
-        <span className="flex-1 truncate font-mono text-xs text-on-surface-variant">
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        className="w-full flex items-center gap-2 px-5 py-2 text-left hover:bg-surface-container/20 transition-colors"
+        aria-expanded={expanded}
+      >
+        <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/50 shrink-0">
+          TOOL
+        </span>
+        <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant shrink-0">
+          {(toolName ?? 'UNKNOWN').toUpperCase()}
+        </span>
+        <span className="flex-1 truncate font-mono text-xs text-on-surface-variant/70">
           {summary}
         </span>
         {approvalId != null && (
           <button
             type="button"
             onClick={handleApprovalClick}
-            className="font-headline text-[10px] font-bold tracking-widest uppercase text-secondary bg-secondary/10 border border-secondary/20 px-2 py-0.5 hover:bg-secondary/20"
+            className="font-headline text-[10px] tracking-widest uppercase text-secondary hover:underline shrink-0"
           >
             → APPROVAL_{approvalId}
           </button>
         )}
         {expanded ? (
           <ChevronUp
-            size={14}
+            size={12}
             strokeWidth={1.5}
-            className="text-on-surface-variant"
+            className="text-on-surface-variant/60 shrink-0"
             aria-hidden="true"
           />
         ) : (
           <ChevronDown
-            size={14}
+            size={12}
             strokeWidth={1.5}
-            className="text-on-surface-variant"
+            className="text-on-surface-variant/60 shrink-0"
             aria-hidden="true"
           />
         )}
-      </div>
+      </button>
       <AnimatePresence>
         {expanded && (
           <motion.div
@@ -121,9 +125,9 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.15 }}
-            onClick={(e) => e.stopPropagation()}
+            className="overflow-hidden"
           >
-            <div className="border-t border-outline-variant/10 px-3 py-2">
+            <div className="px-5 pb-3 pt-1 bg-surface-container/20">
               <ToolPreview
                 toolName={toolName ?? ''}
                 toolInputJson={toolInput}

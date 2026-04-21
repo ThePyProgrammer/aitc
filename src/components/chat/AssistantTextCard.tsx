@@ -1,8 +1,11 @@
-// Phase 10 — `assistant_text` bubble (D-13).
-// self-start, bg-surface-container-high. Body color is on-surface-variant
-// for completed turns; on-surface (#ffffff) while streaming. When
-// payloadJson.streaming === true, a StreamingCursor is appended and a
-// `STREAMING…` label renders in secondary color (D-17).
+// Phase 10 — `assistant_text` full-width row (no bubble).
+// Matches codey's PlaygroundPage `MessageRow` style. Body text fills the
+// panel edge-to-edge; a `border-t` separator distinguishes adjacent rows
+// without chat-bubble chrome.
+//
+// Streaming lifecycle (D-17): while `payloadJson.streaming === true`, a
+// tiny pulsing caret trails the tokens and a secondary `STREAMING…` label
+// is rendered in the footer.
 //
 // Per UI-SPEC the `@user` literal token inside the assistant body renders
 // in `text-secondary font-bold` — the chat-side accent twin of the approval
@@ -65,16 +68,19 @@ export function AssistantTextCard({ event }: AssistantTextCardProps) {
   return (
     <div
       data-testid="assistant-text-card"
-      className={`self-start max-w-[80%] bg-surface-container-high px-3 py-2 ${bodyColor}`}
+      className="w-full px-5 py-3 border-t border-outline-variant/10"
     >
-      <p className={`font-mono text-sm ${bodyColor} whitespace-pre-wrap`}>
+      <div className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/70 mb-1">
+        CLAUDE
+      </div>
+      <p className={`font-mono text-sm ${bodyColor} whitespace-pre-wrap leading-relaxed`}>
         {renderContent(content)}
         {streaming && <StreamingCursor />}
       </p>
       {streaming && (
         <span
           aria-live="polite"
-          className="font-headline text-[10px] font-bold tracking-widest uppercase text-secondary mt-1 inline-block"
+          className="font-headline text-[10px] font-bold tracking-widest uppercase text-secondary mt-2 inline-block"
         >
           STREAMING…
         </span>

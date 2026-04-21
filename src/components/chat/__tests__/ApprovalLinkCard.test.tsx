@@ -36,27 +36,30 @@ function mk(overrides: Partial<AgentEvent> = {}): AgentEvent {
 }
 
 describe('ApprovalLinkCard', () => {
-  it('renders APPROVAL_REQUIRED with tool_name + path', () => {
+  it('renders APPROVAL label with tool_name + path', () => {
     render(
       <MemoryRouter>
         <ApprovalLinkCard event={mk()} />
       </MemoryRouter>,
     );
     const card = screen.getByTestId('approval-link-card');
-    expect(card.textContent ?? '').toContain('APPROVAL_REQUIRED');
+    // Flat-row pattern: separate label tokens instead of APPROVAL_REQUIRED literal.
+    expect(card.textContent ?? '').toContain('APPROVAL');
     expect(card.textContent ?? '').toContain('WRITE');
     expect(card.textContent ?? '').toContain('/etc/hosts');
   });
 
-  it('has border-l-2 border-secondary class', () => {
+  it('renders as a full-width row with border-t row separator (codey style)', () => {
     render(
       <MemoryRouter>
         <ApprovalLinkCard event={mk()} />
       </MemoryRouter>,
     );
     const card = screen.getByTestId('approval-link-card');
-    expect(card.className).toContain('border-l-2');
-    expect(card.className).toContain('border-secondary');
+    expect(card.className).toContain('w-full');
+    expect(card.className).toContain('border-t');
+    // Secondary accent now lives on the label span, not as a left-border bar.
+    expect(card.innerHTML).toContain('text-secondary');
   });
 
   it('clicking the card navigates to /comms?tab=requests&request={id}', () => {

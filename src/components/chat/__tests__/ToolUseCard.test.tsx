@@ -57,12 +57,13 @@ function renderWithRouter(ui: React.ReactElement) {
 }
 
 describe('ToolUseCard', () => {
-  it('renders collapsed by default with ToolBadge + summary + chevron', () => {
+  it('renders collapsed by default with TOOL label + tool name + summary + chevron', () => {
     renderWithRouter(<ToolUseCard event={mk()} />);
     const card = screen.getByTestId('tool-use-card');
     expect(card).toBeInTheDocument();
-    // Collapsed row displays ToolBadge (role="img") and chevron-down.
-    expect(screen.getByRole('img', { name: /Edit tool/i })).toBeInTheDocument();
+    // Flat-row pattern: plain text labels instead of ToolBadge pill.
+    expect(card.textContent ?? '').toContain('TOOL');
+    expect(card.textContent ?? '').toContain('EDIT');
     expect(card.textContent ?? '').toContain('/tmp/a.txt');
     // Expanded body (ToolPreview) should NOT be rendered yet.
     expect(screen.queryByTestId('tool-preview-stub')).toBeNull();
@@ -71,7 +72,11 @@ describe('ToolUseCard', () => {
   it('click expands to render Phase 8 ToolPreview', () => {
     renderWithRouter(<ToolUseCard event={mk()} />);
     const card = screen.getByTestId('tool-use-card');
-    fireEvent.click(card);
+    // The outer row is a <motion.div>; the clickable header is the
+    // nested <button aria-expanded="false">. Click that.
+    const toggle = card.querySelector('button[aria-expanded]');
+    expect(toggle).not.toBeNull();
+    fireEvent.click(toggle!);
     expect(screen.getByTestId('tool-preview-stub')).toBeInTheDocument();
     expect(screen.getByTestId('tool-preview-stub')).toHaveAttribute(
       'data-tool-name',

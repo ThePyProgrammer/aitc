@@ -1,6 +1,6 @@
-// Phase 10 — `approval_link` card (D-13). Renders a secondary-accented
-// deep-link pill that routes to REQUESTS tab via
-// `/comms?tab=requests&request={approval_request_id}`.
+// Phase 10 — `approval_link` inline row (D-13). Quiet full-width line
+// matching codey's `MessageRow` pattern, no pill chrome. Clicks navigate
+// to `/comms?tab=requests&request={approval_request_id}`.
 
 import { ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -42,18 +42,28 @@ export function ApprovalLinkCard({ event }: ApprovalLinkCardProps) {
       type="button"
       data-testid="approval-link-card"
       onClick={handleClick}
-      className="self-start max-w-[80%] text-left bg-surface-container-high hover:bg-surface-container-highest px-3 py-2 border-l-2 border-secondary font-mono text-xs text-on-surface flex items-center gap-2 transition-colors"
+      className="w-full text-left px-5 py-2 border-t border-outline-variant/10 hover:bg-surface-container/20 transition-colors flex items-center gap-2"
     >
+      <span className="font-headline text-[10px] uppercase tracking-widest text-secondary shrink-0">
+        APPROVAL
+      </span>
+      <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant shrink-0">
+        {toolName}
+      </span>
+      <span className="flex-1 truncate font-mono text-xs text-on-surface-variant/70">
+        {filePath}
+      </span>
+      {approvalId != null && (
+        <span className="font-mono text-[10px] text-secondary shrink-0">
+          #{approvalId}
+        </span>
+      )}
       <ExternalLink
-        size={14}
+        size={12}
         strokeWidth={1.5}
-        className="text-secondary shrink-0"
+        className="text-secondary/60 shrink-0"
         aria-hidden="true"
       />
-      <span className="truncate">
-        APPROVAL_REQUIRED → {toolName}
-        {filePath && ` · ${filePath}`}
-      </span>
     </button>
   );
 }

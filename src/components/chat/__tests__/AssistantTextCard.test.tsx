@@ -19,11 +19,16 @@ function mk(overrides: Partial<AgentEvent> = {}): AgentEvent {
 }
 
 describe('AssistantTextCard', () => {
-  it('renders assistant content with self-start + surface-container-high', () => {
+  it('renders assistant content as a full-width row (codey flat-row style)', () => {
     render(<AssistantTextCard event={mk()} />);
     const card = screen.getByTestId('assistant-text-card');
-    expect(card.className).toContain('self-start');
-    expect(card.className).toContain('bg-surface-container-high');
+    // Full-width row, no bubble chrome.
+    expect(card.className).toContain('w-full');
+    expect(card.className).not.toContain('self-start');
+    expect(card.className).not.toContain('bg-surface-container-high');
+    expect(card.className).toContain('border-t');
+    // CLAUDE role label + body content.
+    expect(card.textContent ?? '').toContain('CLAUDE');
     expect(screen.getByText('OK')).toBeInTheDocument();
   });
 
