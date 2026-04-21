@@ -315,6 +315,22 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const agentDotsRef = useRef<
     Map<string, { x: number; y: number; lastEventTs: number }>
   >(new Map());
+
+  // Phase 11.1 — rolling-p95 frame-time diagnostic (D-12).
+  // Enabled at mount if `localStorage.radarPerfDebug === '1'`. Zero runtime
+  // overhead when the flag is off — one boolean ref read per frame.
+  const perfRingRef = useRef<Float32Array>(new Float32Array(120)); // ~2s @ 60fps
+  const perfIdxRef = useRef(0);
+  const perfFilledRef = useRef(0);
+  const perfDebugEnabledRef = useRef(false);
+  useEffect(() => {
+    try {
+      perfDebugEnabledRef.current = localStorage.getItem('radarPerfDebug') === '1';
+    } catch {
+      // Private browsing / storage disabled — keep diagnostic off.
+      perfDebugEnabledRef.current = false;
+    }
+  }, []);
   // Tick version forces `selectedNode` useMemo to re-evaluate after the
   // pipeline subscription mutates lastAgentFileRef (ref mutations don't
   // themselves trigger React re-renders).
@@ -546,6 +562,11 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         animFrameRef.current = requestAnimationFrame(render);
         return;
       }
+      // Phase 11.1 — perf bracket open (D-12). Gated so prod pays only one
+      // boolean ref read per frame; performance.now() is NOT called when the
+      // diagnostic flag is unset.
+      const t0 = perfDebugEnabledRef.current ? performance.now() : 0;
+
       const vp = viewportRef.current;
       const s = stateRef.current;
       const dpr = window.devicePixelRatio || 1;
@@ -695,6 +716,28 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       // Plan 06 z-order steps 12-13: conflict pulse rings + badge dots (D-22).
       drawConflictPulses(ctx, s.activeConflictPaths, livePositions, now, vp.zoom);
       drawConflictBadges(ctx, s.activeConflictPaths, livePositions, vp.zoom);
+
+      // Phase 11.1 — perf bracket close + emit (D-12, D-13). No observer API.
+      // Runs only when radarPerfDebug === '1'. Emits once per 120-frame ring wrap
+      // (~2s at 60fps) with p95/max/avg via the Float32Array(120) ring buffer.
+      if (perfDebugEnabledRef.current) {
+        const dt = performance.now() - t0;
+        const ring = perfRingRef.current;
+        ring[perfIdxRef.current] = dt;
+        perfIdxRef.current = (perfIdxRef.current + 1) % ring.length;
+        if (perfFilledRef.current < ring.length) perfFilledRef.current++;
+        if (perfIdxRef.current === 0) {
+          const n = perfFilledRef.current;
+          const sorted = Array.from(ring.subarray(0, n)).sort((a, b) => a - b);
+          const p95 = sorted[Math.min(n - 1, Math.floor(n * 0.95))];
+          const max = sorted[n - 1];
+          const avg = sorted.reduce((s, v) => s + v, 0) / n;
+          // eslint-disable-next-line no-console
+          console.log(
+            `[RadarPerf] p95=${p95.toFixed(2)}ms max=${max.toFixed(2)}ms avg=${avg.toFixed(2)}ms n=${n}`,
+          );
+        }
+      }
 
       dirtyRef.current = false;
       animFrameRef.current = requestAnimationFrame(render);
