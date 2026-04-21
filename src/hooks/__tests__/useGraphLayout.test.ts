@@ -1,17 +1,26 @@
-// Plan 03: useGraphLayout — settle-then-freeze d3-force wrapper.
+// Phase 11 — useGraphLayout tests with in-thread mocked Worker.
+// Pattern 7 in 11-RESEARCH.md: vi.stubGlobal('Worker', MockWorker) drives
+// makeGraphSimCore synchronously so assertions don't need async waits.
 //
-// Covers D-03 (settle cadence), D-11 (forceCluster wired in), D-23
-// (quadtree hit-test). Tests run against an in-memory radarStore — the
-// hook's useEffect runs synchronously inside `act()` so we can
-// snapshot graphNodes/settledAt after the initial settle.
+// Preserves the 7 original Phase 7 test intents (consts, build sim,
+// quadtree on settle, rewarm threshold, cleanup, determinism) adapted to
+// the new LivePositions ref shape (D-25) + adds Phase 11 assertions:
+// D-01 StrictMode terminate-once, D-12 stale-seq drop, D-16 10-tick
+// quadtree rebuild, D-28 commitSettledPositions Map shape.
 //
 // References:
-//   07-CONTEXT.md D-03, D-11
-//   07-RESEARCH.md §Pattern 1, §Pattern 4, §Pitfall 2/3/5
-//   07-RESEARCH.md §Validation Determinism (lines 900-907)
+//   11-CONTEXT.md D-01, D-12, D-16, D-24, D-28
+//   11-RESEARCH.md §Pattern 6 (StrictMode cleanup), §Pattern 7 (mock)
+//   11-PATTERNS.md §src/hooks/__tests__/useGraphLayout.test.ts
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
+import {
+  makeGraphSimCore,
+  type GraphSimCore,
+  type GraphSimCallbacks,
+} from '../../workers/graphSimCore';
+import type { WorkerIn, WorkerOut } from '../../workers/graphSimProtocol';
 import {
   useGraphLayout,
   MAX_TICKS,
@@ -21,66 +30,132 @@ import {
   ALPHA_DECAY,
   VELOCITY_DECAY,
 } from '../useGraphLayout';
-import { useRadarStore, type GraphNode, type GraphEdge } from '../../stores/radarStore';
+import { useRadarStore, type GraphNode } from '../../stores/radarStore';
 
-// Mock Tauri invoke so the store is purely in-memory for these tests
-// (fetchGraph is not exercised here — we drive graphNodes/graphEdges directly).
+// Mock Tauri invoke — store's fetchGraph is not exercised; tests drive
+// graphNodes/graphEdges directly.
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn().mockResolvedValue([]),
 }));
 
-function mulberry32(seed: number): () => number {
-  let t = seed;
-  return () => {
-    t = (t + 0x6d2b79f5) | 0;
-    let r = Math.imul(t ^ (t >>> 15), 1 | t);
-    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
-    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
-  };
+// --- Test registry: all MockWorker instances, so tests can assert lifecycle. ---
+const workers: MockWorker[] = [];
+
+/**
+ * MockWorker — stubs the global Worker constructor with a synchronous
+ * makeGraphSimCore instance. Uses a queue-based scheduler (per Wave 1
+ * decision) so settle-scale recursion doesn't stack-overflow under
+ * vitest+jsdom; the queue is drained inline inside each postMessage call.
+ */
+class MockWorker {
+  private core: GraphSimCore;
+  private queue: Array<() => void> = [];
+  onmessage: ((e: MessageEvent<WorkerOut>) => void) | null = null;
+  onerror: ((e: ErrorEvent) => void) | null = null;
+  terminateCount = 0;
+  postedMessages: WorkerIn[] = [];
+
+  constructor(_url: string | URL, _opts?: WorkerOptions) {
+    const cb: GraphSimCallbacks = {
+      onTick: (m) =>
+        this.dispatch({
+          type: 'tick',
+          positions: m.positions,
+          alpha: m.alpha,
+          sequence: m.sequence,
+        }),
+      onSettled: (m) =>
+        this.dispatch({
+          type: 'settled',
+          positions: m.positions,
+          alpha: m.alpha,
+          sequence: m.sequence,
+        }),
+      onError: (m) =>
+        this.dispatch({ type: 'error', message: m.message, stack: m.stack }),
+    };
+    // Queue-based scheduler: per Wave 1 §Pattern 2, avoids recursion.
+    this.core = makeGraphSimCore(cb, {
+      schedule: (fn) => {
+        this.queue.push(fn);
+      },
+    });
+    workers.push(this);
+  }
+
+  postMessage(msg: WorkerIn, _transfer?: unknown): void {
+    this.postedMessages.push(msg);
+    switch (msg.type) {
+      case 'init':
+        this.core.init(msg);
+        break;
+      case 'topology':
+        this.core.topology(msg);
+        break;
+      case 'updateConfig':
+        this.core.updateConfig(msg.config);
+        break;
+      case 'pin':
+        this.core.pin(msg.id, msg.x, msg.y);
+        break;
+      case 'unpin':
+        this.core.unpin(msg.id);
+        break;
+      case 'returnBuffer':
+        this.core.returnBuffer(msg.buffer);
+        break;
+      case 'dispose':
+        this.core.dispose();
+        break;
+    }
+    // Drain scheduled callbacks synchronously so tests see the full
+    // settle/tick fan-out without async awaits.
+    let steps = 0;
+    const MAX_STEPS = 5000;
+    while (this.queue.length > 0 && steps < MAX_STEPS) {
+      const fn = this.queue.shift()!;
+      fn();
+      steps++;
+    }
+  }
+
+  terminate(): void {
+    this.terminateCount++;
+    this.core.dispose();
+    this.queue.length = 0;
+  }
+
+  private dispatch(data: WorkerOut): void {
+    this.onmessage?.({ data } as MessageEvent<WorkerOut>);
+  }
 }
 
-function seedGraph(nodeCount: number, dirKey = 'src/foo'): GraphNode[] {
-  const nodes: GraphNode[] = [];
+function seedGraphNodes(nodeCount: number, dirKey = 'src/foo'): GraphNode[] {
+  const out: GraphNode[] = [];
   for (let i = 0; i < nodeCount; i++) {
-    nodes.push({
+    out.push({
       id: `${dirKey}/n${i}.ts`,
       dirKey,
       dirDepth: dirKey.split('/').length,
     });
   }
-  return nodes;
+  return out;
 }
 
-function withSeededRandom<T>(seed: number, fn: () => T): T {
-  const prev = Math.random;
-  const rng = mulberry32(seed);
-  Math.random = rng;
-  try {
-    return fn();
-  } finally {
-    Math.random = prev;
-  }
-}
+beforeEach(() => {
+  workers.length = 0;
+  vi.stubGlobal('Worker', MockWorker);
+  useRadarStore.getState().reset();
+});
 
-function setStoreGraph(nodes: GraphNode[], edges: GraphEdge[] = []) {
-  // Seed for the INITIAL settle: force settledAt null so the hook's
-  // first effect runs.
-  useRadarStore.setState({ graphNodes: nodes, graphEdges: edges, settledAt: null });
-}
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
-function mutateStoreGraph(nodes: GraphNode[], edges: GraphEdge[] = []) {
-  // Subsequent mutation that must NOT reset settledAt — that's the whole
-  // point of the rewarm-threshold gate. Preserves the post-settle
-  // timestamp so the hook's rewarm effect decides whether to re-run.
-  useRadarStore.setState((s) => ({ ...s, graphNodes: nodes, graphEdges: edges }));
-}
+describe('useGraphLayout — Phase 11 Worker client', () => {
+  // ─── Preserved Phase 7 cases (adapted to LivePositions ref shape) ───────
 
-describe('useGraphLayout — Plan 03', () => {
-  beforeEach(() => {
-    useRadarStore.getState().reset();
-  });
-
-  it('exports tuning constants honoring 07-CONTEXT D-03 and RESEARCH §Pattern 1', () => {
+  it('exports tuning constants honoring 07-CONTEXT D-03 + RESEARCH §Pattern 1', () => {
     expect(MAX_TICKS).toBe(500);
     expect(REWARM_NODE_COUNT_THRESHOLD).toBe(5);
     expect(REWARM_PERCENT_THRESHOLD).toBe(0.01);
@@ -89,191 +164,174 @@ describe('useGraphLayout — Plan 03', () => {
     expect(VELOCITY_DECAY).toBe(0.5);
   });
 
-  it('settle terminates (<500 ticks) and commits positions to radarStore (D-03)', () => {
-    withSeededRandom(1, () => {
-      setStoreGraph(seedGraph(50));
-      renderHook(() => useGraphLayout());
+  it('constructs a Worker on mount and terminates on unmount (D-01, Pattern 6)', () => {
+    const { unmount } = renderHook(() => useGraphLayout());
+    expect(workers.length).toBe(1);
+    expect(workers[0].terminateCount).toBe(0);
+    unmount();
+    expect(workers[0].terminateCount).toBe(1);
+  });
+
+  it('StrictMode double-mount terminates the first worker and creates a second', () => {
+    // Simulate StrictMode (mount + unmount + remount) via two
+    // renderHook calls since renderHook().rerender() does not remount.
+    const first = renderHook(() => useGraphLayout());
+    const firstWorker = workers[0];
+    first.unmount();
+    expect(firstWorker.terminateCount).toBe(1);
+
+    const second = renderHook(() => useGraphLayout());
+    expect(workers.length).toBeGreaterThanOrEqual(2);
+    const secondWorker = workers[workers.length - 1];
+    expect(secondWorker.terminateCount).toBe(0);
+    second.unmount();
+    expect(secondWorker.terminateCount).toBe(1);
+  });
+
+  it('posts init when graphNodes first arrive and settles positions (D-03 legacy, D-28)', async () => {
+    const { result, unmount } = renderHook(() => useGraphLayout());
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: seedGraphNodes(10),
+        graphEdges: [],
+      });
     });
+    const w = workers[0];
+    // First message to the worker must be an init (not topology).
+    expect(w.postedMessages[0]?.type).toBe('init');
+    // simNodesRef ids populated.
+    expect(result.current.simNodesRef.current.ids.length).toBe(10);
+    // After settle (queue drain inside postMessage), positions are finite.
     const s = useRadarStore.getState();
     expect(s.settledAt).not.toBeNull();
-    // Every node has a finite position after settle.
     for (const n of s.graphNodes) {
       expect(Number.isFinite(n.x ?? NaN)).toBe(true);
       expect(Number.isFinite(n.y ?? NaN)).toBe(true);
     }
+    unmount();
   });
 
-  it('settle of a trivially small graph terminates via alpha cooldown before MAX_TICKS', () => {
-    // 5 disconnected nodes — alpha cools faster than 500 ticks.
-    withSeededRandom(2, () => {
-      setStoreGraph(seedGraph(5));
-      renderHook(() => useGraphLayout());
+  it('returns a populated quadtree after settle (D-16, D-23)', async () => {
+    const { result, unmount } = renderHook(() => useGraphLayout());
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: seedGraphNodes(20),
+        graphEdges: [],
+      });
     });
-    // Indirectly verified: settledAt is non-null and positions are finite,
-    // meaning the loop exited (either by tick cap or alpha cooldown).
-    // If the loop hung we'd deadlock, not fail here.
-    const s = useRadarStore.getState();
-    expect(s.settledAt).not.toBeNull();
-  });
-
-  it('returns a quadtree populated with settled positions (D-23, RESEARCH §Pattern 4)', () => {
-    let hookResult: { quadtreeRef: React.MutableRefObject<unknown> } | null = null;
-    withSeededRandom(3, () => {
-      setStoreGraph(seedGraph(20));
-      const { result } = renderHook(() => useGraphLayout());
-      hookResult = result.current as unknown as typeof hookResult;
-    });
-    expect(hookResult).not.toBeNull();
-    expect(hookResult!.quadtreeRef.current).not.toBeNull();
-    // d3-quadtree exposes .find(x, y, radius?)
-    const qt = hookResult!.quadtreeRef.current as { find: (x: number, y: number, r?: number) => unknown };
-    expect(typeof qt.find).toBe('function');
-    const found = qt.find(0, 0, 10_000);
+    const qt = result.current.quadtreeRef.current;
+    expect(qt).not.toBeNull();
+    expect(typeof qt!.find).toBe('function');
+    const found = qt!.find(0, 0, 10_000);
     expect(found).toBeTruthy();
+    unmount();
   });
 
-  it('re-warm threshold: <5 mutations with <1% of total leaves settledAt untouched', () => {
-    withSeededRandom(4, () => {
-      // Base 1000 + 4 additions → 4 < 5 nodes AND 4/1004 ≈ 0.4% < 1%.
-      setStoreGraph(seedGraph(1000));
-      const { rerender } = renderHook(() => useGraphLayout());
-      const firstSettle = useRadarStore.getState().settledAt;
-      expect(firstSettle).not.toBeNull();
-
-      // Add 4 new nodes (both thresholds safely under).
-      act(() => {
-        mutateStoreGraph([
-          ...useRadarStore.getState().graphNodes,
-          ...seedGraph(4, 'src/bar'),
-        ]);
-      });
-      rerender();
-      // Rewarm must NOT fire: settledAt unchanged.
-      expect(useRadarStore.getState().settledAt).toBe(firstSettle);
-    });
-  });
-
-  it('re-warm threshold: ≥5 mutations trigger rewarm (RESEARCH §Pitfall 3)', () => {
-    withSeededRandom(5, () => {
-      // 50 base nodes keeps each settle inside the 5s vitest default.
-      // Adding 6 new nodes crosses REWARM_NODE_COUNT_THRESHOLD (6 >= 5)
-      // AND REWARM_PERCENT_THRESHOLD (6/56 ≈ 11% >= 1%). Either alone
-      // should fire the rewarm branch.
-      setStoreGraph(seedGraph(50));
-      const { rerender } = renderHook(() => useGraphLayout());
-      const firstSettle = useRadarStore.getState().settledAt!;
-      expect(firstSettle).not.toBeNull();
-
-      // Spin until Date.now() advances so the rewarm Date.now() is strictly greater.
-      const before = Date.now();
-      while (Date.now() === before) {
-        // tight spin (<=1ms)
-      }
-
-      act(() => {
-        mutateStoreGraph([
-          ...useRadarStore.getState().graphNodes,
-          ...seedGraph(6, 'src/bar'),
-        ]);
-      });
-      rerender();
-      const secondSettle = useRadarStore.getState().settledAt!;
-      expect(secondSettle).toBeGreaterThan(firstSettle);
-    });
-  });
-
-  it('cleanup on unmount (RESEARCH §Pitfall 2): stop is called, no exceptions', () => {
-    withSeededRandom(6, () => {
-      setStoreGraph(seedGraph(10));
-      const { unmount } = renderHook(() => useGraphLayout());
-      expect(() => unmount()).not.toThrow();
-    });
-  });
-
-  it('deterministic settle with seeded RNG: same seed ⇒ same positions', () => {
-    // RESEARCH §Validation Determinism (lines 900-907) recommends EITHER
-    // monkey-patching Math.random OR pre-assigning node.x/y. We use the
-    // latter — fewer RNG touchpoints means fewer places for unrelated
-    // Math.random calls (inside @testing-library/react's StrictMode
-    // double-invoke, React's internal id gen, etc.) to perturb the output.
-    const makeSeededNodes = (): GraphNode[] => {
-      const rng = mulberry32(1234);
-      return Array.from({ length: 20 }, (_, i) => ({
-        id: `src/foo/n${i}.ts`,
-        dirKey: 'src/foo',
-        dirDepth: 2,
-        x: (rng() - 0.5) * 200,
-        y: (rng() - 0.5) * 200,
-      }));
-    };
-
-    useRadarStore.getState().reset();
-    setStoreGraph(makeSeededNodes());
+  it('re-warm threshold: <5 mutations with <1% of total leaves settledAt untouched', async () => {
+    // 500 + 3 additions — 3 < 5 AND 3/503 ≈ 0.6% < 1%. Node count kept
+    // low enough to fit inside the default 5s vitest timeout when the
+    // full suite runs under worker-pool concurrency. Phase 7's 1000-node
+    // version starved on concurrent runs; semantics unchanged.
     renderHook(() => useGraphLayout());
-    const posA = useRadarStore.getState().graphNodes.map((n) => ({
-      id: n.id,
-      x: n.x ?? NaN,
-      y: n.y ?? NaN,
-    }));
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: seedGraphNodes(500),
+        graphEdges: [],
+      });
+    });
+    const firstSettle = useRadarStore.getState().settledAt;
+    expect(firstSettle).not.toBeNull();
+    const w = workers[0];
+    const initCount = w.postedMessages.filter((m) => m.type === 'topology').length;
 
-    useRadarStore.getState().reset();
-    setStoreGraph(makeSeededNodes());
+    // Add 3 new nodes (under both thresholds).
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: [
+          ...useRadarStore.getState().graphNodes,
+          ...seedGraphNodes(3, 'src/bar'),
+        ],
+      });
+    });
+    // Rewarm must NOT fire: no new topology message posted.
+    const afterCount = w.postedMessages.filter((m) => m.type === 'topology').length;
+    expect(afterCount).toBe(initCount);
+  }, 15_000);
+
+  it('re-warm threshold: ≥5 mutations trigger topology (D-18 carry)', async () => {
     renderHook(() => useGraphLayout());
-    const posB = useRadarStore.getState().graphNodes.map((n) => ({
-      id: n.id,
-      x: n.x ?? NaN,
-      y: n.y ?? NaN,
-    }));
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: seedGraphNodes(50),
+        graphEdges: [],
+      });
+    });
+    const w = workers[0];
+    const before = w.postedMessages.filter((m) => m.type === 'topology').length;
 
-    expect(posA.length).toBeGreaterThan(0);
-    expect(posA.length).toBe(posB.length);
-    // d3-force's internal `jiggle()` calls Math.random during collision
-    // resolution on near-coincident nodes — un-reachable via the input
-    // seed. RESEARCH §909 explicitly accepts determinism as a "relative
-    // property" (same cluster, non-NaN, consistent id-to-rough-position
-    // mapping) rather than byte-identical output. We assert:
-    //   1. Both runs settle (no NaN leak).
-    //   2. Both runs place nodes in the same tight cluster.
-    // (Byte-identical determinism would require swapping Math.random at
-    //  the d3-force call site — deferred to Plan 04's bench harness.)
-    for (const p of posA) {
-      expect(Number.isFinite(p.x)).toBe(true);
-      expect(Number.isFinite(p.y)).toBe(true);
-    }
-    for (const p of posB) {
-      expect(Number.isFinite(p.x)).toBe(true);
-      expect(Number.isFinite(p.y)).toBe(true);
-    }
-    // Same island: centroid-to-centroid distance << typical cluster size.
-    const centroidA = {
-      x: posA.reduce((s, p) => s + p.x, 0) / posA.length,
-      y: posA.reduce((s, p) => s + p.y, 0) / posA.length,
+    // 6 additions → 6 >= 5 AND 6/56 ≈ 11% >= 1%.
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: [
+          ...useRadarStore.getState().graphNodes,
+          ...seedGraphNodes(6, 'src/bar'),
+        ],
+      });
+    });
+    const after = w.postedMessages.filter((m) => m.type === 'topology').length;
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it('cleanup on unmount is safe (RESEARCH §Pitfall 2)', () => {
+    renderHook(() => useGraphLayout());
+    act(() => {
+      useRadarStore.setState({
+        graphNodes: seedGraphNodes(10),
+        graphEdges: [],
+      });
+    });
+    const { unmount } = renderHook(() => useGraphLayout());
+    expect(() => unmount()).not.toThrow();
+  });
+
+  it('deterministic settle with seeded RNG: two runs produce close-enough final positions', async () => {
+    // graphSimCore uses mulberry32(INITIAL_POSITION_SEED) for both initial
+    // positions AND sim.randomSource (Wave 1 §Pitfall 1) — so seeded
+    // determinism holds across runs. Tolerance kept at 0.5 world-units;
+    // the core seeds but d3-force's jiggle() during collision resolution
+    // may still introduce trailing-bit drift that exceeds strict
+    // byte-equality.
+    const runOnce = async (): Promise<Float32Array> => {
+      useRadarStore.getState().reset();
+      const { result, unmount } = renderHook(() => useGraphLayout());
+      await act(async () => {
+        useRadarStore.setState({
+          graphNodes: seedGraphNodes(6),
+          graphEdges: [],
+        });
+      });
+      const pos = new Float32Array(result.current.simNodesRef.current.positions);
+      unmount();
+      return pos;
     };
-    const centroidB = {
-      x: posB.reduce((s, p) => s + p.x, 0) / posB.length,
-      y: posB.reduce((s, p) => s + p.y, 0) / posB.length,
-    };
-    expect(Math.hypot(centroidA.x - centroidB.x, centroidA.y - centroidB.y)).toBeLessThan(50);
-    // Each node's position is within a reasonable neighborhood of its
-    // seed-A counterpart — looser than byte-identical but tight enough
-    // to catch "simulation blew up / configuration drift" regressions.
-    for (let i = 0; i < posA.length; i++) {
-      expect(posA[i].id).toBe(posB[i].id);
-      expect(Math.abs(posA[i].x - posB[i].x)).toBeLessThan(50);
-      expect(Math.abs(posA[i].y - posB[i].y)).toBeLessThan(50);
+    const a = await runOnce();
+    const b = await runOnce();
+    expect(a.length).toBe(b.length);
+    for (let i = 0; i < a.length; i++) {
+      expect(Math.abs(a[i] - b[i])).toBeLessThan(0.5);
     }
   });
 
-  it('VIZN-05 regression: files sharing dirKey cluster within 100 world units after settle (D-11)', () => {
-    withSeededRandom(9, () => {
-      // 10 nodes, all `src/foo`, no links. forceCluster + default
-      // forces should pull them into a tight island.
-      setStoreGraph(seedGraph(10, 'src/foo'));
-      renderHook(() => useGraphLayout());
+  it('VIZN-05 regression: dirKey-sharing files cluster within 100 world units (D-11)', async () => {
+    const { unmount } = renderHook(() => useGraphLayout());
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: seedGraphNodes(10, 'src/foo'),
+        graphEdges: [],
+      });
     });
     const nodes = useRadarStore.getState().graphNodes;
     expect(nodes).toHaveLength(10);
-    // Mean pairwise distance bound.
     let total = 0;
     let pairs = 0;
     for (let i = 0; i < nodes.length; i++) {
@@ -286,5 +344,93 @@ describe('useGraphLayout — Plan 03', () => {
       }
     }
     expect(total / pairs).toBeLessThan(100);
+    unmount();
+  });
+
+  // ─── New Phase 11 cases ─────────────────────────────────────────────────
+
+  it('calls commitSettledPositions with Map<id,{x,y}> on settled (D-28)', async () => {
+    // Spy on the current store's action to preserve binding through
+    // zustand's create-pattern.
+    const spy = vi.spyOn(useRadarStore.getState(), 'commitSettledPositions');
+    const { unmount } = renderHook(() => useGraphLayout());
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: seedGraphNodes(6),
+        graphEdges: [],
+      });
+    });
+    expect(spy).toHaveBeenCalled();
+    const arg = spy.mock.calls[spy.mock.calls.length - 1][0] as Map<
+      string,
+      { x: number; y: number }
+    >;
+    expect(arg).toBeInstanceOf(Map);
+    expect(arg.size).toBe(6);
+    for (const [id, p] of arg) {
+      expect(typeof id).toBe('string');
+      expect(Number.isFinite(p.x)).toBe(true);
+      expect(Number.isFinite(p.y)).toBe(true);
+    }
+    unmount();
+    spy.mockRestore();
+  });
+
+  it('drops stale-sequence tick messages without overwriting simNodesRef (D-12)', async () => {
+    const { result, unmount } = renderHook(() => useGraphLayout());
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: seedGraphNodes(5),
+        graphEdges: [],
+      });
+    });
+    const w = workers[0];
+    const beforePositions = result.current.simNodesRef.current.positions;
+    // Forge a stale tick with sequence=0 (current topologySeq is >= 1).
+    const stalePositions = new Float32Array(10);
+    stalePositions.fill(999);
+    act(() => {
+      w.onmessage?.({
+        data: {
+          type: 'tick',
+          positions: stalePositions,
+          alpha: 0.5,
+          sequence: 0,
+        } satisfies WorkerOut,
+      } as MessageEvent<WorkerOut>);
+    });
+    // simNodesRef must NOT have been overwritten with 999s.
+    const afterPositions = result.current.simNodesRef.current.positions;
+    // Either the ref still points at the original Float32Array OR the first
+    // element is not 999 (i.e. positions was not written to the stale
+    // buffer).
+    expect(afterPositions === beforePositions || afterPositions[0] !== 999).toBe(
+      true,
+    );
+    unmount();
+  });
+
+  it('posts pin/unpin when pinnedNodeIds Set diff changes', async () => {
+    renderHook(() => useGraphLayout());
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: seedGraphNodes(5),
+        graphEdges: [],
+      });
+    });
+    const w = workers[0];
+    w.postedMessages.length = 0;
+    await act(async () => {
+      const s = useRadarStore.getState();
+      const firstId = s.graphNodes[0].id;
+      const nodesWithPin = s.graphNodes.map((n, i) =>
+        i === 0 ? { ...n, fx: 42, fy: 43 } : n,
+      );
+      useRadarStore.setState({
+        graphNodes: nodesWithPin,
+        pinnedNodeIds: new Set([firstId]),
+      });
+    });
+    expect(w.postedMessages.some((m) => m.type === 'pin')).toBe(true);
   });
 });
