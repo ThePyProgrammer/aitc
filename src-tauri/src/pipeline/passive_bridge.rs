@@ -499,4 +499,48 @@ mod tests {
             "orphaned candidate (parent=None) must register"
         );
     }
+
+    #[tokio::test]
+    async fn child_of_cwd_filtered_parent_is_promoted() {
+        // Filter-order regression guard: if the parent (pid=200) is dropped
+        // by cwd-scope (its cwd /not/watched is outside repo_root), then
+        // candidate_pids is built from post-cwd in_scope and does NOT
+        // contain 200. The child (pid=201, parent_pid=200, in-repo cwd)
+        // therefore survives the parent-PID filter and is promoted to a
+        // top-level PASSIVE entry. See 18-RESEARCH.md Pitfall 4.
+        let reg = Arc::new(AgentRegistry::new());
+        let snap = seeded_snapshot(vec![
+            CandidateProc {
+                pid: 200,
+                name: "claude".into(),
+                cwd: PathBuf::from("/not/watched"),
+                exe: None,
+                parent: None,
+            },
+            CandidateProc {
+                pid: 201,
+                name: "claude-mcp".into(),
+                cwd: PathBuf::from("/tmp/test-cwd"),
+                exe: None,
+                parent: Some(200),
+            },
+        ]);
+        bridge_tick(
+            &reg,
+            &snap,
+            Some(std::path::Path::new("/tmp/test-cwd")),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(
+            reg.get_agent("PASSIVE-201").await.is_some(),
+            "child should be promoted after cwd-scope drops its parent"
+        );
+        assert!(
+            reg.get_agent("PASSIVE-200").await.is_none(),
+            "cwd-scope should have dropped the out-of-repo parent"
+        );
+    }
 }
