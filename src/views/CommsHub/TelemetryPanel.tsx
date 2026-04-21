@@ -1,4 +1,4 @@
-// Phase 10 Plan 06 (D-21): AGENT_CHANNELS section removed — chat UI now
+// Phase 10 Plan 06 (D-21): per-agent chat section removed — chat UI now
 // lives in the first-class CHAT tab (ChatView + AgentChannelList). This
 // panel keeps SystemLoad + TelemetryFeed only.
 
