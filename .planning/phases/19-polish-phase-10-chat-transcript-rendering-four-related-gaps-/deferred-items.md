@@ -51,3 +51,27 @@ Pre-existing issues surfaced during Phase 19 execution but out of scope per
   after upstream changes (e.g., HeatMapOverlay was likely re-tuned without
   updating the default-tint test). Two-minute fixes.
 
+## 19-02 (Wave 1)
+
+### D-03: Pre-existing `conflict::engine::tests` failures
+
+- **Discovered:** `cargo test --lib` full-suite run during Plan 19-02
+  verification.
+- **Failing tests (2 total in one file):**
+  - `src-tauri/src/conflict/engine.rs::tests::test_conflict_detected_different_pids_within_window`
+  - `src-tauri/src/conflict/engine.rs::tests::test_custom_window_duration`
+  - Both assert `left == right` failures (got `0`, expected `1`) —
+    "Should detect conflict within 10s window". Looks like a timing /
+    window-computation bug in the engine, unrelated to chat_runtime.
+- **Verification of pre-existence:** `git stash` + `cargo test --lib
+  conflict::engine::tests` on commit `339549d` (Plan 19-02 refactor
+  commit, before test additions). Same 2 failures reproduce. Confirmed
+  NOT introduced by any Plan 19-02 work (Plan 19-02 touches only
+  `src-tauri/src/chat_runtime/parser.rs`; `conflict::engine` is a
+  separate module).
+- **Scope:** Unrelated to Phase 19 (conflict engine is Phase 03 scope).
+- **Impact on Phase 19:** None — `cargo test --lib chat_runtime::parser::tests`
+  exits 0 with 17 passed, which is the surface Plan 19-02 owns.
+- **Recommendation:** File as a quick-task or Phase-03 follow-up; the
+  engine's conflict-window predicate or test setup looks stale.
+

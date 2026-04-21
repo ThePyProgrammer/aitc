@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 19 Plan 01 complete — Wave 0 foundation landed
-last_updated: "2026-04-21T07:37:00.000Z"
-last_activity: 2026-04-21 -- Phase 19 Plan 01 (Wave 0) complete
+stopped_at: Phase 19 Plan 02 complete — Wave 1 Rust parser + aggregator refactor landed
+last_updated: "2026-04-21T07:55:13.000Z"
+last_activity: 2026-04-21 -- Phase 19 Plan 02 (Wave 1 Rust) complete
 progress:
   total_phases: 20
   completed_phases: 13
   total_plans: 63
-  completed_plans: 60
-  percent: 95
+  completed_plans: 61
+  percent: 96
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 ## Current Position
 
 Phase: 19 (polish-phase-10-chat-transcript-rendering-four-related-gaps-) — EXECUTING
-Plan: 2 of 4
-Status: Executing Phase 19 (Plan 01 Wave 0 complete; Plan 02 Wave 1 Rust next)
-Last activity: 2026-04-21 -- Phase 19 Plan 01 (Wave 0) complete — 3 commits 1c9ac0e..a1a0c0a
+Plan: 3 of 4
+Status: Executing Phase 19 (Plan 01 Wave 0 + Plan 02 Wave 1 Rust complete; Plan 03 Wave 2 MarkdownBody next)
+Last activity: 2026-04-21 -- Phase 19 Plan 02 (Wave 1 Rust) complete — 3 commits e7de43e..2948369
 
-Progress: [██████████] 95%
+Progress: [██████████] 96%
 
 ## Performance Metrics
 
@@ -71,6 +71,7 @@ Progress: [██████████] 95%
 | Phase 18 P03 | 7 min | 1 task (2 commits) | 3 files |
 | Phase 18 P04 | 3 min | 1 task (1 commit) | 1 file |
 | Phase 19 P01 | 9 min | 3 tasks (3 commits) | 7 files |
+| Phase 19 P02 | 11 min | 2 tasks (3 commits) | 1 file |
 
 ## Accumulated Context
 
@@ -114,6 +115,11 @@ Recent decisions affecting current work:
 - [Phase 19]: Plan 01: Tailwind v4 `@plugin "@tailwindcss/typography";` directive placed on line 2 of src/styles/theme.css (immediately after `@import "tailwindcss";`, before app CSS imports). First-try success — resolves RESEARCH.md Open Question #3 with zero syntax adjustment. `npm run build` compiles in 6.42s and `.prose` utilities land in the production bundle.
 - [Phase 19]: Plan 01: Vitest scaffold pattern established — `.todo` placeholders with `V-19-XX` comment anchors + `vi.mock` wired up front so Plan 03/04 implementers flip `.todo` → real `it(…)` bodies without structural edits. `mkToolUse` / `mkToolResult` factories committed in Wave 0 (NOT Plan 04) + `void mkToolUse; void mkToolResult;` markers satisfy noUnusedLocals until Plan 04 consumes them.
 - [Phase 19]: Plan 01: Pre-existing failures (end_to_end_smoke.rs LaunchOptions shape drift; HeatMapOverlay tint default; MasterDetailShell rail/detail width classes) surfaced during verification but logged to Phase 19 deferred-items.md rather than fixed — "only fix own bugs" memory rule. Two-layer reproduction evidence (HEAD vs pre-Task-1 commit 2c5b54d) rules out any Plan 19-01 cause.
+- [Phase 19]: Plan 02: TurnBuffer is a LOCAL variable inside `run_event_aggregator`, not a `HashMap<AgentId, _>`. Exploits the one-aggregator-per-agent invariant (single caller in `agents/commands.rs`). Zero cross-agent contamination surface — T-19-02-06 satisfied structurally, no runtime check needed.
+- [Phase 19]: Plan 02: Reader-side EOF-flush of `accumulated_text` added as Rule 3 blocker fix. V-19-02 requires the content `"Partial"` to reach the aggregator's StdoutClosed arm end-to-end, but the existing reader emitted `StdoutClosed` directly on EOF — discarding mid-idle-flush text. Fix mirrors the existing `dispatch_result` pre-TurnComplete flush pattern so clean-exit and interrupted-exit paths are symmetric.
+- [Phase 19]: Plan 02: V-19-04 (D-23 regression guard) asserted via observable proxy — zero DB rows after an AssistantText with @user and no TurnComplete. Direct `dispatch_chat_notification` capture would need a testing seam (feature flag / callback probe); the notification helper uses `catch_unwind` + OS-level dispatch, not easily mockable. Zero-row + V-19-01 (turn completes with one row) + V-19-02 (interrupted flushes one row) triangulate the Pitfall 1 surface.
+- [Phase 19]: Plan 02: Model-merge precedence `model.or_else(|| prior_buffer.model)` — envelope's `Some` wins; idle-flush's `None` preserves prior. Pitfall 7 (model-lost across idle flushes) covered by V-19-03 assertion that the envelope's model survives.
+- [Phase 19]: Plan 02: Pre-existing `conflict::engine::tests` failures (`test_conflict_detected_different_pids_within_window`, `test_custom_window_duration`) discovered during full `cargo test --lib` run. Two-layer pre-existence evidence (HEAD vs commit 339549d before test additions) reproduces identical failures. Logged to `deferred-items.md` as D-03 (Phase 03 module scope; unrelated to chat_runtime).
 
 ### Roadmap Evolution
 
@@ -154,6 +160,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T07:37:00.000Z
-Stopped at: Phase 19 Plan 01 (Wave 0) complete — 3 commits 1c9ac0e..a1a0c0a; Plan 02 (Wave 1 Rust) next
-Resume file: .planning/phases/19-polish-phase-10-chat-transcript-rendering-four-related-gaps-/19-02-PLAN.md
+Last session: 2026-04-21T07:55:13.000Z
+Stopped at: Phase 19 Plan 02 (Wave 1 Rust) complete — 3 commits e7de43e..2948369; Plan 03 (Wave 2 frontend MarkdownBody) next
+Resume file: .planning/phases/19-polish-phase-10-chat-transcript-rendering-four-related-gaps-/19-03-PLAN.md
