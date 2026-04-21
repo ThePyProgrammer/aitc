@@ -1649,4 +1649,517 @@ mod tests {
         assert_eq!(events[0].event_type, "system_note");
         assert_eq!(events[0].payload_json["prompt"], "Confirm deployment?");
     }
+
+    // =====================================================================
+    // Phase 17 — conflict-triggered PreToolUse gating integration tests.
+    //
+    // Names locked by VALIDATION.md per-task contract. Do not rename. Each
+    // test exercises one decision rule from CONTEXT.md:
+    //   - D-04 liveness gate      → hook_allows_when_conflicting_agent_was_removed
+    //   - D-05 self-exclusion     → hook_allows_when_only_same_agent_wrote_path
+    //   - D-03 window boundary    → hook_allows_when_other_agent_write_outside_window
+    //   - D-10 parse-failure      → bash_parse_failure_allows
+    //   - D-14/D-15 two-agent     → hook_gates_edit_when_other_agent_recently_wrote_same_path
+    //   - D-21 row metadata       → gate_row_carries_conflict_with_agent_id
+    // T-17-04 latency perf test lives in `conflict::engine::tests::phase17::
+    // lock_contention_under_burst` (Plan 02's canonical home; `#[ignore]`).
+    // =====================================================================
+    mod phase17 {
+        use super::*;
+        use crate::conflict::engine::ConflictEngine;
+        use crate::pipeline::events::{Attribution, FileEvent, FileEventBatch, FileEventKind};
+        use std::path::{Path, PathBuf};
+        use std::sync::Arc;
+
+        fn now_ms() -> i64 {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64
+        }
+
+        /// Seed the engine with a single synthetic write by `(pid_a,
+        /// agent_id_a)` to `path` at `(now_ms - age_ms)`. `update_pid_mapping`
+        /// is called first so the engine's record carries the canonical
+        /// agent_id (D-15b). Path is canonicalized via the shared helper so
+        /// the hook side's `could_conflict_with` finds it in the HashMap.
+        async fn seed_other_agent_write(
+            engine: &Arc<tokio::sync::Mutex<ConflictEngine>>,
+            path: &Path,
+            pid_a: u32,
+            agent_id_a: &str,
+            age_ms: i64,
+        ) {
+            let canon = crate::conflict::canonicalize::canonicalize_for_conflict(path);
+            let mut eng = engine.lock().await;
+            eng.update_pid_mapping(pid_a, agent_id_a.to_string());
+            let batch = FileEventBatch {
+                events: vec![FileEvent {
+                    path: canon,
+                    kind: FileEventKind::Modify,
+                    timestamp_ms: now_ms() - age_ms,
+                    attribution: Attribution::Pid(pid_a),
+                }],
+                batch_id: 1,
+                dropped_batches: 0,
+            };
+            eng.process_batch(&batch);
+        }
+
+        /// Register an agent in the registry with the given pid + state.
+        /// Uses the passive_sentinel_adapter to avoid real-adapter coupling.
+        async fn register_agent(reg: &AgentRegistry, id: &str, pid: u32) {
+            let adapter = crate::agents::generic::passive_sentinel_adapter();
+            reg.upsert_agent(
+                id.to_string(),
+                AgentInfo {
+                    id: id.to_string(),
+                    agent_type: "claude-code".into(),
+                    protocol: "cli".into(),
+                    state: AgentState::Running,
+                    pid: Some(pid),
+                    cwd: None,
+                    intent: None,
+                },
+                adapter,
+                false,
+            )
+            .await
+            .unwrap();
+        }
+
+        /// D-14/D-15 two-agent end-to-end: KAGENT-A wrote /tmp/phase17_a.rs
+        /// 500ms ago; KAGENT-B's Edit on the same path hits /hook and gates
+        /// with gate_reason='file_conflict', conflict_with_agent_id='KAGENT-A'.
+        #[tokio::test]
+        async fn hook_gates_edit_when_other_agent_recently_wrote_same_path() {
+            let (base, reg, waiters, pool, engine) = spawn_hook_server().await;
+
+            let path_str = "/tmp/phase17_gates_edit_when_other.rs";
+            let other_pid: u32 = 77_101;
+            register_agent(&reg, "KAGENT-A", other_pid).await;
+            seed_other_agent_write(&engine, Path::new(path_str), other_pid, "KAGENT-A", 500).await;
+
+            let my_pid = std::process::id();
+            // The hook's resolve_or_create_agent auto-creates PASSIVE-{my_pid};
+            // we use that identity (rather than a synthetic KAGENT-B) so the
+            // live-PID check inside hook_handler always passes.
+
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "session_id": "phase17-sess-1",
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": path_str,
+                    "old_string": "a",
+                    "new_string": "b",
+                },
+            });
+
+            let pool_clone = pool.clone();
+            let waiters_clone = waiters.clone();
+            let post_task = tokio::spawn(async move {
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .timeout(std::time::Duration::from_secs(5))
+                    .send()
+                    .await
+                    .unwrap()
+                    .json::<AitcDecisionResponseDe>()
+                    .await
+                    .unwrap()
+            });
+
+            // Wait for the gated row, then signal Allow.
+            let row_id: i64 = loop {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                let found: Option<(i64,)> = sqlx::query_as(
+                    "SELECT id FROM approval_requests \
+                     WHERE status='pending' AND tool_name='Edit' LIMIT 1",
+                )
+                .fetch_optional(&pool_clone)
+                .await
+                .unwrap();
+                if let Some((id,)) = found {
+                    break id;
+                }
+            };
+
+            let (gate_reason, conflict_with): (Option<String>, Option<String>) = sqlx::query_as(
+                "SELECT gate_reason, conflict_with_agent_id \
+                 FROM approval_requests WHERE id = ?",
+            )
+            .bind(row_id)
+            .fetch_one(&pool_clone)
+            .await
+            .unwrap();
+            assert_eq!(gate_reason.as_deref(), Some("file_conflict"));
+            assert_eq!(conflict_with.as_deref(), Some("KAGENT-A"));
+
+            waiters_clone.signal(row_id, HookDecision::Allow).await;
+            let decoded =
+                tokio::time::timeout(std::time::Duration::from_secs(2), post_task)
+                    .await
+                    .unwrap()
+                    .unwrap();
+            assert!(matches!(decoded, AitcDecisionResponseDe::Allow));
+        }
+
+        /// D-05 self-exclusion: an agent's own prior writes must never gate
+        /// its next tool call. Seed a write under `PASSIVE-{my_pid}`, then
+        /// POST /hook as the same PID — must return Allow with no row.
+        #[tokio::test]
+        async fn hook_allows_when_only_same_agent_wrote_path() {
+            let (base, _reg, _waiters, pool, engine) = spawn_hook_server().await;
+
+            let path_str = "/tmp/phase17_self_write.rs";
+            let my_pid = std::process::id();
+            let self_agent_id = format!("PASSIVE-{my_pid}");
+            seed_other_agent_write(
+                &engine,
+                Path::new(path_str),
+                my_pid,
+                &self_agent_id,
+                500,
+            )
+            .await;
+
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": path_str,
+                    "old_string": "a",
+                    "new_string": "b",
+                },
+            });
+            let resp = tokio::time::timeout(
+                std::time::Duration::from_millis(2000),
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .send(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(resp.status(), 200);
+            let decoded: AitcDecisionResponseDe = resp.json().await.unwrap();
+            assert!(matches!(decoded, AitcDecisionResponseDe::Allow));
+
+            let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM approval_requests")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(cnt, 0, "D-05: self-write must not gate");
+        }
+
+        /// D-03 window boundary: a write by another agent older than the
+        /// configured window must NOT gate. Use the default 5000ms window
+        /// and seed a record 6000ms old.
+        #[tokio::test]
+        async fn hook_allows_when_other_agent_write_outside_window() {
+            let (base, reg, _waiters, pool, engine) = spawn_hook_server().await;
+
+            let path_str = "/tmp/phase17_out_of_window.rs";
+            let other_pid: u32 = 77_102;
+            register_agent(&reg, "KAGENT-OLD", other_pid).await;
+            // 6000ms old > 5000ms default window => must not gate.
+            seed_other_agent_write(&engine, Path::new(path_str), other_pid, "KAGENT-OLD", 6000)
+                .await;
+
+            let my_pid = std::process::id();
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": path_str,
+                    "old_string": "a",
+                    "new_string": "b",
+                },
+            });
+            let resp = tokio::time::timeout(
+                std::time::Duration::from_millis(2000),
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .send(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(resp.status(), 200);
+            let decoded: AitcDecisionResponseDe = resp.json().await.unwrap();
+            assert!(matches!(decoded, AitcDecisionResponseDe::Allow));
+
+            let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM approval_requests")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(cnt, 0, "D-03: outside-window write must not gate");
+        }
+
+        /// D-04 liveness gate: if the engine's record points to an agent
+        /// that's no longer in the registry (crashed / reaped), the hook
+        /// must Allow — under-gate fail-safe, not false-gate.
+        #[tokio::test]
+        async fn hook_allows_when_conflicting_agent_was_removed() {
+            let (base, reg, _waiters, pool, engine) = spawn_hook_server().await;
+
+            let path_str = "/tmp/phase17_ghost_agent.rs";
+            let ghost_pid: u32 = 77_103;
+            register_agent(&reg, "KAGENT-GHOST", ghost_pid).await;
+            seed_other_agent_write(
+                &engine,
+                Path::new(path_str),
+                ghost_pid,
+                "KAGENT-GHOST",
+                500,
+            )
+            .await;
+            // Simulate the ghost agent crashing / being reaped: registry
+            // entry goes away, engine record survives (stale window).
+            reg.remove_agent("KAGENT-GHOST").await;
+
+            let my_pid = std::process::id();
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": path_str,
+                    "old_string": "a",
+                    "new_string": "b",
+                },
+            });
+            let resp = tokio::time::timeout(
+                std::time::Duration::from_millis(2000),
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .send(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(resp.status(), 200);
+            let decoded: AitcDecisionResponseDe = resp.json().await.unwrap();
+            assert!(
+                matches!(decoded, AitcDecisionResponseDe::Allow),
+                "D-04: ghost conflict must under-gate, not false-gate"
+            );
+
+            let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM approval_requests")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(cnt, 0);
+        }
+
+        /// D-10 parse-failure fallback: a Bash command that shlex cannot
+        /// tokenize (unterminated quote) maps to ParseFailed → Allow.
+        #[tokio::test]
+        async fn bash_parse_failure_allows() {
+            let (base, _reg, _waiters, pool, _engine) = spawn_hook_server().await;
+
+            let my_pid = std::process::id();
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "tool_name": "Bash",
+                "tool_input": {
+                    "command": "echo \"unterminated",
+                    "cwd": "/tmp",
+                },
+            });
+            let resp = tokio::time::timeout(
+                std::time::Duration::from_millis(2000),
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .send(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(resp.status(), 200);
+            let decoded: AitcDecisionResponseDe = resp.json().await.unwrap();
+            assert!(
+                matches!(decoded, AitcDecisionResponseDe::Allow),
+                "D-10: bash parse failure must allow"
+            );
+
+            let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM approval_requests")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(cnt, 0);
+        }
+
+        /// D-21 approval-row shape: a file_conflict gate populates BOTH
+        /// `gate_reason='file_conflict'` AND `conflict_with_agent_id=<peer>`
+        /// (T-17-07 both-or-neither invariant).
+        #[tokio::test]
+        async fn gate_row_carries_conflict_with_agent_id() {
+            let (base, reg, waiters, pool, engine) = spawn_hook_server().await;
+
+            let path_str = "/tmp/phase17_row_metadata.rs";
+            let other_pid: u32 = 77_104;
+            register_agent(&reg, "KAGENT-PEER", other_pid).await;
+            seed_other_agent_write(
+                &engine,
+                Path::new(path_str),
+                other_pid,
+                "KAGENT-PEER",
+                300,
+            )
+            .await;
+
+            let my_pid = std::process::id();
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "session_id": "phase17-row-sess",
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": path_str,
+                    "content": "new file",
+                },
+            });
+
+            let pool_clone = pool.clone();
+            let waiters_clone = waiters.clone();
+            let post_task = tokio::spawn(async move {
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .timeout(std::time::Duration::from_secs(5))
+                    .send()
+                    .await
+                    .unwrap()
+                    .json::<AitcDecisionResponseDe>()
+                    .await
+                    .unwrap()
+            });
+
+            let row_id: i64 = loop {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                let found: Option<(i64,)> = sqlx::query_as(
+                    "SELECT id FROM approval_requests WHERE status='pending' LIMIT 1",
+                )
+                .fetch_optional(&pool_clone)
+                .await
+                .unwrap();
+                if let Some((id,)) = found {
+                    break id;
+                }
+            };
+
+            // Introspect the DB columns directly — mirrors what the
+            // frontend ApprovalRequestCard will read via bindings.
+            let (tool_name, file_path, gate_reason, conflict_with): (
+                String,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ) = sqlx::query_as(
+                "SELECT tool_name, file_path, gate_reason, conflict_with_agent_id \
+                 FROM approval_requests WHERE id = ?",
+            )
+            .bind(row_id)
+            .fetch_one(&pool_clone)
+            .await
+            .unwrap();
+            assert_eq!(tool_name, "Write");
+            assert_eq!(gate_reason.as_deref(), Some("file_conflict"));
+            assert_eq!(conflict_with.as_deref(), Some("KAGENT-PEER"));
+            // file_path column carries the canonical form for HashMap parity.
+            assert!(
+                file_path.as_deref().map_or(false, |p| p.ends_with(
+                    "phase17_row_metadata.rs"
+                )),
+                "canonical file_path must end with the original filename, got {file_path:?}"
+            );
+
+            waiters_clone.signal(row_id, HookDecision::Allow).await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), post_task)
+                .await
+                .unwrap();
+        }
+
+        /// D-15b regression: `resolve_or_create_agent` must wire
+        /// `update_pid_mapping` into the engine so process_batch records
+        /// carry the canonical KAGENT-*/PASSIVE-* id (never `PID-{pid}`).
+        #[tokio::test]
+        async fn update_pid_mapping_wired_via_resolve_or_create_agent() {
+            let (base, _reg, _waiters, _pool, engine) = spawn_hook_server().await;
+
+            let my_pid = std::process::id();
+            // A harmless passthrough POST — drives resolve_or_create_agent
+            // through the auto-create PASSIVE-{pid} branch.
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "tool_name": "Read",
+                "tool_input": {"file_path": "/etc/hostname"},
+            });
+            let resp = tokio::time::timeout(
+                std::time::Duration::from_millis(2000),
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .send(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(resp.status(), 200);
+
+            // Now process a write batch through the engine under `my_pid`.
+            // If update_pid_mapping was NOT called, the record would use
+            // format!("PID-{my_pid}"); with D-15b wired it must use
+            // `PASSIVE-{my_pid}`.
+            let expected_id = format!("PASSIVE-{my_pid}");
+            let canonical = crate::conflict::canonicalize::canonicalize_for_conflict(
+                Path::new("/tmp/phase17_pid_mapping.rs"),
+            );
+            {
+                let mut eng = engine.lock().await;
+                let batch = FileEventBatch {
+                    events: vec![FileEvent {
+                        path: canonical.clone(),
+                        kind: FileEventKind::Modify,
+                        timestamp_ms: now_ms(),
+                        attribution: Attribution::Pid(my_pid),
+                    }],
+                    batch_id: 2,
+                    dropped_batches: 0,
+                };
+                eng.process_batch(&batch);
+            }
+
+            // The engine's could_conflict_with returns the record's
+            // canonical agent_id when queried with a DIFFERENT except_id.
+            let found = {
+                let eng = engine.lock().await;
+                eng.could_conflict_with(&canonical, "PID-999999", now_ms() + 10, 5000)
+            };
+            assert_eq!(
+                found.as_deref(),
+                Some(expected_id.as_str()),
+                "D-15b: update_pid_mapping must route PID→canonical id at resolve time; got {found:?}, expected {expected_id}"
+            );
+        }
+
+        /// Placeholder pointing at the T-17-04 opt-in perf test's canonical
+        /// home in `conflict::engine::tests::phase17::lock_contention_under_
+        /// burst`. Kept as a grep-discoverable breadcrumb per VALIDATION
+        /// §"latency" row; the real test is `#[ignore]` in engine.rs.
+        #[ignore]
+        #[allow(dead_code)]
+        #[tokio::test]
+        async fn lock_contention_under_burst_placeholder_see_conflict_engine_tests() {
+            // Intentionally empty — see the real test at:
+            //   cargo test --package aitc --lib \
+            //     conflict::engine::tests::phase17::lock_contention_under_burst \
+            //     -- --ignored --nocapture
+        }
+    }
 }
