@@ -15,7 +15,7 @@ export function TopBar() {
       {/* App title */}
       <div className="pl-6">
         <h1 className="text-primary font-headline text-xl font-bold tracking-tighter select-none">
-          AI_CMD_CENTRE
+          AI_CONTROL_CENTRE
         </h1>
       </div>
 
