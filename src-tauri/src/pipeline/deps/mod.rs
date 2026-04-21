@@ -51,6 +51,10 @@ pub enum EdgeKind {
     ModDecl,
     FromImport,
     ImportStmt,
+    /// Phase 12 D-27: caller file → bridge node (frontend invoke call-site).
+    Invokes,
+    /// Phase 12 D-27: bridge node → Rust handler file.
+    Handles,
 }
 
 /// Internal Rust-side edge with absolute paths (converted to DTO at command boundary).

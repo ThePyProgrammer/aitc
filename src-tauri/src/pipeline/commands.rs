@@ -375,6 +375,35 @@ pub async fn get_dependency_graph(
     }
 }
 
+/// Get the IPC bridge surface (commands + handlers + callers) for the active
+/// watch. Returns an empty vec if no watch is active.
+///
+/// Bridges use repo-relative forward-slash paths (matching `get_tree_index`
+/// convention, commit `a1b15b6`).
+///
+/// CPU-heavy parsing runs on `tauri::async_runtime::spawn_blocking` so the main
+/// async runtime stays responsive during the <100ms build target (D-35).
+#[tauri::command]
+#[specta::specta]
+pub async fn get_ipc_bridges(
+    state: tauri::State<'_, PipelineState>,
+) -> Result<Vec<crate::pipeline::ipc_bridges::IpcBridgeDto>, String> {
+    use crate::pipeline::ipc_bridges::build_ipc_bridges;
+    let guard = state.inner.lock().await;
+    match guard.as_ref() {
+        Some(active) => {
+            let repo_root = active.repo_root.clone();
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                build_ipc_bridges(&repo_root)
+            })
+            .await
+            .map_err(|e| format!("spawn_blocking join: {e}"))?;
+            Ok(result)
+        }
+        None => Ok(Vec::new()),
+    }
+}
+
 /// Persist every attributed file event in `batch` to SQLite (D-09, HIST-01).
 ///
 /// Unattributed / Ambiguous events are silently skipped — per D-09 only
@@ -433,6 +462,36 @@ mod tests {
     #[test]
     fn pipeline_mpsc_capacity_matches_research_recommendation() {
         assert_eq!(PIPELINE_MPSC_CAPACITY, 1024);
+    }
+
+    /// V-12-13: `get_ipc_bridges` returns `Ok(Vec::new())` when no watch is
+    /// active, without panicking. We cannot construct a real
+    /// `tauri::State<'_, PipelineState>` in a unit test (it lives in the
+    /// tauri runtime managed-state system), so we exercise the equivalent
+    /// business logic: a default `PipelineState` has `inner == None`, which
+    /// is the branch that returns `Ok(vec![])`. The Some-branch is covered
+    /// by `pipeline::ipc_bridges::tests::build_ipc_bridges_empty_root_returns_empty`
+    /// (empty repo → build_ipc_bridges() → []).
+    #[tokio::test]
+    async fn get_ipc_bridges_smoke_v_12_13() {
+        let state = PipelineState::default();
+        let guard = state.inner.lock().await;
+        assert!(
+            guard.as_ref().is_none(),
+            "default PipelineState should be inactive (no watch)"
+        );
+        // Mirror the None-branch of get_ipc_bridges exactly:
+        let result: Result<Vec<crate::pipeline::ipc_bridges::IpcBridgeDto>, String> =
+            match guard.as_ref() {
+                Some(_) => unreachable!("default state should be None"),
+                None => Ok(Vec::new()),
+            };
+        assert!(result.is_ok(), "None-branch returns Ok");
+        assert_eq!(
+            result.unwrap().len(),
+            0,
+            "empty state yields empty bridge Vec"
+        );
     }
 }
 

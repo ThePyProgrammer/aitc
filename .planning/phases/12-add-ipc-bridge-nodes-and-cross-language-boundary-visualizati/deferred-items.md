@@ -38,6 +38,52 @@ Pre-existing issues surfaced during Phase 12 execution but out of scope per
   quick-tasks or Phase-11 flake remediation. Do NOT let them block Phase 12
   Wave 1/2/3 execution.
 
+## 12-03 (Wave 2)
+
+### D-03: Pre-existing cargo build failure from Phase 17-03 scaffolding — RESOLVED 2026-04-21
+
+- **Status:** RESOLVED via Phase 17 Plan 01 merge (commits `c02211c` + `5d9d279`,
+  merged into main as `cf9dcff chore: merge Phase 17 Plan 01 executor worktree`).
+  `src-tauri/src/agents/bash_paths.rs` now exists as a full 21KB implementation
+  (verb dispatch + operator split + safelist + extract_target_paths). Phase 12
+  Plan 03 Task 1 verification re-run 2026-04-21: `cargo build --lib` exits 0
+  (13 pre-existing Phase 17 dead-code warnings, no errors); `cargo test --lib
+  pipeline::ipc_bridges` = 17/17 passed; `cargo test --lib pipeline::commands`
+  = 7/7 passed (including new V-12-13 `get_ipc_bridges_smoke_v_12_13`).
+- **Discovered:** `cargo build --lib` during Plan 12-03 Task 1 verification.
+- **Failing compile:**
+  ```
+  error[E0583]: file not found for module `bash_paths`
+    --> src/agents/mod.rs:17:1
+     |
+  17 | pub mod bash_paths;
+     | ^^^^^^^^^^^^^^^^^^^
+  ```
+- **Verification of pre-existence:** Stashed Plan 12-03 Task 1 edits and ran
+  `cargo build --lib` on the clean tip (commit `eacf952`) — same failure
+  reproduces. The introducing commit (`0e603fc feat(17-03): register
+  bash_paths module in agents/mod.rs`) explicitly states in its message:
+  *"cargo check will fail until Plan 01 lands bash_paths.rs — intentional
+  Wave 1 scaffolding sequence. The module file is owned by Plan 01; this
+  plan only wires the module-index entry."*
+- **Scope:** Phase 17 (conflict-triggered PreToolUse gating) ownership. Phase
+  17 Plan 01 owns `src-tauri/src/agents/bash_paths.rs` and is unexecuted on
+  main. Phase 17-03 landed the module index entry before Phase 17-01 landed
+  the file itself — an inverted Wave ordering.
+- **Impact on Plan 12-03:** BLOCKS verification entirely. `cargo build`,
+  `cargo test --lib`, and the `cargo build --bin aitc` + brief-run bindings
+  regen gate (V-12-14) all fail at the missing-module error before Phase 12
+  code is ever type-checked.
+- **Recommendation:** Execute Phase 17 Plan 01 (lands `bash_paths.rs` with
+  `extract_target_paths` + `BashParseResult`) before Plan 12-03 verification
+  can run. Alternatively, a minimum-surface-area stub — `pub fn
+  extract_target_paths(_cmd: &str, _cwd: &Path) -> BashParseResult {
+  BashParseResult::ParseFailed }` — would unblock Plan 12-03 without
+  claiming Phase 17 scope, but that is a user decision (touches another
+  phase's owned file).
+- **Per memory rule "only fix own bugs":** Plan 12-03 does NOT attempt to
+  create the stub. Stopped at checkpoint for user direction.
+
 ## 12-02 (Wave 1)
 
 ### D-02: Pre-existing conflict::engine test failures (2 tests)

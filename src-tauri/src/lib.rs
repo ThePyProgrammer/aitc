@@ -45,6 +45,7 @@ pub fn run() {
             pipeline::commands::list_worktrees,
             pipeline::commands::get_tree_index,
             pipeline::commands::get_dependency_graph,
+            pipeline::commands::get_ipc_bridges,
             repo_session::get_launch_cwd,
             repo_session::detect_git_root,
             repo_session::persist_last_repo,
@@ -104,6 +105,9 @@ pub fn run() {
         .typ::<pipeline::worktree::Worktree>()
         .typ::<pipeline::deps::DependencyEdgeDto>()
         .typ::<pipeline::deps::EdgeKind>()
+        .typ::<pipeline::ipc_bridges::IpcBridgeDto>()
+        .typ::<pipeline::ipc_bridges::IpcCallSite>()
+        .typ::<pipeline::ipc_bridges::CallShape>()
         .typ::<agents::AgentInfo>()
         .typ::<agents::AgentState>()
         .typ::<agents::adapter::LaunchOptions>()
