@@ -249,13 +249,17 @@ Plans:
 
 ### Phase 12: Add IPC bridge nodes and cross-language boundary visualization — parse tauri-specta bindings.ts for the command surface, cross-reference invoke() callers with #[tauri::command] handlers, render bridge nodes on a visible frontend/backend boundary line
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Extend the Phase 7 graph radar with a first-class IPC-bridge layer: each #[tauri::command] becomes a diamond-shaped bridge node pinned on a horizontal y=0 boundary line; TS/TSX files cluster above via a new forceBoundary force, Rust files cluster below; hover + click surface bridge metadata (command, handler, signature, callers); BOUNDARY slider in ForceConfigPanel tunes the bifurcation strength.
+**Requirements**: V-12-01..V-12-24 (phase-local witnesses — no new REQ-IDs; extends VIZN-01 / VIZN-05 / EMON-01 in spirit)
 **Depends on:** Phase 11
-**Plans:** 0 plans
+**Plans:** 5 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 12 to break down)
+- [ ] 12-01-PLAN.md — Wave 0 foundation + test scaffolding (Rust module skeleton, fixtures, panic-stubs, forceBoundary skeleton, 5 frontend test scaffolds)
+- [ ] 12-02-PLAN.md — Wave 1 Rust scanners (bindings_parser regex, rust_handler_scanner rayon, frontend_callsite_scanner tree-sitter, build_ipc_bridges merge; V-12-01..V-12-12)
+- [ ] 12-03-PLAN.md — Wave 1 Tauri command wiring (get_ipc_bridges + EdgeKind widening + lib.rs + bindings regen; V-12-13..V-12-14)
+- [ ] 12-04-PLAN.md — Wave 2 store + worker (radarStore widen, forceBoundary physics, worker protocol + graphSimCore registration, useGraphLayout payload; V-12-15..V-12-20)
+- [ ] 12-05-PLAN.md — Wave 3 canvas + UI + human-verify (BridgeRenderer, BridgeTooltip, BridgeDetailPanel, RadarManifest wiring, RadarCanvas z-order + hit-test, BOUNDARY slider, prod smoke checkpoint; V-12-21..V-12-24)
 
 ### Phase 13: Implement 4-level semantic zoom — workspace (package blobs only), package (sub-packages + file dots), file (names + edges + agent indicators), code (content preview + function signatures). Replace current 3-tier shouldRenderHullAtZoom with a full semantic zoom system that changes representation, not just visibility
 
