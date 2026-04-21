@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 12 Plan 01 (Wave 0 scaffold) complete
-last_updated: "2026-04-21T11:31:24Z"
-last_activity: 2026-04-21 -- Phase 12 Plan 01 (Wave 0) shipped
+stopped_at: Phase 12 Plan 02 (Wave 1 Rust scanners) complete
+last_updated: "2026-04-21T11:57:47Z"
+last_activity: 2026-04-21 -- Phase 12 Plan 02 (Wave 1) shipped
 progress:
   total_phases: 21
   completed_phases: 14
   total_plans: 74
-  completed_plans: 64
-  percent: 86
+  completed_plans: 65
+  percent: 88
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 ## Current Position
 
 Phase: 12 (add-ipc-bridge-nodes-and-cross-language-boundary-visualizati) — EXECUTING
-Plan: 2 of 5 (Plan 01 Wave 0 scaffold complete; next is Plan 12-02 Wave 1 Rust scanners)
+Plan: 3 of 5 (Plan 02 Wave 1 Rust parsers complete; next is Plan 12-03 Wave 2 Tauri command + frontend store/worker)
 Status: Executing Phase 12
-Last activity: 2026-04-21 -- Phase 12 Plan 01 (Wave 0 scaffold) shipped
+Last activity: 2026-04-21 -- Phase 12 Plan 02 (Wave 1 Rust parsers) shipped
 
 Progress: [██████████] 100%
 
@@ -75,6 +75,7 @@ Progress: [██████████] 100%
 | Phase 19 P03 | 10 min | 3 tasks (3 commits) | 4 files |
 | Phase 19 P04 | 15 min | 2 tasks (3 commits) | 4 files |
 | Phase 12 P01 | 14 min | 2 tasks (2 commits) | 16 files |
+| Phase 12 P02 | 13 min | 3 tasks (3 commits) | 6 files |
 
 ## Accumulated Context
 
@@ -135,6 +136,13 @@ Recent decisions affecting current work:
 - [Phase 12]: Plan 01: Type-only imports (`type BoundaryForce, type BoundaryNode`) cannot sit behind `void marker;` guards — TS6196 trips on type-only imports AND on `type _Alias = T;` aliases. Wave-0 workaround: drop the type imports entirely from forceBoundary.test.ts; re-add in Wave 2 when mkBoundaryNode() signature-bearing helpers consume the types naturally. Inline comment anchors the next-wave action.
 - [Phase 12]: Plan 01: 13 Rust `#[test] panic!("pending: V-12-XX")` stubs in pipeline/ipc_bridges/mod.rs + 44 frontend `.todo` entries across 7 files establish the Wave-0 RED-stage contract. Observable invariant: `cargo test --lib pipeline::ipc_bridges 2>&1 | grep 'pending: V-12-' | wc -l == 13`. Waves 1-3 flip these without structural file edits.
 - [Phase 12]: Plan 01: HandlerHit / BindingCommand / CalleeHit scanner structs get `#[allow(dead_code)]` — Wave 1 consumes them but Wave 0 cannot without breaking cargo lib warnings. Minimum-surface-area annotation; preferred over gating the full module behind `#[cfg(test)]` (would hide the types from Wave 1 non-test consumers).
+- [Phase 12]: Plan 02: OnceLock<Regex> (std lib only) across all 4 regex caches — signature/invoke/channel in bindings_parser + handler in rust_handler_scanner. No once_cell / lazy_static!; regex 1.12 already in Cargo.toml. Rust 1.70+ idiom.
+- [Phase 12]: Plan 02: Offset-based header→TAURI_INVOKE pairing via `invoke_re().captures_at(src, header_end)` (Pitfall 3). Does NOT zip signature_iter() with invoke_iter() — a header with no following invoke is skipped defensively (continue) rather than mis-paired with a later command's invoke.
+- [Phase 12]: Plan 02: Thread-local tree-sitter [Option<Parser>; 2] + [Option<Query>; 2] slot cache in frontend_callsite_scanner (TS=0, TSX=1). Uses `tree_sitter::StreamingIterator` (trait re-exported from the tree_sitter crate directly) — matches deps/extract.rs:24 idiom. No separate streaming-iterator crate dep.
+- [Phase 12]: Plan 02: IPC_CALLSITE_QUERY compound S-expression with @invoke_literal (pattern 0) + @commands_typed (pattern 1). pattern_index discriminates CallShape; `@command` capture lookup by name (snake for Literal, camel for Typed). Variable-callee invokes rejected by grammar's `(arguments . (string …))` anchor. Aliased typed imports rejected by `(#eq? @_obj "commands")`.
+- [Phase 12]: Plan 02: Dangling detection via empty-string / zero-line sentinels rather than Option<T> — handler-absent → `handler_file=""` + `handler_line=0` + `tracing::warn!`; caller-absent → `caller_files=[]` + `tracing::info!`. Frontend-friendly DTO shape; serde default works; avoids nullable wire types.
+- [Phase 12]: Plan 02: Ping caller-count assertion corrected from plan's 4 (3 literal + 1 typed) to actual 3 (2 literal + 1 typed) after reading sample_caller_literal.ts — the fixture has 2 valid ping invokes on lines 7+9 plus 1 variable-callee skip on line 12. Plan author's bookkeeping error; fixture is source of truth.
+- [Phase 12]: Plan 02: Pre-existing `conflict::engine::tests` failures (`test_conflict_detected_different_pids_within_window`, `test_custom_window_duration`) reproduced on clean tip via stash + `cargo test --lib conflict::engine`. Logged as D-02 in 12-deferred-items.md. Phase 03 module scope; out of Phase 12 per "only fix own bugs" memory rule.
 - [Phase 11.1]: Post-ship defensive fix — wheel-triggered extreme zoom-in was blanking canvas + minimap instantly with no recovery (pan/zoom-out/force-edit all inert). Root cause confirmed by user smoke: NaN/Infinity propagation in viewport state — `ctx.setTransform(NaN,…)` silently no-ops, NaN self-perpetuates through min/max/+. Static review found no injection path (WebKitGTK pinch-deltaY candidate, untestable). Shipped Option B (defensive guard without diagnosis): `sanitizeViewport(next, prev)` wrapper on `useCanvasZoomPan.setViewport` falls back per-axis on non-finite input + reapplies [0.05, 20] zoom clamp; store-level `radarStore.setViewport` filters non-finite fields from incoming partial (covers `AgentManifestRow` + `RadarMinimap` call sites that bypass the hook). 7 new tests lock the invariant. Commits: 6878f48 (test restore post-revert) + 7b13735 (hook guard) + 383ca24 (store guard) + 06a8f90 (debug session resolved).
 
 ### Roadmap Evolution
