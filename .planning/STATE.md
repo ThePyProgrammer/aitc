@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: awaiting-uat
-stopped_at: Phase 12 Plan 05 (Wave 4 canvas + UI) complete — D-34 human-verify checkpoint pending
-last_updated: "2026-04-21T14:12:34Z"
-last_activity: 2026-04-21 -- Phase 12 Plan 05 (Wave 4 BridgeRenderer + RadarCanvas wiring + BOUNDARY slider) shipped; awaiting D-34 UAT
+stopped_at: Phase 17 Plan 06 (Wave 4 frontend + UAT checkpoint) complete — code-complete; developer sign-off pending on 17-06-CHECKPOINT.md
+last_updated: "2026-04-22T00:00:00Z"
+last_activity: 2026-04-22 -- Phase 17 Plans 01..06 all shipped (6/6); 12+2 new phase17 tests green; UAT pending
 progress:
   total_phases: 21
   completed_phases: 14
-  total_plans: 74
-  completed_plans: 68
-  percent: 92
+  total_plans: 80
+  completed_plans: 74
+  percent: 93
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-07)
 
 **Core value:** A developer can see exactly what every AI agent is doing across their codebase in real time, prevent destructive conflicts between concurrent agents, and approve/deny agent actions from a single command center.
-**Current focus:** Phase 12 — add-ipc-bridge-nodes-and-cross-language-boundary-visualizati
+**Current focus:** Phase 17 — conflict-triggered-pretooluse-gating-replace-tool-category-g (code-complete; UAT pending). Phase 12 also AWAITING UAT (D-34 checkpoint).
 
 ## Current Position
 
-Phase: 12 (add-ipc-bridge-nodes-and-cross-language-boundary-visualizati) — AWAITING UAT
-Plan: 5 of 5 (Plan 05 Wave 4 canvas render + UI complete; all 36 automated V-12-21..V-12-24 witnesses green; D-34 human-verify checkpoint created at `.planning/phases/12-.../12-05-CHECKPOINT.md`; waiting on user to run `npm run tauri dev` and approve the 10-step visual smoke test)
-Status: Awaiting Phase 12 D-34 UAT
-Last activity: 2026-04-21 -- Phase 12 Plan 05 (Wave 4 BridgeRenderer + RadarCanvas wiring + BOUNDARY slider + 36 passing tests) shipped
+Phase: 17 (conflict-triggered-pretooluse-gating) — AWAITING UAT
+Plan: 6 of 6 (all waves merged to main at `1c28f37`; 12 new phase17 tests green — 7 hook-handler integration + 5 engine query; 2 opt-in `#[ignore]` perf stubs; lock-wait p99 measured at 6.259µs vs 10ms budget; 17-06-CHECKPOINT.md awaits developer sign-off on 6 manual UAT scenarios from VALIDATION.md)
+Status: Awaiting Phase 17 UAT — 6 scenarios blocking: two-agent conflict gate, solo-session noise regression, protected-path OR preservation, bash safelist, bash actual-conflict trigger, OS-notification deep-link
+Last activity: 2026-04-22 -- Phase 17 Plan 06 (Wave 4 bindings regen + ApprovalRequestCard D-22 conditional render + vitest + UAT checkpoint) shipped; phase code-complete
 
 Progress: [██████████] 100%
 
