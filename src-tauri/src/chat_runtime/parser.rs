@@ -465,6 +465,18 @@ pub fn spawn_event_aggregator<R: tauri::Runtime>(
     tokio::spawn(run_event_aggregator(rx, agent_id, pool, sessions, app_handle))
 }
 
+/// D-01: one assistant_text DB row per assistant turn. Buffer accumulates
+/// partial deltas (idle-flush) + the whole-turn envelope; flushes once on
+/// TurnComplete (or StdoutClosed if the turn was interrupted).
+///
+/// Local variable — NOT a HashMap. `run_event_aggregator` runs one-per-agent
+/// (see `spawn_event_aggregator` call site in `agents/commands.rs`), so a
+/// per-agent bucket is unnecessary and would invite cross-agent contamination.
+struct TurnBuffer {
+    content: String,
+    model: Option<String>,
+}
+
 async fn run_event_aggregator<R: tauri::Runtime>(
     mut rx: mpsc::Receiver<StreamEvent>,
     agent_id: String,
@@ -473,6 +485,8 @@ async fn run_event_aggregator<R: tauri::Runtime>(
     app_handle: tauri::AppHandle<R>,
 ) {
     use tauri::Emitter;
+
+    let mut turn_buffer: Option<TurnBuffer> = None;
 
     while let Some(event) = rx.recv().await {
         match event {
@@ -501,9 +515,12 @@ async fn run_event_aggregator<R: tauri::Runtime>(
                 }
             }
             StreamEvent::AssistantText { content, model } => {
-                // D-23: check for word-bounded @user BEFORE the DB write so a
-                // slow DB doesn't delay the notification. catch_unwind inside
-                // dispatch_chat_notification makes this safe even in tests.
+                // D-23: word-bounded @user check fires on EVERY AssistantText
+                // event (every idle-flush + the whole-turn envelope). Pitfall 1
+                // defender — do NOT move this into the flush path, or
+                // notification latency regresses to TurnComplete boundaries.
+                // catch_unwind inside dispatch_chat_notification makes this
+                // safe even in tests using mock_app.
                 if is_awaiting_user_mention(&content) {
                     super::notifications::dispatch_chat_notification(
                         &app_handle,
@@ -512,32 +529,20 @@ async fn run_event_aggregator<R: tauri::Runtime>(
                         Some(&agent_id),
                     );
                 }
-                let session_id = sessions.session_id_for(&agent_id).await;
-                let payload = serde_json::json!({
-                    "content": content,
-                    "model": model,
+                // D-01.5: whole-turn envelope (model is Some, emitted by
+                // dispatch_assistant after accumulated_text.clear()) REPLACES
+                // the running buffer — the envelope is authoritative.
+                // D-01.3: idle-flush partials (model is None) — keep their
+                // content; preserve any previously-seen model from a prior
+                // envelope within the same turn (Pitfall 7).
+                // D-01.2/D-01.3: NO DB write here. Flush happens in
+                // TurnComplete / StdoutClosed arms.
+                let merged_model = model
+                    .or_else(|| turn_buffer.as_ref().and_then(|b| b.model.clone()));
+                turn_buffer = Some(TurnBuffer {
+                    content,
+                    model: merged_model,
                 });
-                match crate::db::events::insert_agent_event(
-                    &pool,
-                    &agent_id,
-                    session_id.as_deref(),
-                    "assistant_text",
-                    &payload,
-                    None,
-                    None,
-                    None,
-                )
-                .await
-                {
-                    Ok(row) => {
-                        if let Err(e) = app_handle.emit("agent-event-appended", &row) {
-                            tracing::debug!(agent_id = %agent_id, err = %e, "event-appended emit");
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(agent_id = %agent_id, err = %e, "assistant_text insert");
-                    }
-                }
             }
             StreamEvent::ToolUse {
                 tool_name,
@@ -606,10 +611,50 @@ async fn run_event_aggregator<R: tauri::Runtime>(
                 terminal_reason,
                 is_error,
             } => {
+                let session_id = sessions.session_id_for(&agent_id).await;
+                // D-01.2: flush buffered assistant text as ONE row BEFORE the
+                // turn-complete emit — frontend reducer expects the coalesced
+                // row before the streaming-flag flip.
+                if let Some(buf) = turn_buffer.take() {
+                    let payload = serde_json::json!({
+                        "content": buf.content,
+                        "model": buf.model,
+                    });
+                    match crate::db::events::insert_agent_event(
+                        &pool,
+                        &agent_id,
+                        session_id.as_deref(),
+                        "assistant_text",
+                        &payload,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(row) => {
+                            if let Err(e) =
+                                app_handle.emit("agent-event-appended", &row)
+                            {
+                                tracing::debug!(
+                                    agent_id = %agent_id,
+                                    err = %e,
+                                    "event-appended emit (flush)"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                agent_id = %agent_id,
+                                err = %e,
+                                "assistant_text flush insert"
+                            );
+                        }
+                    }
+                }
                 // Flip the most recent user_text row's delivery_status to
                 // "consumed" — the turn that just ended was the assistant's
                 // response to that message.
-                let session_id = sessions.session_id_for(&agent_id).await;
                 if let Ok(Some(last_user_id)) = crate::db::events::find_last_user_text_id(
                     &pool,
                     &agent_id,
@@ -703,8 +748,62 @@ async fn run_event_aggregator<R: tauri::Runtime>(
                 }
             }
             StreamEvent::StdoutClosed => {
+                // D-01.4: if the turn never reached TurnComplete, flush
+                // buffered assistant text as an interrupted row + synthesize
+                // agent-turn-complete so the frontend's streaming flag flips
+                // off (Pitfall 3 — orphaned streaming flag).
+                if let Some(buf) = turn_buffer.take() {
+                    let session_id = sessions.session_id_for(&agent_id).await;
+                    let payload = serde_json::json!({
+                        "content": buf.content,
+                        "model": buf.model,
+                    });
+                    match crate::db::events::insert_agent_event(
+                        &pool,
+                        &agent_id,
+                        session_id.as_deref(),
+                        "assistant_text",
+                        &payload,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(row) => {
+                            if let Err(e) =
+                                app_handle.emit("agent-event-appended", &row)
+                            {
+                                tracing::debug!(
+                                    agent_id = %agent_id,
+                                    err = %e,
+                                    "event-appended emit (interrupted)"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                agent_id = %agent_id,
+                                err = %e,
+                                "assistant_text interrupted insert"
+                            );
+                        }
+                    }
+                    let tc_payload = serde_json::json!({
+                        "agentId": agent_id,
+                        "terminalReason": "interrupted",
+                        "isError": false,
+                    });
+                    if let Err(e) = app_handle.emit("agent-turn-complete", &tc_payload) {
+                        tracing::debug!(
+                            agent_id = %agent_id,
+                            err = %e,
+                            "synthetic turn-complete emit"
+                        );
+                    }
+                }
                 // Reader hit EOF; the supervisor's wait() will emit the
-                // session_boundary row. Nothing to do here.
+                // session_boundary row. Nothing else to do here.
                 tracing::debug!(agent_id = %agent_id, "stdout closed; aggregator draining");
             }
         }
