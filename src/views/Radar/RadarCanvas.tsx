@@ -35,8 +35,9 @@ import {
 import { usePipelineStore } from '../../stores/pipelineStore';
 import { useAgentStore } from '../../stores/agentStore';
 import { useConflictStore } from '../../stores/conflictStore';
-import { useCanvasZoomPan } from '../../hooks/useCanvasZoomPan';
+import { useCanvasZoomPan, type CanvasViewport } from '../../hooks/useCanvasZoomPan';
 import { useGraphLayout } from '../../hooks/useGraphLayout';
+import { useRafCoalesced } from '../../hooks/useRafCoalesced';
 import {
   drawFolderHulls,
   drawEdges,
@@ -267,10 +268,17 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   }, [settledAt, graphNodes, canvasSize, setViewport]);
 
   // Sync viewport back to store so minimap / debug tools can observe.
+  // Phase 11.1 (D-06): rAF-coalesce the writeback as defense-in-depth.
+  // D-01 already caps `viewport` mutations at 1/frame via useCanvasZoomPan's
+  // wheel coalescer; this guards any future caller (keyboard zoom, fit-to-
+  // view, resize-induced recomputation, etc.) that bypasses that path.
   const storeSetViewport = useRadarStore((s) => s.setViewport);
+  const enqueueViewportWriteback = useRafCoalesced<CanvasViewport>((vp) => {
+    storeSetViewport(vp);
+  });
   useEffect(() => {
-    storeSetViewport(viewport);
-  }, [viewport, storeSetViewport]);
+    enqueueViewportWriteback(() => viewport);
+  }, [viewport, enqueueViewportWriteback]);
 
   // Bootstrap: fetch graph once. Also re-fetch when the pipeline watcher
   // starts (pipelineStore.isWatching flips true) — the initial mount may
