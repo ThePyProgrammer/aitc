@@ -658,5 +658,48 @@ mod tests {
             "second overflow should bump counter to 2"
         );
     }
+
+    #[tokio::test]
+    async fn snapshot_stats_counts_by_prefix_and_atomic() {
+        let reg = AgentRegistry::new();
+        let adapter: Arc<dyn AgentAdapter> =
+            Arc::new(TestAdapter::new("test", vec!["test"]));
+
+        // 2 KAGENT entries, launched_by_aitc = true.
+        for id in ["KAGENT-1", "KAGENT-2"] {
+            reg.upsert_agent(
+                id.into(),
+                make_info(id, "test"),
+                adapter.clone(),
+                true,
+            )
+            .await
+            .unwrap();
+        }
+        // 3 PASSIVE entries, launched_by_aitc = false.
+        for id in ["PASSIVE-100", "PASSIVE-200", "PASSIVE-300"] {
+            reg.upsert_agent(
+                id.into(),
+                make_info(id, "test"),
+                adapter.clone(),
+                false,
+            )
+            .await
+            .unwrap();
+        }
+
+        let stats = reg.snapshot_stats().await;
+        assert_eq!(stats.total_agents, 5, "total should count all entries");
+        assert_eq!(stats.passive_count, 3, "PASSIVE-* entries");
+        assert_eq!(stats.kagent_count, 2, "KAGENT-* entries");
+        assert_eq!(
+            stats.launched_count, 2,
+            "launched_by_aitc=true entries (the KAGENTs)"
+        );
+        assert_eq!(
+            stats.capacity_hits_since_start, 0,
+            "no capacity hits occurred in this test"
+        );
+    }
 }
 
