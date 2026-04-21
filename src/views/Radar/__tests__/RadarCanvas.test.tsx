@@ -114,16 +114,28 @@ function installCanvasShim() {
 }
 
 // Mock useGraphLayout. Expose a mutable hit map so Plan 05 tests can
-// make the quadtree "find" a specific node on demand.
+// make the quadtree "find" a specific node on demand. Phase 11 D-25:
+// simNodesRef is LivePositions ({ ids, positions: Float32Array, idIndex })
+// — tests that want to drive the sim branch mutate mockLivePositions
+// before rendering. Default is "no live data" so the render loop takes
+// the fallback path to store positions (pre-Phase-11 behavior).
 const mockQuadtreeHit = { current: null as null | { id: string } };
+const mockLivePositions = {
+  current: {
+    ids: [] as string[],
+    positions: new Float32Array(0),
+    idIndex: new Map<string, number>(),
+  },
+};
+const mockIsSimulating = { current: false };
 vi.mock('../../../hooks/useGraphLayout', () => {
   return {
     useGraphLayout: () => ({
       quadtreeRef: {
         current: { find: () => mockQuadtreeHit.current ?? undefined },
       },
-      simNodesRef: { current: [] },
-      isSimulatingRef: { current: false },
+      simNodesRef: mockLivePositions,
+      isSimulatingRef: mockIsSimulating,
       markDirtyRef: { current: () => {} },
     }),
   };
@@ -257,6 +269,16 @@ describe('RadarCanvas (graph mode) — Plan 04', () => {
     mockAgentState.agents = [];
     mockConflictState.alerts = [];
     mockQuadtreeHit.current = null;
+    // Reset the LivePositions ref so each test starts from "no live data"
+    // (render loop takes the store-fallback path). Tests that want to
+    // exercise the Float32Array hot path override these fields before
+    // rendering.
+    mockLivePositions.current = {
+      ids: [],
+      positions: new Float32Array(0),
+      idIndex: new Map(),
+    };
+    mockIsSimulating.current = false;
     vi.clearAllMocks();
   });
 
@@ -436,6 +458,53 @@ describe('RadarCanvas (graph mode) — Plan 04', () => {
       return Math.abs(x - 42) < 0.01 && Math.abs(y - 17) < 0.01;
     });
     expect(pulseArc).toBeDefined();
+  });
+
+  it('renders nodes from simNodesRef.current.positions Float32Array during active sim (D-25, D-26)', async () => {
+    // Two nodes in the store at store positions (0, 0) and (100, 0) — the
+    // store positions are the pre-simulation coordinates. The Worker has
+    // delivered a live tick with DIFFERENT positions (77, 88) and
+    // (-42, 13) via the LivePositions Float32Array. The render loop must
+    // draw nodes at the Float32Array coordinates, not the store
+    // coordinates — proving it reads through the hot path.
+    mockRadarState.graphNodes = [
+      { id: 'src/a.ts', dirKey: 'src', dirDepth: 1, x: 0, y: 0 },
+      { id: 'src/b.ts', dirKey: 'src', dirDepth: 1, x: 100, y: 0 },
+    ];
+    mockRadarState.settledAt = null;
+
+    const ids = ['src/a.ts', 'src/b.ts'];
+    const positions = new Float32Array([77, 88, -42, 13]);
+    mockLivePositions.current = {
+      ids,
+      positions,
+      idIndex: new Map(ids.map((id, i) => [id, i])),
+    };
+    mockIsSimulating.current = true;
+
+    render(<RadarCanvas />);
+    await new Promise((r) => setTimeout(r, 40));
+
+    // The node draw should land an arc at the Float32Array coordinates
+    // (77, 88) for src/a.ts — NOT at the store coords (0, 0).
+    const arcs = shim.lastCtx.current!._calls.filter((c) => c.fn === 'arc');
+    const liveArcA = arcs.find((c) => {
+      const [x, y] = c.args as [number, number, ...unknown[]];
+      return Math.abs(x - 77) < 0.01 && Math.abs(y - 88) < 0.01;
+    });
+    const liveArcB = arcs.find((c) => {
+      const [x, y] = c.args as [number, number, ...unknown[]];
+      return Math.abs(x - -42) < 0.01 && Math.abs(y - 13) < 0.01;
+    });
+    expect(liveArcA).toBeDefined();
+    expect(liveArcB).toBeDefined();
+    // And no arc at the store coords (0, 0) or (100, 0) for these ids —
+    // if there were, the hot path would be reading from the wrong source.
+    const storeArcA = arcs.find((c) => {
+      const [x, y] = c.args as [number, number, ...unknown[]];
+      return Math.abs(x - 0) < 0.01 && Math.abs(y - 0) < 0.01;
+    });
+    expect(storeArcA).toBeUndefined();
   });
 
   it('skips conflict pulse for dismissed alerts (D-22)', async () => {

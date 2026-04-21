@@ -31,6 +31,7 @@ import {
   useRadarStore,
   getAgentColor,
   installRadarPipelineBridge,
+  type GraphNode,
 } from '../../stores/radarStore';
 import { usePipelineStore } from '../../stores/pipelineStore';
 import { useAgentStore } from '../../stores/agentStore';
@@ -181,6 +182,16 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
 
   const { viewport, setViewport, handlers, screenToWorld } = useCanvasZoomPan();
   const { quadtreeRef, simNodesRef, isSimulatingRef, markDirtyRef } = useGraphLayout();
+
+  // D-25 / D-26 — Metadata lookup for the rAF hot path. graphNodes is
+  // already in the store; here we just index it by id so the render loop
+  // can resolve dirKey/dirDepth per node without array searches when
+  // reading positions out of the Float32Array delivered by useGraphLayout's
+  // Worker-populated simNodesRef.current.positions buffer.
+  const nodeById = useMemo(
+    () => new Map<string, GraphNode>(graphNodes.map((n) => [n.id, n])),
+    [graphNodes],
+  );
 
   // D-22 conflict subscription — reads all alerts, filters to active
   // (non-dismissed) entries, and memoizes a Set of contended file paths for
@@ -462,6 +473,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     activeTrails,
     activeConflictPaths,
     theme,
+    nodeById,
   });
   useEffect(() => {
     stateRef.current = {
@@ -479,6 +491,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       activeTrails,
       activeConflictPaths,
       theme,
+      nodeById,
     };
   }, [
     graphNodes,
@@ -495,6 +508,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     activeTrails,
     activeConflictPaths,
     theme,
+    nodeById,
   ]);
 
   // Main rAF render loop — single subscription for the lifetime of the view.
@@ -509,6 +523,12 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     // 5k nodes at 60fps that eliminates ~300k/sec short-lived entries from
     // hitting the GC.
     const simPositionMap = new Map<string, { x: number; y: number }>();
+    // Scratch liveNodes array — mutated in place each frame so the sim
+    // branch doesn't allocate a new array on every rAF tick. Length is
+    // set to the current live.ids.length; when the sim is idle or the
+    // Worker hasn't delivered its first tick yet, we fall back to
+    // s.graphNodes (allocation-free).
+    let simLiveNodes: GraphNode[] = [];
 
     function render() {
       if (!ctx) return;
@@ -540,25 +560,65 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         vp.panY * dpr,
       );
 
-      // When the d3 simulation is actively ticking, read live positions
-      // from simNodesRef (updated each tick) so nodes animate smoothly.
-      // When idle, fall back to the store positions (s.graphNodes / s.positions).
-      // Phase 11 D-25: simNodesRef.current is LivePositions
-      // ({ ids, positions: Float32Array, idIndex }), not SimNode[]. The
-      // metadata (dirKey/dirDepth) needed for folder-hull rendering stays in
-      // s.graphNodes; only the per-tick {x,y} reads go through the Float32Array.
-      // Wave 3 will further optimize this hot path per §Pattern 5 (xyPool).
+      // D-25 / D-26 — hot-path read from LivePositions.
+      // During active simulation, read world positions from the
+      // Worker-populated Float32Array (ids[i] <-> positions[i*2],
+      // positions[i*2+1]). When the Worker has not yet emitted its first
+      // tick (positions.byteLength === 0) OR the sim is idle, fall back to
+      // the store's graphNodes/positions — identical to the pre-Phase-11
+      // idle path. Metadata (dirKey/dirDepth) is resolved via the
+      // memoized s.nodeById Map, avoiding O(n) array scans per frame.
       const simulating = isSimulatingRef.current;
       const live = simNodesRef.current;
-      const liveNodes = s.graphNodes;
+      let liveNodes: typeof s.graphNodes = s.graphNodes;
       let livePositions = s.positions;
-      if (simulating && live.positions.byteLength > 0) {
-        const { ids, positions } = live;
+      if (
+        simulating &&
+        live.positions.byteLength > 0 &&
+        live.ids.length > 0
+      ) {
+        // Repopulate simPositionMap from the Float32Array (reads via
+        // live.positions[i * 2] / live.positions[i * 2 + 1] — the
+        // Worker-populated Transferable buffer; ids[i] resolves the
+        // matching node id for the consumer-facing Map<string,{x,y}>
+        // contract preserved from Phase 7).
         simPositionMap.clear();
-        for (let i = 0; i < ids.length; i++) {
-          simPositionMap.set(ids[i], { x: positions[i * 2], y: positions[i * 2 + 1] });
+        for (let i = 0; i < live.ids.length; i++) {
+          simPositionMap.set(live.ids[i], {
+            x: live.positions[i * 2],
+            y: live.positions[i * 2 + 1],
+          });
         }
         livePositions = simPositionMap;
+        // Build the scratch liveNodes array: merge Float32Array positions
+        // with store-supplied metadata (dirKey/dirDepth) via the
+        // nodeById memo. Length-set in place so repeated frames reuse the
+        // same array backing store (no per-frame Array allocation).
+        simLiveNodes.length = live.ids.length;
+        let valid = true;
+        for (let i = 0; i < live.ids.length; i++) {
+          const id = live.ids[i];
+          const meta = s.nodeById.get(id);
+          if (!meta) {
+            // Transient id-mismatch: a tick landed for a topology that the
+            // store hasn't caught up to yet. Skip the sim branch for this
+            // frame and fall back to store positions.
+            valid = false;
+            break;
+          }
+          simLiveNodes[i] = {
+            ...meta,
+            x: live.positions[i * 2],
+            y: live.positions[i * 2 + 1],
+          };
+        }
+        if (valid) {
+          liveNodes = simLiveNodes;
+        } else {
+          // Fallback — reset the sim-only override so downstream reads see
+          // coherent metadata+positions from the store.
+          livePositions = s.positions;
+        }
       }
 
       // Steps 2-3: Folder hulls (fill/stroke + label).
