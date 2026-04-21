@@ -211,9 +211,16 @@ async fn hook_handler<R: tauri::Runtime>(
     Extension(rate_limiter): Extension<Arc<RateLimiter>>,
     Extension(pool): Extension<sqlx::SqlitePool>,
     Extension(waiters): Extension<Arc<WaiterRegistry>>,
+    Extension(engine): Extension<Arc<tokio::sync::Mutex<crate::conflict::engine::ConflictEngine>>>,
     Extension(app): Extension<tauri::AppHandle<R>>,
     Json(body): Json<HookRequest>,
 ) -> axum::response::Response {
+    // Phase 17 Plan 04 breadcrumb — Plan 05 rewrites the gate branch below
+    // to call `engine.lock().await.could_conflict_with(...)`. The Extension
+    // is plumbed here so Plan 05 is a pure-behavioral diff rather than a
+    // wiring + behavior diff. Until then, the handle is intentionally unused.
+    let _engine_handle_for_plan_05 = engine;
+
     // T-08-Rate.
     if !rate_limiter.check().await {
         return (
@@ -525,6 +532,7 @@ pub fn build_router<R: tauri::Runtime>(
     rate_limiter: Arc<RateLimiter>,
     chat_sessions: Arc<crate::chat_runtime::session_registry::LiveSessionRegistry>,
     mcp_state: Arc<crate::mcp::McpState>,
+    engine: Arc<tokio::sync::Mutex<crate::conflict::engine::ConflictEngine>>,
 ) -> Router {
     Router::new()
         .route("/register", post(register_agent))
@@ -543,6 +551,11 @@ pub fn build_router<R: tauri::Runtime>(
         .layer(Extension(rate_limiter))
         .layer(Extension(pool))
         .layer(Extension(waiters))
+        // Phase 17 D-16: ConflictEngine shared with pipeline/commands.rs
+        // conflict_task via Tauri managed state (see lib.rs). Plan 05
+        // rewrites the hook gate branch to call
+        // `engine.lock().await.could_conflict_with(...)`.
+        .layer(Extension(engine))
         .layer(Extension(app))
         .layer(Extension(chat_sessions))
         .layer(Extension(mcp_state))
@@ -555,6 +568,7 @@ pub fn build_router<R: tauri::Runtime>(
 ///
 /// Returns the actual bound port number. Generic over runtime for test
 /// compatibility.
+#[allow(clippy::too_many_arguments)]
 pub async fn start_registration_server<R: tauri::Runtime>(
     registry: Arc<AgentRegistry>,
     pool: sqlx::SqlitePool,
@@ -563,6 +577,7 @@ pub async fn start_registration_server<R: tauri::Runtime>(
     preferred_port: u16,
     chat_sessions: Arc<crate::chat_runtime::session_registry::LiveSessionRegistry>,
     mcp_state: Arc<crate::mcp::McpState>,
+    engine: Arc<tokio::sync::Mutex<crate::conflict::engine::ConflictEngine>>,
 ) -> Result<u16, String> {
     let rate_limiter = Arc::new(RateLimiter::new());
 
@@ -574,6 +589,7 @@ pub async fn start_registration_server<R: tauri::Runtime>(
         rate_limiter,
         chat_sessions,
         mcp_state,
+        engine,
     );
 
     // Try preferred port first, fallback to OS-assigned
