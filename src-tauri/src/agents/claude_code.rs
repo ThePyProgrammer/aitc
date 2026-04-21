@@ -75,16 +75,18 @@ impl AgentAdapter for ClaudeCodeAdapter {
         intent: Option<String>,
         options: LaunchOptions,
     ) -> Result<(u32, tokio::process::Child), String> {
-        // D-06: long-lived stream-json subprocess. The intent becomes the
-        // INITIAL prompt in the stream-json session; the supervisor keeps
-        // the subprocess alive for follow-up turns driven by the stdin
-        // writer (Plan 02 `spawn_outbound_writer`). Require the intent so
-        // the launch failure surfaces at launch time instead of on first
-        // silent exit.
-        let prompt = intent.ok_or_else(|| {
+        // D-06: long-lived stream-json subprocess. The intent is NOT passed
+        // as a positional argv — `--input-format stream-json` expects the
+        // first user turn on stdin as a JSONL frame. The command layer
+        // (`launch_agent_inner`) enqueues the intent via
+        // `send_chat_message_to_agent_inner` immediately after the outbound
+        // writer is wired. We still require the intent at launch-time so
+        // misconfigured deploys surface the error before spawn rather than
+        // producing a silent Claude subprocess waiting on an empty pipe.
+        let _prompt = intent.ok_or_else(|| {
             "Claude Code launches require an INTENT_LABEL. The intent is \
-             forwarded to claude as the initial prompt for the long-lived \
-             stream-json session."
+             delivered to claude as the initial user turn via stdin JSONL \
+             after the long-lived stream-json subprocess spawns."
                 .to_string()
         })?;
 
@@ -172,10 +174,10 @@ impl AgentAdapter for ClaudeCodeAdapter {
         // D-06: long-lived stream-json subprocess via `launch_live_session`.
         // Returns `LaunchLiveSessionResult { pid, child, mcp_config_path }`
         // — the Child has all three stdio pipes piped; the command layer
-        // takes ownership of them.
+        // takes ownership of them and sends the initial user turn (intent)
+        // via stdin JSONL.
         let result = crate::chat_runtime::launcher::launch_live_session(
             "claude",
-            &prompt,
             &cwd,
             aitc_port,
             mcp_config_path.as_deref(),

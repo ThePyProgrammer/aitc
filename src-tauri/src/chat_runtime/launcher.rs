@@ -9,8 +9,15 @@
 //! Target CLI:
 //!   claude --input-format stream-json --output-format stream-json --verbose \
 //!          --include-partial-messages \
-//!          [--mcp-config <path> --strict-mcp-config] \
-//!          <intent>
+//!          [--mcp-config <path> --strict-mcp-config]
+//!
+//! The initial user turn (intent) is delivered via stdin JSONL AFTER spawn —
+//! NOT as a positional argv. `--input-format stream-json` makes Claude read
+//! user turns from stdin; a positional prompt is ignored, leaving the
+//! subprocess hanging post-SessionStart waiting for an input frame. The
+//! command layer (`agents/commands.rs::launch_agent_inner`) enqueues the
+//! intent via `send_chat_message_to_agent_inner` right after the outbound
+//! writer is wired.
 
 #![allow(dead_code)]
 
@@ -27,13 +34,18 @@ pub struct LaunchLiveSessionResult {
 /// of `launch_live_session` so tests can assert the exact argv shape without
 /// actually spawning.
 ///
+/// No positional prompt — `--input-format stream-json` requires the first
+/// user turn to arrive via stdin JSONL. Passing a positional causes Claude
+/// to ignore it (or worse, mis-parse) and leaves the subprocess hanging
+/// after SessionStart. The initial user turn is injected by the command
+/// layer via `send_chat_message_to_agent_inner` after spawn.
+///
 /// `extra_flags` — Plan 04 extension point. Flags appended AFTER the
 /// stream-json baseline (`--input-format`, `--output-format`, `--verbose`,
-/// `--include-partial-messages`) and the optional `--mcp-config` pair, but
-/// BEFORE the positional `intent`. Used by `ClaudeCodeAdapter::launch` to
-/// pass `--dangerously-skip-permissions` or `--permission-mode acceptEdits`.
+/// `--include-partial-messages`) and the optional `--mcp-config` pair.
+/// Used by `ClaudeCodeAdapter::launch` to pass
+/// `--dangerously-skip-permissions` or `--permission-mode acceptEdits`.
 pub(crate) fn build_argv(
-    intent: &str,
     mcp_config_path: Option<&Path>,
     extra_flags: Option<&[&str]>,
 ) -> Vec<String> {
@@ -55,7 +67,6 @@ pub(crate) fn build_argv(
             args.push((*f).to_string());
         }
     }
-    args.push(intent.into());
     args
 }
 
@@ -64,19 +75,22 @@ pub(crate) fn build_argv(
 /// `aitc_port` is injected as `AITC_PORT` env (Phase 3 precedent) so the
 /// `/register` + `/hook` + `/mcp` sidecar routes remain addressable.
 ///
+/// No `intent` parameter — `--input-format stream-json` requires the first
+/// user turn to arrive via stdin JSONL. The caller is responsible for
+/// injecting the initial user frame via the outbound writer after spawn.
+///
 /// `extra_flags` — Plan 04 passes permission-mode flags here (e.g.
 /// `--dangerously-skip-permissions`) so the adapter can still honor the
 /// `LaunchOptions` bypass chips without duplicating argv construction.
 pub async fn launch_live_session(
     program: &str,
-    intent: &str,
     cwd: &Path,
     aitc_port: u16,
     mcp_config_path: Option<&Path>,
     env_vars: Option<Vec<(&str, &str)>>,
     extra_flags: Option<&[&str]>,
 ) -> Result<LaunchLiveSessionResult, String> {
-    let args = build_argv(intent, mcp_config_path, extra_flags);
+    let args = build_argv(mcp_config_path, extra_flags);
     let mut cmd = tokio::process::Command::new(program);
     cmd.args(args.iter().map(String::as_str))
         .current_dir(cwd)
@@ -117,9 +131,10 @@ mod tests {
 
     #[test]
     fn launch_live_session_argv_includes_stream_json_flags() {
-        let argv = build_argv("do the thing", None, None);
+        let argv = build_argv(None, None);
         // Exact ordering — the stream-json flag set appears first, then
-        // --verbose + --include-partial-messages, then the positional intent.
+        // --verbose + --include-partial-messages. No positional intent —
+        // the initial user turn is injected via stdin JSONL post-spawn.
         assert_eq!(
             argv,
             vec![
@@ -129,7 +144,6 @@ mod tests {
                 "stream-json".into(),
                 "--verbose".into(),
                 "--include-partial-messages".into(),
-                "do the thing".into(),
             ]
         );
     }
@@ -137,7 +151,7 @@ mod tests {
     #[test]
     fn launch_live_session_with_mcp_config_includes_flag_pair() {
         let path = PathBuf::from("/tmp/aitc-mcp.json");
-        let argv = build_argv("task", Some(&path), None);
+        let argv = build_argv(Some(&path), None);
         assert!(argv.iter().any(|a| a == "--mcp-config"));
         assert!(argv.iter().any(|a| a == "/tmp/aitc-mcp.json"));
         assert!(argv.iter().any(|a| a == "--strict-mcp-config"));
@@ -150,23 +164,22 @@ mod tests {
             .unwrap();
         assert!(mcp_pos < path_pos);
         assert!(path_pos < strict_pos);
-        // Intent is the final positional.
-        assert_eq!(argv.last().unwrap(), "task");
+        // No positional — argv ends with the strict flag.
+        assert_eq!(argv.last().unwrap(), "--strict-mcp-config");
     }
 
     #[test]
     fn launch_live_session_no_mcp_config_omits_flag_pair() {
-        let argv = build_argv("task", None, None);
+        let argv = build_argv(None, None);
         assert!(!argv.iter().any(|a| a == "--mcp-config"));
         assert!(!argv.iter().any(|a| a == "--strict-mcp-config"));
     }
 
     #[test]
-    fn launch_live_session_extra_flags_appear_before_intent_and_after_mcp_pair() {
+    fn launch_live_session_extra_flags_appear_after_mcp_pair() {
         let path = PathBuf::from("/tmp/aitc-mcp.json");
         let flags = ["--dangerously-skip-permissions"];
-        let argv = build_argv("task", Some(&path), Some(&flags));
-        let intent_pos = argv.iter().position(|a| a == "task").unwrap();
+        let argv = build_argv(Some(&path), Some(&flags));
         let strict_pos = argv
             .iter()
             .position(|a| a == "--strict-mcp-config")
@@ -176,17 +189,14 @@ mod tests {
             .position(|a| a == "--dangerously-skip-permissions")
             .unwrap();
         assert!(strict_pos < dangerous_pos, "extra flags come after mcp pair");
-        assert!(
-            dangerous_pos < intent_pos,
-            "extra flags come before positional intent"
-        );
-        assert_eq!(argv.last().unwrap(), "task");
+        // extra flags are the last positional entries (no intent trailing).
+        assert_eq!(argv.last().unwrap(), "--dangerously-skip-permissions");
     }
 
     #[test]
     fn launch_live_session_permission_mode_pair_preserved() {
         let flags = ["--permission-mode", "acceptEdits"];
-        let argv = build_argv("task", None, Some(&flags));
+        let argv = build_argv(None, Some(&flags));
         let pm_pos = argv.iter().position(|a| a == "--permission-mode").unwrap();
         let value_pos = argv.iter().position(|a| a == "acceptEdits").unwrap();
         assert_eq!(value_pos, pm_pos + 1);
@@ -234,7 +244,6 @@ mod tests {
         let tmp = std::env::temp_dir();
         let result = launch_live_session(
             "claude-that-does-not-exist-xyz-aitc",
-            "nothing",
             &tmp,
             9417,
             None,

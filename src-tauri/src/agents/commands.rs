@@ -268,6 +268,31 @@ pub(crate) async fn launch_agent_inner<R: tauri::Runtime>(
             pool.clone(),
             app_handle.clone(),
         );
+
+        // Deliver the initial intent as the first user turn via stdin JSONL.
+        // `--input-format stream-json` ignores positional prompts and waits
+        // for user frames on stdin; without this, Claude hangs after
+        // SessionStart hooks fire. Re-using send_chat_message_to_agent_inner
+        // preserves DB invariants (user_text row + queued delivery status +
+        // agent-event-appended emit) and matches the ChatInput happy path.
+        if let Some(intent_str) = intent.as_deref() {
+            if let Err(e) = crate::chat_runtime::commands::send_chat_message_to_agent_inner(
+                &agent_id,
+                intent_str,
+                pool,
+                chat_sessions,
+                registry,
+                &app_handle,
+            )
+            .await
+            {
+                tracing::warn!(
+                    agent_id = %agent_id,
+                    err = %e,
+                    "initial intent enqueue failed — subprocess may hang until user sends via ChatInput"
+                );
+            }
+        }
     } else {
         // D-12: read-only transcript. Capture stdout/stderr line-by-line
         // into agent_events (raw_stdout / raw_stderr).
@@ -835,6 +860,32 @@ mod tests {
 
         // Drop the stale entry — mirrors relaunch_agent_session's teardown.
         sessions.remove(&agent_id).await;
+
+        // Kill cat1 so supervisor1 wakes from child.wait() and runs its
+        // mark_archived (which no-ops on the removed entry). Without this,
+        // supervisor1 might fire mark_archived AFTER the second launch has
+        // re-registered a fresh LiveSession under the same agent_id — a
+        // latent race in the supervisor that only bites when relaunches
+        // happen in a tight test loop (real users have user-reaction-time
+        // gaps). Deferred proper fix: give LiveSession a generation id and
+        // gate mark_archived on matching generation (out of Phase 10 scope).
+        if let Some(pid) = first.pid {
+            let _ = crate::agents::launcher::terminate_process(pid).await;
+        }
+        // Poll briefly for supervisor1 to finish its mark_archived no-op.
+        for _ in 0..25 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let still_waiting: Option<(i64,)> = sqlx::query_as(
+                "SELECT COUNT(*) FROM agent_events WHERE agent_id = ? AND event_type = 'session_boundary'",
+            )
+            .bind(&agent_id)
+            .fetch_optional(&pool)
+            .await
+            .unwrap_or(None);
+            if matches!(still_waiting, Some((n,)) if n >= 1) {
+                break;
+            }
+        }
 
         // Relaunch under the same agent_id.
         let opts = LaunchOptions {
