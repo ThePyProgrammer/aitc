@@ -304,3 +304,13 @@ Plans:
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 17 to break down)
+
+### Phase 18: Fix passive-scan registry flooding. AgentRegistry hits its MAX_AGENTS=100 cap within seconds of startup because passive_bridge.bridge_tick registers a PASSIVE-{pid} for every claude/codex/opencode-named process on the machine — including unrelated interactive CLI sessions in other terminals, plus short-lived subprocesses that Phase 10 long-lived stream-json runtime spawns (MCP request handlers, aitc-hook fires, node helpers). Once capped, new KAGENT launches fail with 'Registry at capacity (100)'. Need to scope passive registration to only processes that actually matter: PIDs that self-registered via /register, or PIDs whose cwd is inside the active watched repo AND command-line matches a narrow AITC-compatible shape, or a hybrid where noisy subprocess children do not get their own registry entry (only the parent claude/codex does). Also raise MAX_AGENTS ceiling as a safety net. Pre-existing bug from Phase 3 (T-03-03 throttle) / Phase 6 (passive_bridge). Phase 10 amplified it with 4 long-lived sessions.
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 17
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 18 to break down)
