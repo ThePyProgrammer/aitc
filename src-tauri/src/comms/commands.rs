@@ -30,15 +30,24 @@ fn dispatch_approval_notification<R: tauri::Runtime>(
     agent_id: &str,
     file_path: Option<&str>,
     request_id: Option<i64>,
+    conflict_agent_id: Option<&str>,
 ) {
     use tauri_plugin_notification::NotificationExt;
     let suffix = match request_id {
         Some(id) => format!(" [#{id}]"),
         None => String::new(),
     };
+    // Phase 17 D-23: when the gate was triggered by a file conflict, prefix
+    // the body with `⚠ CONFLICT: ` so the notification itself signals the
+    // reason. Deep-link route (/comms?requestId={id}) stays identical.
+    let prefix = if conflict_agent_id.is_some() {
+        "⚠ CONFLICT: "
+    } else {
+        ""
+    };
     let body = match file_path {
-        Some(fp) => format!("{agent_id} requests access to {fp}{suffix}"),
-        None => format!("{agent_id} requests approval{suffix}"),
+        Some(fp) => format!("{prefix}{agent_id} requests access to {fp}{suffix}"),
+        None => format!("{prefix}{agent_id} requests approval{suffix}"),
     };
     // The notification plugin panics on .notification() when not registered
     // (e.g. tauri::test::mock_app). Catch it so hook_handler integration
@@ -81,6 +90,12 @@ fn map_approval_row(row: &sqlx::sqlite::SqliteRow) -> ApprovalRequest {
         tool_name: row.try_get("tool_name").ok().flatten(),
         tool_input_json: row.try_get("tool_input_json").ok().flatten(),
         session_id: row.try_get("hook_session_id").ok().flatten(),
+        // Phase 17 D-20/D-21: conflict metadata columns added in migration
+        // 007. Legacy rows (pre-migration or Phase 4 write_access path) keep
+        // both NULL; the pretool_use gate branch of hook_handler populates
+        // them when the gate fires.
+        conflict_with_agent_id: row.try_get("conflict_with_agent_id").ok().flatten(),
+        gate_reason: row.try_get("gate_reason").ok().flatten(),
     }
 }
 
@@ -113,16 +128,22 @@ pub async fn create_approval_request_internal<R: tauri::Runtime>(
     tool_name: Option<&str>,
     tool_input_json: Option<&str>,
     session_id: Option<&str>,
+    // Phase 17 D-21: conflict metadata threaded from the hook_handler gate
+    // branch. Both `None` for the Phase 4 protected-path trigger; hook gates
+    // pass either `(Some(id), Some("file_conflict"))` or
+    // `(None, Some("protected_path"))`.
+    conflict_with_agent_id: Option<&str>,
+    gate_reason: Option<&str>,
     pool: &Pool<Sqlite>,
     app_handle: &tauri::AppHandle<R>,
 ) -> Result<ApprovalRequest, String> {
     let row = sqlx::query(
         "INSERT INTO approval_requests \
-         (agent_id, request_type, file_path, diff_content, urgency, tool_name, tool_input_json, hook_session_id) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+         (agent_id, request_type, file_path, diff_content, urgency, tool_name, tool_input_json, hook_session_id, conflict_with_agent_id, gate_reason) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
          RETURNING id, agent_id, request_type, file_path, diff_content, status, urgency, \
                    response_note, edited_content, created_at, resolved_at, \
-                   tool_name, tool_input_json, hook_session_id",
+                   tool_name, tool_input_json, hook_session_id, conflict_with_agent_id, gate_reason",
     )
     .bind(agent_id)
     .bind(request_type)
@@ -132,6 +153,8 @@ pub async fn create_approval_request_internal<R: tauri::Runtime>(
     .bind(tool_name)
     .bind(tool_input_json)
     .bind(session_id)
+    .bind(conflict_with_agent_id)
+    .bind(gate_reason)
     .fetch_one(pool)
     .await
     .map_err(|e| format!("insert approval_request failed: {e}"))?;
@@ -142,7 +165,15 @@ pub async fn create_approval_request_internal<R: tauri::Runtime>(
     let _ = app_handle.emit("approval-request-created", &req);
 
     // OS notification — Plan 08-05 reads request_id for click-to-focus deeplink.
-    dispatch_approval_notification(app_handle, agent_id, file_path, Some(req.id));
+    // Phase 17 D-23: `conflict_with_agent_id` threads into the notification
+    // body prefix so the user sees `⚠ CONFLICT: …` even from the tray.
+    dispatch_approval_notification(
+        app_handle,
+        agent_id,
+        file_path,
+        Some(req.id),
+        conflict_with_agent_id,
+    );
 
     Ok(req)
 }

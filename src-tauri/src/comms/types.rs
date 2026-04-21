@@ -22,6 +22,16 @@ pub struct ApprovalRequest {
     pub tool_name: Option<String>,
     pub tool_input_json: Option<String>,
     pub session_id: Option<String>,
+
+    /// Phase 17 D-21: the OTHER agent whose recent write triggered the
+    /// `file_conflict` gate. `None` on legacy rows, protected_path gates,
+    /// and future non-conflict gate reasons.
+    pub conflict_with_agent_id: Option<String>,
+
+    /// Phase 17 D-20/D-21: one of `'file_conflict' | 'protected_path' |
+    /// 'unknown'` (GateReason enum string, see `conflict::types::GateReason`).
+    /// `None` on legacy rows predating migration 007.
+    pub gate_reason: Option<String>,
 }
 
 // `ChatMessage` was REMOVED in Phase 10 (D-21). The Phase 4 chat surface

@@ -320,6 +320,12 @@ async fn hook_handler<R: tauri::Runtime>(
         Some(&body.tool_name),
         Some(&tool_input_str),
         body.session_id.as_deref(),
+        // Phase 17 Task 1 signature sweep: hook gate metadata is populated
+        // by Task 2's rewrite of this branch. Until then, pass `None, None`
+        // so Task 1 lands a standalone-compilable signature change. The
+        // Task 2 diff replaces this whole call site.
+        None,
+        None,
         &pool,
         &app,
     )
