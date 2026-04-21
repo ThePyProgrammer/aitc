@@ -82,6 +82,12 @@ impl AgentRegistry {
             Ok(())
         } else {
             if agents.len() >= MAX_AGENTS {
+                // Phase 18 D-04: count every at-capacity failure for lifetime
+                // observability via `snapshot_stats()` / `get_registry_stats`.
+                // Atomic Relaxed increment; no additional lock acquisition
+                // (write-lock on `agents` already held here).
+                self.capacity_hits_since_start
+                    .fetch_add(1, Ordering::Relaxed);
                 return Err(format!(
                     "Registry at capacity ({MAX_AGENTS}). Cannot add agent '{id}'"
                 ));
