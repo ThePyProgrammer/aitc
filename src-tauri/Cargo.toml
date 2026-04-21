@@ -80,6 +80,15 @@ tauri-plugin-shell = "2"
 # position, so simultaneous Cargo.toml edits land on distinct lines.
 shlex = "1.3.0"
 
+# Phase 17 (Plan 02 Task 0): lexical path normalization for D-02
+# "file does not exist yet" fallback in conflict/canonicalize.rs.
+# 0-dep crate, ~1 KB compiled, implements Plan 9 cleanname / Go path.Clean.
+# Owned by Plan 02 (not Plan 03) so this plan's `cargo check` in Task 1
+# succeeds regardless of Wave 1 sibling plan ordering. Plan 01 owns the
+# parallel `shlex = "1.3.0"` addition at a different alphabetical
+# position, so simultaneous Cargo.toml edits land on distinct lines.
+path-clean = "1.0"
+
 # Linux-only: intercept Ctrl+scroll at the GTK widget level before
 # WebKitGTK processes it into a zoom change. All three crates are
 # already transitive deps of tauri (via wry / tray-icon) — pinning
