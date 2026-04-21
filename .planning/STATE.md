@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 11.1 code-complete; manual wheel-zoom smoke pending user action
-last_updated: "2026-04-21T05:21:54.417Z"
-last_activity: 2026-04-21 -- Phase 11.1 execution started
+stopped_at: Phase 18-01 complete; plan 18-02 ready to start
+last_updated: "2026-04-21T05:28:28Z"
+last_activity: 2026-04-21 -- Phase 18-01 completed (parent-PID filter + 5 tests, 7 commits)
 progress:
   total_phases: 19
   completed_phases: 12
   total_plans: 59
-  completed_plans: 55
-  percent: 93
+  completed_plans: 56
+  percent: 95
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 
 ## Current Position
 
-Phase: 11.1 (fix-zoom-scroll-lag-in-radarcanvas-wheel-event-raf-coalescin) — EXECUTING
-Plan: 1 of 1
-Status: Executing Phase 11.1
-Last activity: 2026-04-21 -- Phase 11.1 execution started
+Phase: 18 (fix-passive-scan-registry-flooding-agentregistry-hits-its-ma) — EXECUTING
+Plan: 1 of 4 complete (18-01 ✓; 18-02, 18-03, 18-04 pending)
+Status: Executing Phase 18 wave 1 (18-01 complete)
+Last activity: 2026-04-21 -- Phase 18-01 completed (parent-PID filter + 5 tests)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██░░░░░░░░] 25%
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 10 P04 | 20m | 3 tasks | 14 files |
 | Phase 10 P05 | 13min | 3 tasks | 24 files |
 | Phase 10 P06 | 14 min | 3 tasks | 13 files |
+| Phase 18 P01 | 8 min | 1 task (7 commits) | 1 file |
 
 ## Accumulated Context
 
@@ -98,6 +99,8 @@ Recent decisions affecting current work:
 - [Phase 10]: Plan 06: Task 3 is a blocking human-verify UAT checkpoint — Plan 06 automation is complete but Phase 10 is NOT closed until developer signs off against 10-UI-SPEC.md via 10-06-CHECKPOINT.md
 - [Phase 10]: Plan 06: ?tab=chat / ?agent=<id> URL schema finalized; CommsTabBar prop shape (unreadChat + onTabChange) confirmed; setSearchParams uses replace mode to avoid history pollution from tab/selection churn
 - [Phase 10]: Plan 06: D-21 Phase 4 frontend chat artifacts DELETED — ChatThread.tsx, MiniChatCard.tsx, Phase-4-era ChatInput.tsx (new Phase 10 version at src/components/chat/ChatInput.tsx); commsStore scrubbed of ChatMessage/messages/sendMessage/fetchMessages; TelemetryPanel AGENT_CHANNELS section gone
+- [Phase 18]: Plan 01: D-02 parent-PID filter lives inside bridge_tick after cwd-scope, before reap/upsert — candidate_pids HashSet built from post-cwd in_scope; filter reads ProcessInfo.parent_pid (NOT CandidateProc.parent, which is the seed type). None-branch retention preserves AGNT-03 (shell/PID-1 parents).
+- [Phase 18]: Plan 01: cand_with_parent test helper takes parent_pid: u32 positionally and wraps in Some(); existing cand (parent=None default) preserved for 6+ legacy tests. Flood regression test uses all_agents().len()==1 as the authoritative invariant — 51 candidates fit under MAX_AGENTS=1000 so "no capacity hit" is not a meaningful witness.
 
 ### Roadmap Evolution
 
@@ -136,6 +139,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T05:21:54.384Z
-Stopped at: Phase 11.1 code-complete; manual wheel-zoom smoke pending user action
-Resume file: .planning/phases/11.1-fix-zoom-scroll-lag-in-radarcanvas-wheel-event-raf-coalescin/11.1-VERIFICATION-REPORT.md
+Last session: 2026-04-21T05:28:28Z
+Stopped at: Phase 18-01 complete; plan 18-02 ready to start
+Resume file: .planning/phases/18-fix-passive-scan-registry-flooding-agentregistry-hits-its-ma/18-02-PLAN.md
