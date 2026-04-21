@@ -92,7 +92,7 @@ wireframes/                Command Horizon design-system source
 
 ## the build plan, featuring scope creep
 
-Built phase-by-phase through [GSD](.planning/). Started as "oh I'll ship six phases, a cute little tower + radar + merge UI app." Now there are seventeen. Phases 11-17 were added *after* v1.0 shipped because once you have a functional ATC radar you cannot stop asking what if the radar was cooler. Classic.
+Built phase-by-phase through [GSD](.planning/). Started as "oh I'll ship six phases, a cute little tower + radar + merge UI app." Now there are eighteen, plus a decimal (11.1) for urgent bug work, and the count keeps going up every time I actually run the thing. Phases 11-17 were added *after* v1.0 shipped because once you have a functional ATC radar you cannot stop asking what if the radar was cooler. Phase 18 was added because running four agents at once filled the registry in about ten seconds. Classic.
 
 Each phase has a `.planning/phases/NN-*/` folder with research · context · plan(s) · verification artefacts. Phases run strictly in numeric order: each one depends on the one before. No cheating.
 
@@ -164,4 +164,4 @@ It runs, though. On my Linux machine at least. Mostly. And apparently on Windows
 
 I had this idea when I read [this LinkedIn post](https://www.linkedin.com/posts/dr-oliver-borchers-043a48b9_cursor-3-just-left-vs-code-completely-rewritten-share-7447171765312786433-3TO3) that suggested the logical progression for an IDE like Cursor was to move from being a "co-pilot" to an "air traffic control system". After discussing with [@Ethan-Chew](https://github.com/Ethan-Chew), it sounded like a pretty cool idea to implement over the weekend.
 
-Now it's seventeen phases long so...
+Now it's eighteen phases long (nineteen if you count 11.1) so...
