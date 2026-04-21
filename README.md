@@ -94,36 +94,35 @@ wireframes/                Command Horizon design-system source
 
 Built phase-by-phase through [GSD](.planning/). Started as "oh I'll ship six phases, a cute little tower + radar + merge UI app." Now there are eighteen, plus a decimal (11.1) for urgent bug work, and the count keeps going up every time I actually run the thing. Phases 11-17 were added *after* v1.0 shipped because once you have a functional ATC radar you cannot stop asking what if the radar was cooler. Phase 18 was added because running four agents at once filled the registry in about ten seconds. Classic.
 
-Each phase has a `.planning/phases/NN-*/` folder with research · context · plan(s) · verification artefacts. The arrows below are the **real dependency graph**, not execution order — GSD happens to run one phase at a time, but the tree says which ones actually block which. Phases 17 and 18 in particular don't care about the Wave 2 chain; both are unblocked right now.
+Each phase has a `.planning/phases/NN-*/` folder with research · context · plan(s) · verification artefacts. The arrow after each phase name lists its **real dependencies** — not execution order. GSD happens to run one phase at a time, but Phases 17 and 18 don't actually care about the Wave 2 chain; both are unblocked right now.
 
 ```
 Wave 0 — "ok let's actually ship v1"
-  (truly linear — each one is built on top of the last)
-    1 ──→ 2 ──→ 3 ──→ 4 ──→ 5 ──→ 6                         ✅ all shipped
-    Shell   Pipe  Agents  UI    Merge  Wiring
+  1    Foundation + App Shell              ← (none)    ✅ shipped
+  2    Real-Time Data Pipeline             ← 1         ✅ shipped (2026-04-10)
+  3    Agents + Conflict Detection         ← 2         ✅ shipped
+  4    Core UI Views                       ← 3         ✅ shipped
+  5    Conflict Resolution + History       ← 4         ✅ shipped
+  6    Pipeline Activation (gap closure)   ← 5         ✅ shipped
 
 Wave 1 — "wait, I want more surfaces"
-  (three parallel branches off Phase 6; 10 is the convergence point)
-    6 ──┬── 7  Graph-based Codebase Map       (7 ← 4, 6)    ✅ shipped (RIP treemap)
-        ├── 8  Claude Code PreToolUse Hooks   (8 ← 3, 4)    ✅ shipped
-        └── 9  Arsenal (skills/agents/config) (9 ← 2, 4)    ✅ shipped
-                       ↓
-                  10 First-class Chat UI      (10 ← 3,8,9)  🟡 6/6 coded — UAT pending on 10-06
+  7    Graph-based Codebase Map            ← 4, 6      ✅ shipped (RIP treemap)
+  8    Claude Code PreToolUse Hooks        ← 3, 4      ✅ shipped
+  9    Arsenal (skills/agents/config)      ← 2, 4      ✅ shipped
+  10   First-class Chat UI                 ← 3, 8, 9   🟡 6/6 coded — UAT pending on 10-06
 
 Wave 2 — "the radar should be sicker"
-  (everything needs Phase 7's graph; most need Phase 11's worker for perf headroom)
-    7 ──→ 11   d3-force in a WebWorker                      ✅ shipped (2026-04-21)
-    7 ──→ 11.1 Fix zoom-scroll lag (exposed by 11, not caused)  ⏳ planning  ← next up
-    7+11 ─┬── 12 IPC bridge nodes + boundary viz            ⏳ planning
-          ├── 13 4-level semantic zoom                      ⏳ planning
-          └── 14 Multi-layer offscreen canvas               ⏳ planning
-                    ↓                             12 ──→ 16 Typed edges + Louvain
-                   15 Enhanced ATC overlay (TCAS)           ⏳ planning
+  11   d3-force in a WebWorker             ← 7         ✅ shipped (2026-04-21)
+  11.1 Fix zoom-scroll lag                 ← 7         ⏳ planning  ← next up
+  12   IPC bridge nodes + boundary viz     ← 7, 11     ⏳ planning
+  13   4-level semantic zoom               ← 7, 11     ⏳ planning
+  14   Multi-layer offscreen canvas        ← 7, 11     ⏳ planning
+  15   Enhanced ATC overlay (TCAS)         ← 7, 14     ⏳ planning
+  16   Typed edges + Louvain communities   ← 7, 12     ⏳ planning
 
 Wave 3 — "things you only find out by actually running this"
-  (both phases float free of Wave 2 — could ship right now)
-    3+8 ──→ 17 Conflict-triggered gate                      ⏳ drafted (17-CONTEXT.md)
-    3+6 ──→ 18 Fix passive-scan registry flooding           ⏳ planning
+  17   Conflict-triggered gate             ← 3, 8      ⏳ drafted (17-CONTEXT.md)
+  18   Fix passive-scan registry flooding  ← 3, 6      ⏳ planning
 ```
 
 **Status (2026-04-21):** Waves 0 and 1 are basically done. All of v1.0 shipped. Phase 7 replaced the original squarified-treemap radar with the force-directed graph (RIP, you served us well). Phase 8 shipped the Claude Code hook plumbing. Phase 9 shipped Arsenal. Phase 10 (Chat UI) has **all 6 plans coded** — blocked only on the Plan 06 Task 3 human-verify UAT checkpoint (see `10-06-CHECKPOINT.md`).
