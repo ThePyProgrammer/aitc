@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 19 Plan 02 complete — Wave 1 Rust parser + aggregator refactor landed
-last_updated: "2026-04-21T07:55:13.000Z"
-last_activity: 2026-04-21 -- Phase 19 Plan 02 (Wave 1 Rust) complete
+stopped_at: Phase 19 Plan 03 complete — Wave 2 MarkdownBody + AssistantTextCard delegation landed
+last_updated: "2026-04-21T08:15:00.000Z"
+last_activity: 2026-04-21 -- Phase 19 Plan 03 (Wave 2 MarkdownBody) complete — 3 commits d6697b7..a3c5975
 progress:
   total_phases: 20
   completed_phases: 13
   total_plans: 63
-  completed_plans: 61
-  percent: 96
+  completed_plans: 62
+  percent: 98
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 ## Current Position
 
 Phase: 19 (polish-phase-10-chat-transcript-rendering-four-related-gaps-) — EXECUTING
-Plan: 3 of 4
-Status: Executing Phase 19 (Plan 01 Wave 0 + Plan 02 Wave 1 Rust complete; Plan 03 Wave 2 MarkdownBody next)
-Last activity: 2026-04-21 -- Phase 19 Plan 02 (Wave 1 Rust) complete — 3 commits e7de43e..2948369
+Plan: 4 of 4
+Status: Executing Phase 19 (Plans 01+02+03 complete; Plan 04 Wave 2 chat-store selector next)
+Last activity: 2026-04-21 -- Phase 19 Plan 03 (Wave 2 MarkdownBody) complete — 3 commits d6697b7..a3c5975
 
-Progress: [██████████] 96%
+Progress: [██████████] 98%
 
 ## Performance Metrics
 
@@ -72,6 +72,7 @@ Progress: [██████████] 96%
 | Phase 18 P04 | 3 min | 1 task (1 commit) | 1 file |
 | Phase 19 P01 | 9 min | 3 tasks (3 commits) | 7 files |
 | Phase 19 P02 | 11 min | 2 tasks (3 commits) | 1 file |
+| Phase 19 P03 | 10 min | 3 tasks (3 commits) | 4 files |
 
 ## Accumulated Context
 
@@ -120,6 +121,10 @@ Recent decisions affecting current work:
 - [Phase 19]: Plan 02: V-19-04 (D-23 regression guard) asserted via observable proxy — zero DB rows after an AssistantText with @user and no TurnComplete. Direct `dispatch_chat_notification` capture would need a testing seam (feature flag / callback probe); the notification helper uses `catch_unwind` + OS-level dispatch, not easily mockable. Zero-row + V-19-01 (turn completes with one row) + V-19-02 (interrupted flushes one row) triangulate the Pitfall 1 surface.
 - [Phase 19]: Plan 02: Model-merge precedence `model.or_else(|| prior_buffer.model)` — envelope's `Some` wins; idle-flush's `None` preserves prior. Pitfall 7 (model-lost across idle flushes) covered by V-19-03 assertion that the envelope's model survives.
 - [Phase 19]: Plan 02: Pre-existing `conflict::engine::tests` failures (`test_conflict_detected_different_pids_within_window`, `test_custom_window_duration`) discovered during full `cargo test --lib` run. Two-layer pre-existence evidence (HEAD vs commit 339549d before test additions) reproduces identical failures. Logged to `deferred-items.md` as D-03 (Phase 03 module scope; unrelated to chat_runtime).
+- [Phase 19]: Plan 03: MarkdownBody uses Pattern 4 (imperative shiki OUTSIDE the rehype-sanitize tree) — CodeBlock renders shiki HTML via dangerouslySetInnerHTML; the sanitizer never traverses that subtree, so inline `style="color:…"` spans survive (T-05-07 HTML-escape + safeCssColor validator in useSyntaxHighlight already make shiki output pre-sanitized upstream). Rest of the markdown AST is sanitized normally — `<script>` never reaches DOM (V-19-17).
+- [Phase 19]: Plan 03: Path A test strategy — `vi.mock('../MarkdownBody', …)` stub inside AssistantTextCard.test.tsx keeps the shell test suite decoupled from the markdown pipeline. @user test migrated from AssistantTextCard.test.tsx to MarkdownBody.test.tsx V-19-18 (single-owner). New shell-invariant tests: `isContinuation=true` suppresses CLAUDE label + border-t; positive delegation assertion confirms MarkdownBody receives content.
+- [Phase 19]: Plan 03: V-19-17 input pattern adjusted from inline `<script>...legitimate text` to separate-block `<script>...\n\nlegitimate paragraph` — react-markdown's default `allowDangerousHtml: false` + CommonMark HTML-block grammar consumes the entire line beginning with raw HTML; blank-line separator promotes legitimate content to its own paragraph so both security (no script) and preservation (content survives) assertions hold.
+- [Phase 19]: Plan 03: Pre-existing flake `useGraphLayout.test.ts > posts pin/unpin` surfaces only under full-suite load (65-file concurrent vitest pool). Passes 13/13 in isolation with + without Plan 19-03 changes. Logged as D-04 in deferred-items.md (Phase 11 Radar worker scope; no Plan-19-03 causation).
 - [Phase 11.1]: Post-ship defensive fix — wheel-triggered extreme zoom-in was blanking canvas + minimap instantly with no recovery (pan/zoom-out/force-edit all inert). Root cause confirmed by user smoke: NaN/Infinity propagation in viewport state — `ctx.setTransform(NaN,…)` silently no-ops, NaN self-perpetuates through min/max/+. Static review found no injection path (WebKitGTK pinch-deltaY candidate, untestable). Shipped Option B (defensive guard without diagnosis): `sanitizeViewport(next, prev)` wrapper on `useCanvasZoomPan.setViewport` falls back per-axis on non-finite input + reapplies [0.05, 20] zoom clamp; store-level `radarStore.setViewport` filters non-finite fields from incoming partial (covers `AgentManifestRow` + `RadarMinimap` call sites that bypass the hook). 7 new tests lock the invariant. Commits: 6878f48 (test restore post-revert) + 7b13735 (hook guard) + 383ca24 (store guard) + 06a8f90 (debug session resolved).
 
 ### Roadmap Evolution
@@ -161,9 +166,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T16:05:00Z
-Stopped at: Phase 11.1 blanking-on-extreme-zoom RESOLVED via defensive setViewport guards (6878f48, 7b13735, 383ca24, 06a8f90); user smoke confirmed. Opening fresh debug session for cold-boot "stuck on building graph" symptom. Phase 19 Plan 02 also shipped in parallel (e7de43e..2948369..177871c); next is Plan 03 (Wave 2 frontend MarkdownBody).
-Resume file: .planning/debug/ (new session for cold-boot stuck-on-building-graph) + .planning/phases/19-polish-phase-10-chat-transcript-rendering-four-related-gaps-/19-03-PLAN.md (for Phase 19 continuation)
+Last session: 2026-04-21T08:15:00Z
+Stopped at: Phase 19 Plan 03 Wave 2 complete — MarkdownBody.tsx created (165 lines), AssistantTextCard delegated (105 → 68 lines), 7 V-19-13..V-19-19 assertions green; 3 commits d6697b7..a3c5975. Plan 04 (chat store selector) is next in Wave 2.
+Resume file: .planning/phases/19-polish-phase-10-chat-transcript-rendering-four-related-gaps-/19-04-PLAN.md
 Active debug sessions:
   - resolved: .planning/debug/resolved/radar-zoom-blanks-canvas.md (Phase 11.1 NaN/Infinity viewport corruption fixed)
   - awaiting_human_verify: .planning/debug/squarify-not-a-function.md (Phase 6 treemap interop — pending user smoke)
