@@ -6,6 +6,7 @@
 
 use crate::agents::adapter::{AgentAdapter, AgentInfo, AgentState};
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -37,6 +38,12 @@ pub struct ManagedAgent {
 pub struct AgentRegistry {
     agents: RwLock<HashMap<String, ManagedAgent>>,
     adapters: Vec<Arc<dyn AgentAdapter>>,
+    /// Phase 18 D-04: monotonic lifetime counter of `upsert_agent`
+    /// at-capacity failures. Read via `snapshot_stats()`; never resets.
+    /// Outlives `ActiveWatch` lifecycles — counts for the entire AITC
+    /// process. `Ordering::Relaxed` because no happens-before relationship
+    /// with other memory is required (pure diagnostic gauge).
+    capacity_hits_since_start: AtomicU64,
 }
 
 impl AgentRegistry {
@@ -45,6 +52,7 @@ impl AgentRegistry {
         Self {
             agents: RwLock::new(HashMap::new()),
             adapters: Vec::new(),
+            capacity_hits_since_start: AtomicU64::new(0),
         }
     }
 
