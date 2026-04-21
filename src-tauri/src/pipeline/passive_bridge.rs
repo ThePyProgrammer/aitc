@@ -572,4 +572,22 @@ mod tests {
             "only the top-level parent (pid=100) should register"
         );
     }
+
+    #[tokio::test]
+    async fn externally_launched_with_shell_parent_still_registers() {
+        // AGNT-03 preservation. Externally-launched `claude` has a shell or
+        // PID-1 parent that is NOT in the candidate list (shells are not
+        // allowlisted). Parent PID 1 is therefore absent from
+        // candidate_pids and the candidate passes the parent-PID filter —
+        // the top-level externally-launched agent still gets a PASSIVE
+        // entry. Guards against regressing AGNT-03 when tightening the
+        // filter.
+        let reg = Arc::new(AgentRegistry::new());
+        let snap = seeded_snapshot(vec![cand_with_parent(777, "claude", 1)]);
+        bridge_tick(&reg, &snap, None, None, None).await.unwrap();
+        assert!(
+            reg.get_agent("PASSIVE-777").await.is_some(),
+            "externally-launched agent with non-candidate parent must register (AGNT-03)"
+        );
+    }
 }
