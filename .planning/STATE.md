@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Phase 12 context gathered (--auto)
-last_updated: "2026-04-21T10:09:03.300Z"
+stopped_at: Phase 12 UI-SPEC approved (--auto)
+last_updated: "2026-04-21T10:22:58.692Z"
 last_activity: 2026-04-21 -- Phase 19 Plan 04 (Wave 2 ToolUseCard enrichment) complete — 3 commits 368958c..090b57e
 progress:
   total_phases: 21
@@ -172,9 +172,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T10:09:03.280Z
-Stopped at: Phase 12 context gathered (--auto)
-Resume file: .planning/phases/12-add-ipc-bridge-nodes-and-cross-language-boundary-visualizati/12-CONTEXT.md
+Last session: 2026-04-21T10:22:58.660Z
+Stopped at: Phase 12 UI-SPEC approved (--auto)
+Resume file: .planning/phases/12-add-ipc-bridge-nodes-and-cross-language-boundary-visualizati/12-UI-SPEC.md
 Active debug sessions:
 
   - resolved: .planning/debug/resolved/radar-zoom-blanks-canvas.md (Phase 11.1 NaN/Infinity viewport corruption fixed)
