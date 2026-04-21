@@ -37,3 +37,27 @@ Pre-existing issues surfaced during Phase 12 execution but out of scope per
 - **Recommendation:** Follow Phase 19 D-02 + D-04 recommendations — file as
   quick-tasks or Phase-11 flake remediation. Do NOT let them block Phase 12
   Wave 1/2/3 execution.
+
+## 12-02 (Wave 1)
+
+### D-02: Pre-existing conflict::engine test failures (2 tests)
+
+- **Discovered:** `cargo test --lib` (full backend suite) during Plan 12-02
+  Task 3 verification.
+- **Failing tests (2 total in 1 file):**
+  - `conflict::engine::tests::test_conflict_detected_different_pids_within_window`
+  - `conflict::engine::tests::test_custom_window_duration`
+  - Both panic at `src/conflict/engine.rs:415` with
+    `assertion left == right failed: Should detect conflict within 10s window`
+    — received 0, expected 1.
+- **Verification of pre-existence:** Stashed Plan 12-02 Task 3 changes and ran
+  `cargo test --lib conflict::engine` on the clean tip (commit `4cc570b`) —
+  same 2 failures reproduce. Zero causation link to Phase 12 code; the failing
+  tests never touch `pipeline::ipc_bridges`.
+- **Scope:** Phase 03 (conflict engine) ownership — timing-based detection
+  window test likely flaky under concurrent test execution or drifted after
+  a Phase-03/later-phase refactor of the window semantics.
+- **Impact on Phase 12 Plan 02:** None. Scoped run on
+  `pipeline::ipc_bridges::*` reports 17/17 pass (12 V-12-XX witnesses).
+- **Recommendation:** Investigate under Phase 03 ownership or a dedicated
+  conflict-engine flake plan. Do NOT block Plan 12-03 / 12-04 execution.
