@@ -29,7 +29,8 @@ describe('UserMessageCard', () => {
     render(<UserMessageCard event={mk()} />);
     const card = screen.getByTestId('user-message-card');
     expect(card.className).toContain('self-end');
-    expect(card.className).toContain('bg-surface-container');
+    // surface-container fill lives on the inner bubble, not the flex-column wrapper.
+    expect(card.innerHTML).toContain('bg-surface-container');
   });
 
   it('renders a timestamp (Data-sm)', () => {
