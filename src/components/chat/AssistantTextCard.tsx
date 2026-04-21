@@ -5,14 +5,12 @@
 //
 // Streaming lifecycle (D-17): while `payloadJson.streaming === true`, a
 // tiny pulsing caret trails the tokens and a secondary `STREAMING…` label
-// is rendered in the footer.
-//
-// Per UI-SPEC the `@user` literal token inside the assistant body renders
-// in `text-secondary font-bold` — the chat-side accent twin of the approval
-// ASK_FOR_MORE_INFO secondary treatment.
+// is rendered in the footer. The caret + @user-mention styling live inside
+// MarkdownBody (Phase 19 Plan 03, D-03.5) — this component retains only the
+// shell (role label, wrapper, streaming hint label).
 
 import type { AgentEvent } from '../../stores/chatStore';
-import { StreamingCursor } from './StreamingCursor';
+import { MarkdownBody } from './MarkdownBody';
 
 export interface AssistantTextCardProps {
   event: AgentEvent;
@@ -22,40 +20,6 @@ export interface AssistantTextCardProps {
    * as one continuous block instead of repeating the label every row.
    */
   isContinuation?: boolean;
-}
-
-// Word-bounded @user regex — matches @user when it's not part of a longer
-// identifier (e.g. NOT @username, NOT foo_@user_bar). Mirrors the backend
-// is_awaiting_user_mention pattern (Pitfall 5 defense).
-const AT_USER_RE = /(^|\W)(@user)(?=\W|$)/g;
-
-function renderContent(content: string): React.ReactNode[] {
-  if (!content) return [];
-  const parts: React.ReactNode[] = [];
-  let cursor = 0;
-  let match: RegExpExecArray | null;
-  let key = 0;
-  AT_USER_RE.lastIndex = 0;
-  while ((match = AT_USER_RE.exec(content)) !== null) {
-    const leading = match[1] ?? '';
-    const mentionStart = match.index + leading.length;
-    if (mentionStart > cursor) {
-      parts.push(content.slice(cursor, mentionStart));
-    }
-    parts.push(
-      <span
-        key={`mention-${key++}`}
-        className="text-secondary font-bold"
-      >
-        @user
-      </span>,
-    );
-    cursor = mentionStart + '@user'.length;
-  }
-  if (cursor < content.length) {
-    parts.push(content.slice(cursor));
-  }
-  return parts;
 }
 
 export function AssistantTextCard({
@@ -88,10 +52,9 @@ export function AssistantTextCard({
           CLAUDE
         </div>
       )}
-      <p className={`font-mono text-sm ${bodyColor} whitespace-pre-wrap leading-relaxed`}>
-        {renderContent(content)}
-        {streaming && <StreamingCursor />}
-      </p>
+      <div className={`${bodyColor} leading-relaxed`}>
+        <MarkdownBody content={content} streaming={streaming} />
+      </div>
       {streaming && (
         <span
           aria-live="polite"
