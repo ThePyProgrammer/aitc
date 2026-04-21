@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Phase 12 Plan 04 (Wave 3 frontend store + forceBoundary) complete
-last_updated: "2026-04-21T13:50:13Z"
-last_activity: 2026-04-21 -- Phase 12 Plan 04 (Wave 3 frontend store + forceBoundary) shipped
+status: awaiting-uat
+stopped_at: Phase 12 Plan 05 (Wave 4 canvas + UI) complete — D-34 human-verify checkpoint pending
+last_updated: "2026-04-21T14:12:34Z"
+last_activity: 2026-04-21 -- Phase 12 Plan 05 (Wave 4 BridgeRenderer + RadarCanvas wiring + BOUNDARY slider) shipped; awaiting D-34 UAT
 progress:
   total_phases: 21
   completed_phases: 14
   total_plans: 74
-  completed_plans: 67
-  percent: 91
+  completed_plans: 68
+  percent: 92
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 
 ## Current Position
 
-Phase: 12 (add-ipc-bridge-nodes-and-cross-language-boundary-visualizati) — EXECUTING
-Plan: 5 of 5 (Plan 04 Wave 3 frontend store + forceBoundary complete; next is Plan 12-05 Wave 4 GraphRenderer drawBridgeNodes/drawBoundaryLine + BridgeSelection/BridgeTooltip + ForceConfigPanel slider)
-Status: Executing Phase 12
-Last activity: 2026-04-21 -- Phase 12 Plan 04 (Wave 3 frontend store + forceBoundary physics) shipped
+Phase: 12 (add-ipc-bridge-nodes-and-cross-language-boundary-visualizati) — AWAITING UAT
+Plan: 5 of 5 (Plan 05 Wave 4 canvas render + UI complete; all 36 automated V-12-21..V-12-24 witnesses green; D-34 human-verify checkpoint created at `.planning/phases/12-.../12-05-CHECKPOINT.md`; waiting on user to run `npm run tauri dev` and approve the 10-step visual smoke test)
+Status: Awaiting Phase 12 D-34 UAT
+Last activity: 2026-04-21 -- Phase 12 Plan 05 (Wave 4 BridgeRenderer + RadarCanvas wiring + BOUNDARY slider + 36 passing tests) shipped
 
 Progress: [██████████] 100%
 
@@ -78,6 +78,7 @@ Progress: [██████████] 100%
 | Phase 12 P02 | 13 min | 3 tasks (3 commits) | 6 files |
 | Phase 12 P03 | 12 min | 2 tasks (2 commits) | 4 files |
 | Phase 12 P04 | 12 min | 2 tasks (2 commits) | 9 files |
+| Phase 12 P05 | 15 min | 3 tasks (3 commits) | 12 files |
 
 ## Accumulated Context
 
@@ -150,6 +151,11 @@ Recent decisions affecting current work:
 - [Phase 12]: Plan 03: V-12-13 witness placed in `pipeline::commands::tests::get_ipc_bridges_smoke_v_12_13` exercising the None-branch via direct guard inspection (`PipelineState::default()` → `guard.as_ref().is_none()`) rather than constructing a real `tauri::State<'_, PipelineState>` (only available in a running Tauri app). The Some-branch is already covered by Plan 02's `build_ipc_bridges_empty_root_returns_empty`.
 - [Phase 12]: Plan 03: Bindings regen uses canonical Phase 18 D-03 recipe (`cd src-tauri && cargo build --bin aitc && timeout --preserve-status 8 ./target/debug/aitc`). The `./target/debug/aitc` path is relative to `src-tauri/` — the binary boots, runs the debug_assertions-gated specta `.export(...)` inside `pub fn run()`, and the 8-second timeout with `--preserve-status` forwards the exit status. Verified regen produced `+74 -1` lines including all 6 V-12-14 grep-gate symbols.
 - [Phase 12]: Plan 03: D-03 deferred-items entry (bash_paths module missing — RESOLVED by Phase 17 Plan 01 merge `cf9dcff` in absentia between executor sessions) annotated RESOLVED rather than removed. Preserves audit trail of the inverted Wave ordering (Phase 17-03 landed the module index entry before Phase 17-01 created the file) so future planners can see why Wave ordering within a phase matters.
+- [Phase 12]: Plan 05: `drawBoundaryAnchorLabels` screen-space pass uses `ctx.setTransform(dpr, 0, 0, dpr, 0, 0)` instead of plain identity. On HiDPI displays a plain `setTransform(1,0,0,1,0,0)` would draw the `leftX=12` inset at device pixel 12 (~6 logical px on dpr=2), shrinking both the inset and 10px font. DPR-scaled identity keeps the screen-space labels in logical-pixel coordinates regardless of device-pixel density.
+- [Phase 12]: Plan 05: Diamond hit-test uses rectangular-bbox containment (`|dx|<=r && |dy|<=r`) instead of a rotated-square point-in-polygon. At BRIDGE_HIT_RADIUS=10 the visual difference is imperceptible and 3 comparisons beat 6-8 for the polygon test. RESEARCH recommendation.
+- [Phase 12]: Plan 05: Bridge hit-test runs BEFORE the file-node quadtree in handleMouseMove/handleClick — bridges are visually foremost in z-order (D-31) so interaction precedence mirrors visual precedence. Prevents accidental file-node latch-on for files near y≈0.
+- [Phase 12]: Plan 05: Escape-to-deselect lives on a window-level keydown listener (not canvas-level) so the user can press Escape regardless of focused sub-region. Intentionally does NOT deselect agents — staying within Phase 12's scope for bridge-only selection.
+- [Phase 12]: Plan 05: BridgeTooltip accepts `GraphNode | IpcBridgeDto` via shape-agnostic field lookup (camelCase both today; snake_case fallback chain in place for future subsystems that might surface bridges outside the store). Reusable component without rewrapping.
 - [Phase 11.1]: Post-ship defensive fix — wheel-triggered extreme zoom-in was blanking canvas + minimap instantly with no recovery (pan/zoom-out/force-edit all inert). Root cause confirmed by user smoke: NaN/Infinity propagation in viewport state — `ctx.setTransform(NaN,…)` silently no-ops, NaN self-perpetuates through min/max/+. Static review found no injection path (WebKitGTK pinch-deltaY candidate, untestable). Shipped Option B (defensive guard without diagnosis): `sanitizeViewport(next, prev)` wrapper on `useCanvasZoomPan.setViewport` falls back per-axis on non-finite input + reapplies [0.05, 20] zoom clamp; store-level `radarStore.setViewport` filters non-finite fields from incoming partial (covers `AgentManifestRow` + `RadarMinimap` call sites that bypass the hook). 7 new tests lock the invariant. Commits: 6878f48 (test restore post-revert) + 7b13735 (hook guard) + 383ca24 (store guard) + 06a8f90 (debug session resolved).
 
 ### Roadmap Evolution
@@ -192,9 +198,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T13:31:40Z
-Stopped at: Phase 12 Plan 03 (Wave 2 Tauri IPC surface) complete — next is Plan 12-04 Wave 3 frontend store/GraphRenderer
-Resume file: .planning/phases/12-add-ipc-bridge-nodes-and-cross-language-boundary-visualizati/12-04-PLAN.md
+Last session: 2026-04-21T14:12:34Z
+Stopped at: Phase 12 Plan 05 (Wave 4 canvas + UI + D-34 checkpoint) complete — awaiting manual UAT via 12-05-CHECKPOINT.md
+Resume file: .planning/phases/12-add-ipc-bridge-nodes-and-cross-language-boundary-visualizati/12-05-CHECKPOINT.md
 Active debug sessions:
 
   - resolved: .planning/debug/resolved/radar-zoom-blanks-canvas.md (Phase 11.1 NaN/Infinity viewport corruption fixed)
