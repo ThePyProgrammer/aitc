@@ -75,3 +75,30 @@ Pre-existing issues surfaced during Phase 19 execution but out of scope per
 - **Recommendation:** File as a quick-task or Phase-03 follow-up; the
   engine's conflict-window predicate or test setup looks stale.
 
+## 19-03 (Wave 2)
+
+### D-04: Flaky `useGraphLayout.test.ts` "posts pin/unpin" test under full-suite load
+
+- **Discovered:** `npm run test` full-suite run during Plan 19-03 Task 3
+  verification.
+- **Failing test:** `src/hooks/__tests__/useGraphLayout.test.ts > useGraphLayout
+  — Phase 11 Worker client > posts pin/unpin when pinnedNodeIds Set diff
+  changes`. Timeout/race during 6168ms run (see stack trace in
+  `MockWorker.postMessage` → zustand `setState` → Set iteration).
+- **Verification of pre-existence / non-causation:**
+  1. `git stash` → `npm run test -- src/hooks/__tests__/useGraphLayout.test.ts`
+     in isolation → **13/13 passed** (commit `dce6c43`, Plan 19-03 Task 2).
+  2. Re-ran in isolation WITH Plan 19-03 Task 3 changes applied → **13/13
+     passed** (same file, same command, 9.64s total).
+  3. Failure only manifests inside the full-suite run (concurrent vitest
+     pool of 65 files) — classic resource-contention flake on the Phase-11
+     D3 worker mock. Plan 19-03 touches ZERO files under `src/hooks/` or
+     `src/views/Radar/` — the only overlap is shared vitest pool pressure.
+- **Scope:** Unrelated to Phase 19 (Phase 11 Radar graph worker).
+- **Impact on Phase 19:** None — Plan 19-03's targeted suites
+  (`MarkdownBody.test.tsx` 7/7, `AssistantTextCard.test.tsx` 6/6) pass in
+  isolation AND as part of the full suite.
+- **Recommendation:** File as a Phase-11 flake; either add an explicit
+  timeout override on the pin/unpin test or stabilize MockWorker
+  message-ordering assumptions. Not a blocker.
+
