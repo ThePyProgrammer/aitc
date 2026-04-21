@@ -160,7 +160,7 @@ function readPersistedThemeId(): string {
   return DEFAULT_THEME_ID;
 }
 
-export const useRadarStore = create<RadarStore>((set) => ({
+export const useRadarStore = create<RadarStore>((set, get) => ({
   viewport: { zoom: 1, panX: 0, panY: 0 },
   selectedAgentId: null,
   isManifestOpen: true,
@@ -193,13 +193,26 @@ export const useRadarStore = create<RadarStore>((set) => ({
       ]);
       const fileEntries = treeIndex.filter((e) => !e.isDir);
       const knownIds = new Set(fileEntries.map((e) => e.path));
+      // Phase 11.1 fix: preserve x/y/fx/fy for nodes that survive the
+      // refresh. Without this, a pipeline-triggered re-fetch (e.g. from a
+      // stray file-watcher event) would wipe every node's coords and the
+      // minimap + canvas would render blank until the worker re-settled
+      // — user-visible as "the nodes just disappeared mid-zoom."
+      const existingById = new Map(
+        get().graphNodes.map((n) => [n.id, n]),
+      );
       const nodes: GraphNode[] = fileEntries.map((e) => {
         const lastSlash = e.path.lastIndexOf('/');
         const dirKey = lastSlash >= 0 ? e.path.slice(0, lastSlash) : '';
+        const prev = existingById.get(e.path);
         return {
           id: e.path,
           dirKey,
           dirDepth: dirKey === '' ? 0 : dirKey.split('/').length,
+          x: prev?.x,
+          y: prev?.y,
+          fx: prev?.fx,
+          fy: prev?.fy,
         };
       });
       const validEdges: GraphEdge[] = edges
