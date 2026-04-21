@@ -14,6 +14,7 @@ use std::path::Path;
 
 pub mod bindings_parser;
 pub mod frontend_callsite_scanner;
+pub mod queries;
 pub mod rust_handler_scanner;
 
 /// Wire-format for the get_ipc_bridges Tauri command (D-06).
@@ -69,36 +70,14 @@ mod tests {
     // V-12-01..V-12-04 are covered by the real assertions in
     // `super::bindings_parser::tests::*` — removed from mod.rs to avoid
     // redundant failure noise during Wave-1 bring-up.
-
-    #[test]
-    fn matches_attribute_to_fn_v_12_05() {
-        panic!("pending: V-12-05");
-    }
-
-    #[test]
-    fn supports_fn_variants_v_12_06() {
-        panic!("pending: V-12-06");
-    }
-
-    #[test]
-    fn duplicate_warn_once_v_12_07() {
-        panic!("pending: V-12-07");
-    }
-
-    #[test]
-    fn literal_invoke_v_12_08() {
-        panic!("pending: V-12-08");
-    }
-
-    #[test]
-    fn typed_invoke_v_12_09() {
-        panic!("pending: V-12-09");
-    }
-
-    #[test]
-    fn skips_variable_callee_v_12_10() {
-        panic!("pending: V-12-10");
-    }
+    //
+    // V-12-05..V-12-07 are covered by
+    // `super::rust_handler_scanner::tests::{matches_attribute_to_fn,
+    // supports_fn_variants, duplicate_warn_once}`.
+    //
+    // V-12-08..V-12-10 are covered by
+    // `super::frontend_callsite_scanner::tests::{literal_invoke, typed_invoke,
+    // skips_variable_callee}`.
 
     #[test]
     fn merge_preserves_order_and_dedup_v_12_11() {
