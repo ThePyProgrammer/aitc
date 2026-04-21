@@ -27,3 +27,7 @@ src-tauri/target
 .claude/settings.local.json
 .claude/aitc-mcp-*.json
 
+# Local tool dumping grounds
+.superpowers/
+outputs/
+
