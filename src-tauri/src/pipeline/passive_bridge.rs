@@ -543,4 +543,33 @@ mod tests {
             "cwd-scope should have dropped the out-of-repo parent"
         );
     }
+
+    #[tokio::test]
+    async fn flood_regression_parent_plus_many_children() {
+        // Reproduces the Phase 10 amplification pattern at scale: 1 parent
+        // claude + 50 allowlisted subprocess children. After one tick the
+        // registry must contain exactly 1 entry — PASSIVE-{parent}. Before
+        // the parent-PID filter landed, this scenario filled the cap
+        // (100 → 1000 in hotfix 62612b3) within seconds; with the filter
+        // in place, 51 candidates collapse to 1.
+        let reg = Arc::new(AgentRegistry::new());
+        let mut fixtures = Vec::with_capacity(51);
+        fixtures.push(cand(100, "claude-code"));
+        for i in 0..50 {
+            fixtures.push(cand_with_parent(1000 + i, "claude-mcp-helper", 100));
+        }
+        let snap = seeded_snapshot(fixtures);
+        bridge_tick(&reg, &snap, None, None, None).await.unwrap();
+        let all = reg.all_agents().await;
+        assert_eq!(
+            all.len(),
+            1,
+            "1 parent + 50 children must collapse to exactly 1 PASSIVE entry, got {}",
+            all.len()
+        );
+        assert!(
+            reg.get_agent("PASSIVE-100").await.is_some(),
+            "only the top-level parent (pid=100) should register"
+        );
+    }
 }
