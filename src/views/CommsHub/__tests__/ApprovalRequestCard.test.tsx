@@ -127,3 +127,77 @@ describe('ApprovalRequestCard — Phase 8 Plan 05', () => {
     expect(container.textContent).toContain('echo hi');
   });
 });
+
+describe('ApprovalRequestCard — Phase 17 D-22 conflict line', () => {
+  beforeEach(() => {
+    useCommsStore.getState().reset();
+  });
+
+  it('renders ⚠ CONFLICT line when gateReason=file_conflict + conflictWithAgentId set', () => {
+    const req: ApprovalRequest = {
+      ...baseRequest,
+      gateReason: 'file_conflict',
+      conflictWithAgentId: 'KAGENT-A',
+    };
+    render(<ApprovalRequestCard request={req} />);
+    const line = screen.getByTestId('conflict-line');
+    // D-22 exact string — warning emoji + space + CONFLICT + space + with + space + agent id.
+    expect(line.textContent).toContain('⚠ CONFLICT with KAGENT-A');
+    // Semantic error token (Command Horizon conflict-red).
+    expect(line.className).toContain('text-error');
+    // Protected-path line must NOT render when gate reason is file_conflict.
+    expect(screen.queryByTestId('protected-path-line')).toBeNull();
+  });
+
+  it('defensive: renders "unknown" agent-id placeholder when conflictWithAgentId is null', () => {
+    const req: ApprovalRequest = {
+      ...baseRequest,
+      gateReason: 'file_conflict',
+      conflictWithAgentId: null,
+    };
+    render(<ApprovalRequestCard request={req} />);
+    const line = screen.getByTestId('conflict-line');
+    expect(line.textContent).toContain('⚠ CONFLICT with unknown');
+  });
+
+  it('renders 🔒 PROTECTED line when gateReason=protected_path', () => {
+    const req: ApprovalRequest = {
+      ...baseRequest,
+      gateReason: 'protected_path',
+      conflictWithAgentId: null,
+    };
+    render(<ApprovalRequestCard request={req} />);
+    const line = screen.getByTestId('protected-path-line');
+    // D-22 exact string — padlock emoji + space + PROTECTED path.
+    expect(line.textContent).toContain('🔒 PROTECTED path');
+    // Warning-amber raw hex matching UrgencyBadge/StatusBadge conventions.
+    expect(line.className).toContain('text-[#ffd16f]');
+    // Conflict line must NOT render when gate reason is protected_path.
+    expect(screen.queryByTestId('conflict-line')).toBeNull();
+  });
+
+  it('renders NEITHER line on legacy rows (both fields null)', () => {
+    const req: ApprovalRequest = {
+      ...baseRequest,
+      gateReason: null,
+      conflictWithAgentId: null,
+    };
+    render(<ApprovalRequestCard request={req} />);
+    expect(screen.queryByTestId('conflict-line')).toBeNull();
+    expect(screen.queryByTestId('protected-path-line')).toBeNull();
+  });
+
+  it('renders NEITHER line when gateReason is an unrecognized string', () => {
+    const req: ApprovalRequest = {
+      ...baseRequest,
+      // Defensive fallback — backend could someday emit a new reason the
+      // frontend has not been taught to render. Component must stay silent,
+      // not crash or render a raw string.
+      gateReason: 'some_future_reason',
+      conflictWithAgentId: 'KAGENT-X',
+    };
+    render(<ApprovalRequestCard request={req} />);
+    expect(screen.queryByTestId('conflict-line')).toBeNull();
+    expect(screen.queryByTestId('protected-path-line')).toBeNull();
+  });
+});
