@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 19 Plan 03 complete — Wave 2 MarkdownBody + AssistantTextCard delegation landed
-last_updated: "2026-04-21T08:15:00.000Z"
-last_activity: 2026-04-21 -- Phase 19 Plan 03 (Wave 2 MarkdownBody) complete — 3 commits d6697b7..a3c5975
+stopped_at: Phase 19 Plan 04 complete — Wave 2 ToolUseCard enrichment + selectToolUseWithResult selector landed; Phase 19 ready for combined manual UAT
+last_updated: "2026-04-21T16:35:00.000Z"
+last_activity: 2026-04-21 -- Phase 19 Plan 04 (Wave 2 ToolUseCard enrichment) complete — 3 commits 368958c..090b57e
 progress:
   total_phases: 21
   completed_phases: 13
   total_plans: 63
-  completed_plans: 62
-  percent: 98
+  completed_plans: 63
+  percent: 100
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 
 ## Current Position
 
-Phase: 19 (polish-phase-10-chat-transcript-rendering-four-related-gaps-) — EXECUTING
-Plan: 4 of 4
-Status: Executing Phase 19 (Plans 01+02+03 complete; Plan 04 Wave 2 chat-store selector next)
-Last activity: 2026-04-21 -- Phase 19 Plan 03 (Wave 2 MarkdownBody) complete — 3 commits d6697b7..a3c5975
+Phase: 19 (polish-phase-10-chat-transcript-rendering-four-related-gaps-) — AWAITING UAT
+Plan: 4 of 4 (all plans complete)
+Status: Phase 19 Plans 01+02+03+04 all complete. Remaining: combined manual Tauri-smoke UAT (markdown prose body + green/red/grey status dots on tool-use cards) before advancing to next phase.
+Last activity: 2026-04-21 -- Phase 19 Plan 04 (Wave 2 ToolUseCard enrichment) complete — 3 commits 368958c..090b57e
 
-Progress: [██████████] 98%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -73,6 +73,7 @@ Progress: [██████████] 98%
 | Phase 19 P01 | 9 min | 3 tasks (3 commits) | 7 files |
 | Phase 19 P02 | 11 min | 2 tasks (3 commits) | 1 file |
 | Phase 19 P03 | 10 min | 3 tasks (3 commits) | 4 files |
+| Phase 19 P04 | 15 min | 2 tasks (3 commits) | 4 files |
 
 ## Accumulated Context
 
@@ -125,6 +126,10 @@ Recent decisions affecting current work:
 - [Phase 19]: Plan 03: Path A test strategy — `vi.mock('../MarkdownBody', …)` stub inside AssistantTextCard.test.tsx keeps the shell test suite decoupled from the markdown pipeline. @user test migrated from AssistantTextCard.test.tsx to MarkdownBody.test.tsx V-19-18 (single-owner). New shell-invariant tests: `isContinuation=true` suppresses CLAUDE label + border-t; positive delegation assertion confirms MarkdownBody receives content.
 - [Phase 19]: Plan 03: V-19-17 input pattern adjusted from inline `<script>...legitimate text` to separate-block `<script>...\n\nlegitimate paragraph` — react-markdown's default `allowDangerousHtml: false` + CommonMark HTML-block grammar consumes the entire line beginning with raw HTML; blank-line separator promotes legitimate content to its own paragraph so both security (no script) and preservation (content survives) assertions hold.
 - [Phase 19]: Plan 03: Pre-existing flake `useGraphLayout.test.ts > posts pin/unpin` surfaces only under full-suite load (65-file concurrent vitest pool). Passes 13/13 in isolation with + without Plan 19-03 changes. Logged as D-04 in deferred-items.md (Phase 11 Radar worker scope; no Plan-19-03 causation).
+- [Phase 19]: Plan 04: `selectToolUseWithResult(events, toolUseId)` exported from chatStore.ts as a pure linear-scan function (NOT a store method — two inputs don't fit the totalUnread zero-arg shape). Placed after the useChatStore block; consumed via `useChatStore((s) => s.eventsByAgent[agentId] ?? EMPTY_EVENTS)` + `useMemo` wrapper.
+- [Phase 19]: Plan 04: ToolUseCard selector consumption uses stable-slice + useMemo to avoid an infinite-render loop — returning a fresh `{toolUse, toolResult}` object inside `useChatStore(selector)` breaks useSyncExternalStore's Object.is equality (caught by `EventCard.test.tsx > dispatches tool_use` failing with Maximum update depth exceeded). Module-level `EMPTY_EVENTS = Object.freeze([])` sentinel preserves stable ref for agents with no events yet — same pattern Phase 10 ChatTranscript already applies.
+- [Phase 19]: Plan 04: Status dot uses `bg-primary` (green #8eff71) + `bg-error` (red #ff7351) + `bg-on-surface-variant/30` (grey/pending) — NOT the RESEARCH sketch's `bg-status-success`/`bg-status-error` (those tokens don't exist in theme.css). Matches Command Horizon vocabulary already in StatusBadge / RadarPulse / ConflictNavBadge / PendingCountBadge.
+- [Phase 19]: Plan 04: `{primary, secondary?}` summary structure preserves D-02.5 single-line truncation — primary is raw text, secondary is a nested `<span>` with a `·` separator, both inside the same `flex-1 truncate` container. Test assertions use `container.textContent.toContain(primary)` (raw text node) + `getByText(secondary)` (nested span).
 - [Phase 11.1]: Post-ship defensive fix — wheel-triggered extreme zoom-in was blanking canvas + minimap instantly with no recovery (pan/zoom-out/force-edit all inert). Root cause confirmed by user smoke: NaN/Infinity propagation in viewport state — `ctx.setTransform(NaN,…)` silently no-ops, NaN self-perpetuates through min/max/+. Static review found no injection path (WebKitGTK pinch-deltaY candidate, untestable). Shipped Option B (defensive guard without diagnosis): `sanitizeViewport(next, prev)` wrapper on `useCanvasZoomPan.setViewport` falls back per-axis on non-finite input + reapplies [0.05, 20] zoom clamp; store-level `radarStore.setViewport` filters non-finite fields from incoming partial (covers `AgentManifestRow` + `RadarMinimap` call sites that bypass the hook). 7 new tests lock the invariant. Commits: 6878f48 (test restore post-revert) + 7b13735 (hook guard) + 383ca24 (store guard) + 06a8f90 (debug session resolved).
 
 ### Roadmap Evolution
@@ -167,9 +172,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T08:15:00Z
-Stopped at: Phase 19 Plan 03 Wave 2 complete — MarkdownBody.tsx created (165 lines), AssistantTextCard delegated (105 → 68 lines), 7 V-19-13..V-19-19 assertions green; 3 commits d6697b7..a3c5975. Plan 04 (chat store selector) is next in Wave 2.
-Resume file: .planning/phases/19-polish-phase-10-chat-transcript-rendering-four-related-gaps-/19-04-PLAN.md
+Last session: 2026-04-21T16:35:00Z
+Stopped at: Phase 19 Plan 04 Wave 2 complete — `selectToolUseWithResult` selector exported from chatStore.ts (3 new V-19-08 assertions green); ToolUseCard dispatcher + status dot + py-1.5/bg-surface-container-10 polish shipped (7 new V-19-05..V-19-12 assertions green); 3 commits 368958c..090b57e. Phase 19 ready for combined manual Tauri-smoke UAT (markdown prose body + green/red/grey dots on tool-use cards) before phase close-out.
+Resume file: (Phase 19 complete — next up is manual UAT or advancing to Phase 20 diff-aware agent polling)
 Active debug sessions:
   - resolved: .planning/debug/resolved/radar-zoom-blanks-canvas.md (Phase 11.1 NaN/Infinity viewport corruption fixed)
   - awaiting_human_verify: .planning/debug/squarify-not-a-function.md (Phase 6 treemap interop — pending user smoke)
