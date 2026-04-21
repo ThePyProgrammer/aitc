@@ -481,6 +481,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     activeConflictPaths,
     theme,
     nodeById,
+    settledAt, // Phase 11.1 T3 (D-08) — cache key for hullCache.getHullCache.
   });
   useEffect(() => {
     stateRef.current = {
@@ -499,6 +500,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       activeConflictPaths,
       theme,
       nodeById,
+      settledAt, // Phase 11.1 T3 (D-08) — see stateRef init block.
     };
   }, [
     graphNodes,
@@ -516,6 +518,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     activeConflictPaths,
     theme,
     nodeById,
+    settledAt, // Phase 11.1 T3 (D-08).
   ]);
 
   // Main rAF render loop — single subscription for the lifetime of the view.
@@ -633,6 +636,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         ctx,
         liveNodes,
         vp.zoom,
+        s.settledAt, // Phase 11.1 T3 (D-08) — hullCache key.
         s.parentChildMap,
         s.dirsWithOwnFiles,
         s.theme,

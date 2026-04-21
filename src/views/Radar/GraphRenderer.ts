@@ -10,39 +10,19 @@
 // 07-UI-SPEC §Component Inventory (steps 2-7 in this plan; 8-13 land in Plans
 // 05 and 06).
 
-import { polygonHull, polygonCentroid } from 'd3-polygon';
-import { line, curveCatmullRomClosed } from 'd3-shape';
 import type { GraphNode, GraphEdge, Viewport } from '../../stores/radarStore';
 import type { GraphTheme } from './themes';
 import { clusterAccentFor, THEMES, DEFAULT_THEME_ID } from './themes';
+// Phase 11.1 (T3): convex-hull math + Catmull-Rom spline + padded-point
+// scatter + centroid all moved into hullCache.ts so drawFolderHulls can
+// resolve pre-built bundles from a settledAt-keyed cache instead of re-
+// running them every frame. See src/views/Radar/hullCache.ts.
+import { getHullCache } from './hullCache';
 
 // Used as the optional-arg default across every draw function so legacy
 // callers / tests that pre-date the theme arg still render with the
 // original phosphor-classic palette.
 const FALLBACK_THEME: GraphTheme = THEMES[DEFAULT_THEME_ID];
-
-// Catmull-Rom closed spline for smooth hull outlines (ResearchOS technique).
-const smoothHullLine = line().curve(curveCatmullRomClosed.alpha(0.5));
-
-/**
- * Generate padded hull points by placing `resolution` points in a circle
- * of `radius` around each node center. This inflates the hull so it
- * doesn't hug nodes tightly. (ResearchOS NoteGraphView technique.)
- */
-function paddedHullPoints(
-  nodePoints: [number, number][],
-  radius = 25,
-  resolution = 10,
-): [number, number][] {
-  const result: [number, number][] = [];
-  for (const [x, y] of nodePoints) {
-    for (let i = 0; i < resolution; i++) {
-      const angle = (i / resolution) * Math.PI * 2;
-      result.push([x + Math.cos(angle) * radius, y + Math.sin(angle) * radius]);
-    }
-  }
-  return result;
-}
 
 // ───── Color tokens (Command Horizon phosphor green palette) ─────
 export const COLORS = {
@@ -197,50 +177,31 @@ export function drawFolderHulls(
   ctx: CanvasRenderingContext2D,
   nodes: GraphNode[],
   zoom: number,
+  settledAt: number | null,
   parentChildMap: Map<string, Set<string>>,
   dirsWithOwnFiles: Set<string>,
   theme: GraphTheme = FALLBACK_THEME,
 ): void {
-  const byDir = new Map<string, GraphNode[]>();
-  for (const n of nodes) {
-    if (n.x === undefined || n.y === undefined) continue;
-    if (n.dirKey === '') continue;
-    const arr = byDir.get(n.dirKey) ?? [];
-    arr.push(n);
-    byDir.set(n.dirKey, arr);
-  }
-
+  // Phase 11.1 (D-08..D-11): hull bundles are cached per (settledAt,
+  // zoom-bucket). The cache does the expensive work (convex hull +
+  // closed spline + Path2D construction + centroid) only when the
+  // composite epoch key changes.
+  const entries = getHullCache(nodes, zoom, settledAt);
   const lineW = 1 / zoom;
-  for (const [dirKey, members] of byDir) {
-    if (!shouldRenderHullAtZoom(members[0].dirDepth, zoom)) continue;
+  for (const [dirKey, entry] of entries) {
+    if (!shouldRenderHullAtZoom(entry.dirDepth, zoom)) continue;
     ctx.strokeStyle = theme.hullStroke;
     ctx.fillStyle = theme.hullFill;
     ctx.lineWidth = lineW;
 
-    const pts = members.map((n) => [n.x!, n.y!] as [number, number]);
-    const padded = paddedHullPoints(pts, 25 / zoom);
-    const hull = polygonHull(padded);
-
-    let cx: number;
-    let cy: number;
-    if (hull && hull.length >= 3) {
-      // Render smooth Catmull-Rom closed spline through hull points.
-      const pathStr = smoothHullLine(hull);
-      if (pathStr) {
-        const path2d = new Path2D(pathStr);
-        ctx.fill(path2d);
-        ctx.stroke(path2d);
-      }
-      const centroid = polygonCentroid(hull);
-      cx = centroid[0];
-      cy = centroid[1];
+    if (entry.smoothPath) {
+      ctx.fill(entry.smoothPath);
+      ctx.stroke(entry.smoothPath);
     } else {
       // Fallback circle for dirs with <3 nodes or degenerate hulls.
-      cx = members.reduce((s, n) => s + (n.x ?? 0), 0) / members.length;
-      cy = members.reduce((s, n) => s + (n.y ?? 0), 0) / members.length;
       const r = 25 / zoom;
       ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.arc(entry.cx, entry.cy, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
@@ -249,13 +210,13 @@ export function drawFolderHulls(
     // depth ≥2 = 10px/zoom dimmed via globalAlpha (keeps the theme color
     // intact so we don't have to parse/rewrite rgba strings).
     const label = collapseSingleChildChain(dirKey, dirsWithOwnFiles, parentChildMap);
-    const isTop = members[0].dirDepth <= 1;
+    const isTop = entry.dirDepth <= 1;
     const fontSize = (isTop ? 12 : 10) / zoom;
     ctx.font = `${isTop ? 'bold ' : ''}${fontSize}px "Space Grotesk", sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillStyle = theme.folderLabelColor;
     if (!isTop) ctx.globalAlpha = 0.67; // nested labels dimmed 40/60 of base.
-    ctx.fillText(label.toUpperCase(), cx, cy - 6 / zoom);
+    ctx.fillText(label.toUpperCase(), entry.cx, entry.cy - 6 / zoom);
     if (!isTop) ctx.globalAlpha = 1;
   }
 }

@@ -204,7 +204,7 @@ describe('GraphRenderer pure functions — Plan 04', () => {
       ];
       const parentChildMap = new Map<string, Set<string>>([['src', new Set(['src'])]]);
       const dirsWithOwnFiles = new Set<string>(['src']);
-      drawFolderHulls(ctx, nodes, 1, parentChildMap, dirsWithOwnFiles);
+      drawFolderHulls(ctx, nodes, 1, null, parentChildMap, dirsWithOwnFiles);
       // Padded hull technique generates enough points for a convex hull
       // even with 2 nodes. Rendered via Path2D + ctx.fill(path2d).
       const fills = (ctx as any)._calls.filter((c: any) => c.fn === 'fill');
@@ -225,7 +225,7 @@ describe('GraphRenderer pure functions — Plan 04', () => {
       ];
       const parentChildMap = new Map<string, Set<string>>([['src', new Set(['src'])]]);
       const dirsWithOwnFiles = new Set<string>(['src']);
-      drawFolderHulls(ctx, nodes, 1, parentChildMap, dirsWithOwnFiles);
+      drawFolderHulls(ctx, nodes, 1, null, parentChildMap, dirsWithOwnFiles);
       // Rendered via Path2D + Catmull-Rom spline — fill + stroke called
       const fills = (ctx as any)._calls.filter((c: any) => c.fn === 'fill');
       const strokes = (ctx as any)._calls.filter((c: any) => c.fn === 'stroke');
@@ -242,7 +242,7 @@ describe('GraphRenderer pure functions — Plan 04', () => {
       ];
       const parentChildMap = new Map<string, Set<string>>();
       const dirsWithOwnFiles = new Set<string>();
-      drawFolderHulls(ctx, nodes, 0.5, parentChildMap, dirsWithOwnFiles);
+      drawFolderHulls(ctx, nodes, 0.5, null, parentChildMap, dirsWithOwnFiles);
       // No arc calls because depth-3 hulls are skipped at zoom < 0.6
       const arcs = (ctx as any)._calls.filter((c: any) => c.fn === 'arc');
       expect(arcs.length).toBe(0);
@@ -475,6 +475,7 @@ describe('GraphRenderer pure functions — Plan 04', () => {
         ctx,
         nodes,
         1,
+        null,
         parentChildMap,
         dirsWithOwnFiles,
         THEMES['stellar-forge'],
