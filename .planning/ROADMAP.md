@@ -258,8 +258,8 @@ Plans:
 - [x] 12-01-PLAN.md — Wave 0 foundation + test scaffolding (Rust module skeleton, fixtures, panic-stubs, forceBoundary skeleton, 5 frontend test scaffolds) — completed 2026-04-21, commits `a6e6a46` / `8038742`
 - [x] 12-02-PLAN.md — Wave 1 Rust scanners (bindings_parser regex, rust_handler_scanner rayon, frontend_callsite_scanner tree-sitter, build_ipc_bridges merge; V-12-01..V-12-12) — completed 2026-04-21, commits `f7192e0` / `4cc570b` / `4ee804b`
 - [x] 12-03-PLAN.md — Wave 2 Tauri command wiring (get_ipc_bridges + EdgeKind::{Invokes,Handles} + lib.rs registration + bindings regen; V-12-13..V-12-14) — completed 2026-04-21, commits `b5ccbab` / `3a1bf30`
-- [ ] 12-04-PLAN.md — Wave 2 store + worker (radarStore widen, forceBoundary physics, worker protocol + graphSimCore registration, useGraphLayout payload; V-12-15..V-12-20)
-- [ ] 12-05-PLAN.md — Wave 3 canvas + UI + human-verify (BridgeRenderer, BridgeTooltip, BridgeDetailPanel, RadarManifest wiring, RadarCanvas z-order + hit-test, BOUNDARY slider, prod smoke checkpoint; V-12-21..V-12-24)
+- [x] 12-04-PLAN.md — Wave 3 store + worker (radarStore widen, forceBoundary physics, worker protocol + graphSimCore registration, useGraphLayout payload; V-12-15..V-12-20) — completed 2026-04-21, commits `4bc9b35` / `62cf031`
+- [ ] 12-05-PLAN.md — Wave 4 canvas + UI + human-verify (BridgeRenderer, BridgeTooltip, BridgeDetailPanel, RadarManifest wiring, RadarCanvas z-order + hit-test, BOUNDARY slider, prod smoke checkpoint; V-12-21..V-12-24)
 
 ### Phase 13: Implement 4-level semantic zoom — workspace (package blobs only), package (sub-packages + file dots), file (names + edges + agent indicators), code (content preview + function signatures). Replace current 3-tier shouldRenderHullAtZoom with a full semantic zoom system that changes representation, not just visibility
 
