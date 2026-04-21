@@ -34,7 +34,7 @@ export function UserMessageCard({ event }: UserMessageCardProps) {
   return (
     <div
       data-testid="user-message-card"
-      className="w-full px-5 py-3 border-t border-outline-variant/10 bg-surface-container/30"
+      className="w-full px-5 py-3 border-t border-outline-variant/10 bg-surface-container-lowest/60"
     >
       <div className="flex items-center gap-3 mb-1">
         <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/70">
