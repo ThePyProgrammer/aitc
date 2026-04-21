@@ -591,5 +591,72 @@ mod tests {
             assert!(reg.get_agent("KAGENT-999").await.is_some());
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Phase 18 D-04: capacity-hit counter + snapshot_stats tests.
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn capacity_hit_increments_counter() {
+        let reg = AgentRegistry::new();
+        let adapter: Arc<dyn AgentAdapter> =
+            Arc::new(TestAdapter::new("test", vec!["test"]));
+
+        assert_eq!(
+            reg.snapshot_stats().await.capacity_hits_since_start,
+            0,
+            "fresh registry should report 0 capacity hits"
+        );
+
+        // Fill to MAX_AGENTS (1000). All inserts share pid=Some(1234); that's
+        // fine — capacity is keyed on HashMap length (unique IDs), not PID.
+        for i in 0..1000 {
+            let id = format!("a{i}");
+            reg.upsert_agent(
+                id.clone(),
+                make_info(&id, "test"),
+                adapter.clone(),
+                false,
+            )
+            .await
+            .expect("insert within capacity should succeed");
+        }
+        assert_eq!(reg.all_agents().await.len(), 1000);
+
+        // 1001st should fail and bump the counter by 1.
+        let err = reg
+            .upsert_agent(
+                "overflow".into(),
+                make_info("overflow", "test"),
+                adapter.clone(),
+                false,
+            )
+            .await
+            .expect_err("at capacity should return Err");
+        assert!(
+            err.contains("at capacity"),
+            "error must mention capacity: {err}"
+        );
+        assert_eq!(
+            reg.snapshot_stats().await.capacity_hits_since_start,
+            1,
+            "first overflow should bump counter to 1"
+        );
+
+        // Second overflow bumps to 2 (counter is monotonic).
+        let _ = reg
+            .upsert_agent(
+                "overflow2".into(),
+                make_info("overflow2", "test"),
+                adapter,
+                false,
+            )
+            .await;
+        assert_eq!(
+            reg.snapshot_stats().await.capacity_hits_since_start,
+            2,
+            "second overflow should bump counter to 2"
+        );
+    }
 }
 
