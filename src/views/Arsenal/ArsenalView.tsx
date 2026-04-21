@@ -138,7 +138,7 @@ export function ArsenalView() {
 
   return (
     <main
-      className="text-on-surface"
+      className="text-on-surface h-[calc(100vh-56px)]"
       style={{ animation: 'phosphor-in 150ms ease' }}
     >
       <MasterDetailShell

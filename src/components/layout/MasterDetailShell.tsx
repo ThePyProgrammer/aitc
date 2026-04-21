@@ -40,7 +40,7 @@ export function MasterDetailShell({
   return (
     <div
       data-testid="master-detail-root"
-      className="h-[calc(100vh-56px)] flex flex-col"
+      className="h-full flex flex-col"
     >
       {header && (
         <div data-testid="header" className="px-6 pt-4 pb-0">

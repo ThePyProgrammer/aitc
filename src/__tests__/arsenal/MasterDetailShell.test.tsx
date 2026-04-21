@@ -51,7 +51,13 @@ describe('MasterDetailShell', () => {
     expect(detail.className).toMatch(/shrink-0/);
   });
 
-  it('root container has h-[calc(100vh-56px)] and flex', () => {
+  it('root container fills parent height and uses flex-col (consumer owns viewport bound)', () => {
+    // Changed 2026-04-21: MasterDetailShell no longer hardcodes
+    // `h-[calc(100vh-56px)]`. Mounting it inside a view that already
+    // provides its own viewport-height container (e.g. CommsView with
+    // heading + tab bar) would otherwise overflow. Consumers now supply
+    // the height (Arsenal's `<main>`, CommsView's flex-1 body) and MDS
+    // fills it via `h-full`.
     render(
       <MasterDetailShell
         rail={<div>r</div>}
@@ -60,8 +66,8 @@ describe('MasterDetailShell', () => {
       />,
     );
     const root = screen.getByTestId('master-detail-root');
-    expect(root.className).toMatch(/h-\[calc\(100vh-56px\)\]/);
-    expect(root.className).toMatch(/flex/);
+    expect(root.className).toMatch(/h-full/);
+    expect(root.className).toMatch(/flex-col/);
   });
 
   it('exports MASTER_DETAIL_RAIL=220 and MASTER_DETAIL_PANEL=520 constants', () => {
