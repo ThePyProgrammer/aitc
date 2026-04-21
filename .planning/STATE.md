@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 19 context gathered
-last_updated: "2026-04-21T07:26:20.097Z"
-last_activity: 2026-04-21 -- Phase 19 execution started
+stopped_at: Phase 19 Plan 01 complete — Wave 0 foundation landed
+last_updated: "2026-04-21T07:37:00.000Z"
+last_activity: 2026-04-21 -- Phase 19 Plan 01 (Wave 0) complete
 progress:
   total_phases: 20
   completed_phases: 13
   total_plans: 63
-  completed_plans: 59
-  percent: 94
+  completed_plans: 60
+  percent: 95
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 ## Current Position
 
 Phase: 19 (polish-phase-10-chat-transcript-rendering-four-related-gaps-) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 19
-Last activity: 2026-04-21 -- Phase 19 execution started
+Plan: 2 of 4
+Status: Executing Phase 19 (Plan 01 Wave 0 complete; Plan 02 Wave 1 Rust next)
+Last activity: 2026-04-21 -- Phase 19 Plan 01 (Wave 0) complete — 3 commits 1c9ac0e..a1a0c0a
 
-Progress: [██████████] 100%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -70,6 +70,7 @@ Progress: [██████████] 100%
 | Phase 18 P02 | 8 min | 1 task (6 commits) | 1 file |
 | Phase 18 P03 | 7 min | 1 task (2 commits) | 3 files |
 | Phase 18 P04 | 3 min | 1 task (1 commit) | 1 file |
+| Phase 19 P01 | 9 min | 3 tasks (3 commits) | 7 files |
 
 ## Accumulated Context
 
@@ -110,6 +111,9 @@ Recent decisions affecting current work:
 - [Phase 18]: Plan 03: get_registry_stats uses fully-qualified `crate::agents::registry::RegistryStats` return type (no new `use` import in commands.rs) — single-use, matches existing commands.rs pattern for single-use external types.
 - [Phase 18]: Plan 03: Binding regen via `cargo build --bin aitc && timeout --preserve-status 8 ./target/debug/aitc` — the specta `.export(...)` is gated inside `pub fn run()`, so `cargo test --lib` does NOT regenerate bindings despite both paths having debug_assertions. This is the canonical regen command for future Tauri command additions in this repo.
 - [Phase 18]: Plan 04: MAX_AGENTS = 1000 doc comment formalizes D-03 inline — explains why 1000 (emergency ceiling), why not 100 (Phase 3 value overrun by Phase 10 amplification), why not configurable (emergency-only, wrong surface for settings); cites hotfix 62612b3 + D-01/D-02; forward-references `capacity_hits_since_start` (18-02) and `get_registry_stats` Tauri command (18-03) so the ceiling has first-class observability. Single atomic commit `8571af0`, pure doc edit, zero code-path impact. Phase 18 now 4/4 plans complete.
+- [Phase 19]: Plan 01: Tailwind v4 `@plugin "@tailwindcss/typography";` directive placed on line 2 of src/styles/theme.css (immediately after `@import "tailwindcss";`, before app CSS imports). First-try success — resolves RESEARCH.md Open Question #3 with zero syntax adjustment. `npm run build` compiles in 6.42s and `.prose` utilities land in the production bundle.
+- [Phase 19]: Plan 01: Vitest scaffold pattern established — `.todo` placeholders with `V-19-XX` comment anchors + `vi.mock` wired up front so Plan 03/04 implementers flip `.todo` → real `it(…)` bodies without structural edits. `mkToolUse` / `mkToolResult` factories committed in Wave 0 (NOT Plan 04) + `void mkToolUse; void mkToolResult;` markers satisfy noUnusedLocals until Plan 04 consumes them.
+- [Phase 19]: Plan 01: Pre-existing failures (end_to_end_smoke.rs LaunchOptions shape drift; HeatMapOverlay tint default; MasterDetailShell rail/detail width classes) surfaced during verification but logged to Phase 19 deferred-items.md rather than fixed — "only fix own bugs" memory rule. Two-layer reproduction evidence (HEAD vs pre-Task-1 commit 2c5b54d) rules out any Plan 19-01 cause.
 
 ### Roadmap Evolution
 
@@ -150,6 +154,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T06:08:40.973Z
-Stopped at: Phase 19 context gathered
-Resume file: .planning/phases/19-polish-phase-10-chat-transcript-rendering-four-related-gaps-/19-CONTEXT.md
+Last session: 2026-04-21T07:37:00.000Z
+Stopped at: Phase 19 Plan 01 (Wave 0) complete — 3 commits 1c9ac0e..a1a0c0a; Plan 02 (Wave 1 Rust) next
+Resume file: .planning/phases/19-polish-phase-10-chat-transcript-rendering-four-related-gaps-/19-02-PLAN.md
