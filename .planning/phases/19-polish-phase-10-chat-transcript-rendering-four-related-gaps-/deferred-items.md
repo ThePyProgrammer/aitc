@@ -23,3 +23,31 @@ Pre-existing issues surfaced during Phase 19 execution but out of scope per
   Phase-10 follow-up plan; supply the two missing fields and re-run the smoke.
   Not urgent — CI hasn't been gating on it.
 
+### D-02: Pre-existing vitest failures (HeatMapOverlay + MasterDetailShell)
+
+- **Discovered:** `npm run test` full-suite run during Task 3 verification.
+- **Failing tests (3 total across 2 files):**
+  - `src/views/Radar/__tests__/HeatMapOverlay.test.ts` — `heatTintForNode(0)
+    returns the default surface-container color (#1a1919)` — received
+    `#0f1a0e`. Test expectation drift against current implementation.
+  - `src/__tests__/arsenal/MasterDetailShell.test.tsx` — `rail region has
+    w-[220px] shrink-0 classes` and `detail region has 2xl:w-[520px]
+    xl:w-[480px] shrink-0 classes`. Tailwind v4 arbitrary-value class
+    formatting drift (likely related to the typography plugin install
+    side-effect on class generation) or pre-existing selector mismatch.
+- **Verification of pre-existence:** Two-layer check:
+  1. Stashed Task 3 changes → ran on HEAD (commit 566c247, post-Task-2).
+     Identical 3 failures reproduced.
+  2. Checked out commit 2c5b54d (BEFORE Task 1 — pre-typography-plugin
+     install). Same 3 failures reproduced. Rules out the `@plugin
+     "@tailwindcss/typography"` wiring as a cause.
+  Confirmed NOT introduced by any Plan 19-01 work.
+- **Scope:** Unrelated to Phase 19 (HeatMap is Phase 06 radar; MasterDetail
+  is app shell — neither consumes markdown or chat code).
+- **Impact on Phase 19:** None — Plan 19-01's two targeted test files
+  (MarkdownBody + chatStore) both pass (`Test Files 1 passed | 1 skipped`,
+  `Tests 21 passed | 10 todo`).
+- **Recommendation:** File as a quick-task; both look like expectation drift
+  after upstream changes (e.g., HeatMapOverlay was likely re-tuned without
+  updating the default-tint test). Two-minute fixes.
+

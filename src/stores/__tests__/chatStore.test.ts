@@ -398,3 +398,66 @@ describe('chatStore', () => {
     expect(s.error).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 19 Plan 04 — selectToolUseWithResult selector (D-02.2)
+// ---------------------------------------------------------------------------
+//
+// `selectToolUseWithResult` does not exist yet in chatStore.ts — Plan 04
+// will export it. This block scaffolds the test surface (factories +
+// describe + 3 `.todo` placeholders keyed to V-19-08). Plan 04 flips
+// `.todo` → real `it(…)` bodies and adds the `import` line. Keeping the
+// factories here today means Plan 04 does NOT touch test infrastructure.
+
+function mkToolUse(
+  id: number,
+  toolUseId: string,
+  overrides: Partial<AgentEvent> = {},
+): AgentEvent {
+  return {
+    id,
+    agentId: 'a',
+    sessionId: 'sess-1',
+    eventType: 'tool_use',
+    payloadJson: { tool_use_id: toolUseId, tool_name: 'Edit', tool_input: {} },
+    approvalRequestId: null,
+    sequenceNumber: null,
+    createdAt: '2026-04-21T12:00:00Z',
+    deliveryStatus: null,
+    ...overrides,
+  };
+}
+
+function mkToolResult(
+  id: number,
+  toolUseId: string,
+  isError: boolean,
+  overrides: Partial<AgentEvent> = {},
+): AgentEvent {
+  return {
+    id,
+    agentId: 'a',
+    sessionId: 'sess-1',
+    eventType: 'tool_result',
+    payloadJson: { tool_use_id: toolUseId, is_error: isError, content: '' },
+    approvalRequestId: null,
+    sequenceNumber: null,
+    createdAt: '2026-04-21T12:00:01Z',
+    deliveryStatus: null,
+    ...overrides,
+  };
+}
+
+describe('selectToolUseWithResult (Plan 04 target — D-02.2)', () => {
+  // V-19-08: returns { toolUse, toolResult } when both exist;
+  //          returns { toolUse, toolResult: null } when only tool_use present;
+  //          ignores events with mismatched tool_use_id.
+  it.todo('pairs tool_use and tool_result by tool_use_id');
+  it.todo('returns toolResult: null when no paired tool_result exists');
+  it.todo('ignores events with mismatched tool_use_id');
+});
+
+// Reference unused factories so TypeScript does not trip noUnusedLocals
+// while the `.todo` placeholders have no bodies. Plan 04 consumes them.
+void mkToolUse;
+void mkToolResult;
