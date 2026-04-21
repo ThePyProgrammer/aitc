@@ -156,6 +156,4 @@ The trait exposes `capabilities()` so the frontend can hide UI bits per-agent (C
 
 ## is this production ready
 
-lol. lmao even.
-
 It runs, though. For one developer (me). On Linux (my machine). Mostly. And apparently on Windows if you're brave. Welcome aboard, controller.
