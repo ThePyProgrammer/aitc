@@ -240,10 +240,10 @@ Plans:
 
 **Requirements**: No new REQ-IDs (perf refactor of VIZN-04 delivery).
 **Depends on:** Phase 11
-**Plans:** 0 plans
+**Plans:** 1 plan
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 11.1 to break down)
+- [ ] 11.1-01-PLAN.md — Wave 1: wheel rAF coalescer + useRafCoalesced hook + defensive viewport writeback throttle + settledAt-keyed hullCache + drawFolderHulls rewrite + radarPerfDebug rolling-p95 diagnostic (D-01..D-19; VIZN-04 perf delivery)
 
 ### Phase 12: Add IPC bridge nodes and cross-language boundary visualization — parse tauri-specta bindings.ts for the command surface, cross-reference invoke() callers with #[tauri::command] handlers, render bridge nodes on a visible frontend/backend boundary line
 
