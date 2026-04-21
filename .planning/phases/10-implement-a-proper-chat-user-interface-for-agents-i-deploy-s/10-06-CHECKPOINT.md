@@ -4,8 +4,10 @@ plan: 06
 task: 3
 type: checkpoint:human-verify
 gate: blocking
-state: awaiting-developer-signoff
+state: approved
 created: 2026-04-21
+signed_off_at: 2026-04-21
+signed_off_by: prannaya@subs.pragnition.ai
 ---
 
 # Phase 10 Plan 06 Task 3 — UAT Checkpoint
@@ -121,11 +123,48 @@ Run `pnpm tauri dev` from the repo root and walk the 25-step checklist below.
 
 ## Checkpoint Sign-off
 
-- [ ] UAT walkthrough completed
-- [ ] Date completed: ______________
-- [ ] Signed off by: ______________
-- [ ] Result: `approved` / `revisions needed (see notes below)`
+- [x] UAT walkthrough completed
+- [x] Date completed: 2026-04-21
+- [x] Signed off by: prannaya@subs.pragnition.ai
+- [x] Result: `approved` (with follow-up polish scoped to Phase 19)
 
 **Notes:**
 
-_(developer fills in during UAT)_
+Data is streaming end-to-end. Agent deploys, shows up in both Tower and
+CHAT, session_boundary fires, assistant turns stream token-by-token,
+tool invocations land as tool_use rows, user→agent messages deliver via
+stdin JSONL. Phase 10 core contract met.
+
+### Follow-ups captured in Phase 19 (chat transcript polish)
+
+Four UAT-surfaced UI gaps that don't block Phase 10 completion but
+want addressing before Phase 10 can be called "finished-finished":
+
+1. **Repeated assistant_text chunks** — aggregator emits one row per
+   content_block_delta flush; contiguous chunks within a turn should
+   merge into a single transcript row.
+2. **Tool-use card richness** — TOOL · EDIT path shows a raw truncation;
+   need MultiEdit hunk counts, Write diff preview, Bash exit-code/output,
+   codey-details-summary aesthetic.
+3. **Markdown rendering** — `whitespace-pre-wrap` shows literal \`\`\`
+   fences, `*` emphasis, `-` lists. Integrate react-markdown + remark-gfm
+   + existing shiki code highlighting.
+4. **SessionStart hook noise** — 4× [HOOK_STARTED] + 4× [HOOK_RESPONSE]
+   per boot. Filter in parser or collapse into a single system_note row.
+
+### In-session bug fixes during UAT (landed against Phase 10)
+
+- `62612b3` raised `MAX_AGENTS` 100 → 1000 so launches aren't blocked
+  by passive-scan flooding. Real fix for the passive flooding is Phase 18.
+- `8084bcf` chatStore.fetchChannels() after launch_agent so the CHAT tab
+  master list surfaces new agents without waiting for stream-json init.
+- `fc3f944` initial intent delivered via stdin JSONL instead of positional
+  argv — Claude was hanging post-SessionStart waiting for an input frame.
+- `33940b3` codey-playground flat-row transcript refactor (user ask).
+- `bb24daf` MasterDetailShell fills parent height instead of hardcoding
+  viewport-56px so the REQUESTS|CHAT tab bar doesn't scroll off.
+- `9c2f4e8` CommsView overflow-hidden + textarea blink removal +
+  CLAUDE label continuation suppression.
+- `dcd5554` tool_use/tool_result payload keys corrected from camelCase
+  to snake_case so cards actually render tool name + summary instead of
+  "UNKNOWN".
