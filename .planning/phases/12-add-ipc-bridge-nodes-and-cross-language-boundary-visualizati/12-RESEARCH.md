@@ -1377,7 +1377,7 @@ async manyArgs(a: string, b: number | null, c: { nested: string }) : Promise<Res
 
 **If this table is empty:** Not applicable — the assumptions above warrant user confirmation during discuss-phase if any feel risky.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `handles` edge target the Rust file even when cross-module resolution is imperfect?**
    - What we know: The handler scanner emits `handler_file = src-tauri/src/agents/commands.rs` with 1-indexed line. That path is in the `graphNodes` set (Phase 7 dep extractor includes `.rs` files).
