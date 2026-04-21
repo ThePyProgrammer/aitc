@@ -58,6 +58,7 @@ pub fn run() {
             agents::commands::accept_passive_hook_consent,
             agents::commands::decline_passive_hook_consent,
             agents::commands::resolve_sidecar_path,
+            agents::commands::get_registry_stats,
             agents::notifications::get_notification_prefs,
             agents::notifications::update_notification_prefs,
             conflict::commands::list_conflicts,
@@ -107,6 +108,7 @@ pub fn run() {
         .typ::<agents::AgentState>()
         .typ::<agents::adapter::LaunchOptions>()
         .typ::<agents::notifications::NotificationPrefs>()
+        .typ::<agents::registry::RegistryStats>()
         .typ::<conflict::ConflictAlert>()
         .typ::<comms::types::ApprovalRequest>()
         // Phase 10 D-21: the Phase 4 chat type was removed; the
