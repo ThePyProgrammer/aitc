@@ -225,6 +225,13 @@ async fn dispatch_system(v: &serde_json::Value, sink: &mpsc::Sender<StreamEvent>
                 .get("hook_name")
                 .and_then(|s| s.as_str())
                 .unwrap_or("");
+            // D-04.2: silent drop for SessionStart hook lifecycle — zero user signal.
+            // Preserves D-04.3 (other hook names still surface as SystemNote),
+            // D-04.5 (raw_stdout still carries the full lifecycle for debugging),
+            // D-04.6 (unknown-subtype catch-all unchanged).
+            if hook_name.starts_with("SessionStart:") {
+                return;
+            }
             let text = format!("[{subtype}] {hook_name}");
             let _ = sink.send(StreamEvent::SystemNote { text }).await;
         }
@@ -864,10 +871,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn parses_hook_started_response_emits_system_note_not_assistant() {
+    async fn session_start_hooks_silently_dropped() {
+        // V-19-20 (D-04.2): fixture's two SessionStart:startup envelopes
+        // (hook_started + hook_response) are now silently dropped by
+        // dispatch_system — neither SystemNote nor AssistantText.
+        //
+        // Pitfall 2 still holds for non-SessionStart hook names
+        // (see `non_session_start_hooks_still_emit_system_note` below).
         let bytes = load_fixture("hook_started_response.jsonl");
         let events = run_reader_against_bytes(&bytes).await;
-        // Pitfall 2: must be SystemNote, never AssistantText.
         let note_count = events
             .iter()
             .filter(|e| matches!(e, StreamEvent::SystemNote { .. }))
@@ -876,8 +888,24 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, StreamEvent::AssistantText { .. }))
             .count();
-        assert_eq!(note_count, 2);
-        assert_eq!(asst_count, 0);
+        assert_eq!(note_count, 0, "SessionStart hooks must not emit SystemNote");
+        assert_eq!(
+            asst_count, 0,
+            "SessionStart hooks must never surface as assistant text"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_session_start_hooks_still_emit_system_note() {
+        // V-19-21 (D-04.3): PreToolUse / PostToolUse / UserPromptSubmit / Stop
+        // etc. continue to surface as SystemNote — only SessionStart is silent.
+        let bytes = load_fixture("hook_pretool_use.jsonl");
+        let events = run_reader_against_bytes(&bytes).await;
+        let note_count = events
+            .iter()
+            .filter(|e| matches!(e, StreamEvent::SystemNote { .. }))
+            .count();
+        assert_eq!(note_count, 1, "PreToolUse:Edit must still emit SystemNote");
     }
 
     #[tokio::test]
