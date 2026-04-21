@@ -66,28 +66,9 @@ pub fn build_ipc_bridges(_repo_root: &Path) -> Vec<IpcBridgeDto> {
 mod tests {
     use super::*;
 
-    // Wave 0 stubs anchored to VALIDATION witnesses.
-    // Wave 1 flips panic! → real assertion.
-
-    #[test]
-    fn parse_bindings_returns_command_set_v_12_01() {
-        panic!("pending: V-12-01");
-    }
-
-    #[test]
-    fn preserves_camel_snake_pair_v_12_02() {
-        panic!("pending: V-12-02");
-    }
-
-    #[test]
-    fn detects_channel_arg_v_12_03() {
-        panic!("pending: V-12-03");
-    }
-
-    #[test]
-    fn signature_summary_bounded_v_12_04() {
-        panic!("pending: V-12-04");
-    }
+    // V-12-01..V-12-04 are covered by the real assertions in
+    // `super::bindings_parser::tests::*` — removed from mod.rs to avoid
+    // redundant failure noise during Wave-1 bring-up.
 
     #[test]
     fn matches_attribute_to_fn_v_12_05() {
