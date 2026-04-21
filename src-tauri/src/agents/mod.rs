@@ -13,6 +13,9 @@ pub mod commands;
 pub mod hook_install;
 pub mod hook_waiters;
 
+// Phase 17: Bash command → target-path extractor for conflict-gate predicate.
+pub mod bash_paths;
+
 pub use adapter::{AgentAdapter, AgentInfo, AgentState};
 pub use registry::{AgentRegistry, ManagedAgent};
 
