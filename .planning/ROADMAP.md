@@ -255,7 +255,7 @@ Plans:
 **Plans:** 5 plans
 
 Plans:
-- [ ] 12-01-PLAN.md — Wave 0 foundation + test scaffolding (Rust module skeleton, fixtures, panic-stubs, forceBoundary skeleton, 5 frontend test scaffolds)
+- [x] 12-01-PLAN.md — Wave 0 foundation + test scaffolding (Rust module skeleton, fixtures, panic-stubs, forceBoundary skeleton, 5 frontend test scaffolds) — completed 2026-04-21, commits `a6e6a46` / `8038742`
 - [ ] 12-02-PLAN.md — Wave 1 Rust scanners (bindings_parser regex, rust_handler_scanner rayon, frontend_callsite_scanner tree-sitter, build_ipc_bridges merge; V-12-01..V-12-12)
 - [ ] 12-03-PLAN.md — Wave 1 Tauri command wiring (get_ipc_bridges + EdgeKind widening + lib.rs + bindings regen; V-12-13..V-12-14)
 - [ ] 12-04-PLAN.md — Wave 2 store + worker (radarStore widen, forceBoundary physics, worker protocol + graphSimCore registration, useGraphLayout payload; V-12-15..V-12-20)

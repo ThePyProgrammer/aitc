@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 12 UI-SPEC approved (--auto)
-last_updated: "2026-04-21T11:20:05.079Z"
-last_activity: 2026-04-21 -- Phase 12 execution started
+stopped_at: Phase 12 Plan 01 (Wave 0 scaffold) complete
+last_updated: "2026-04-21T11:31:24Z"
+last_activity: 2026-04-21 -- Phase 12 Plan 01 (Wave 0) shipped
 progress:
   total_phases: 21
   completed_phases: 14
   total_plans: 74
-  completed_plans: 63
-  percent: 85
+  completed_plans: 64
+  percent: 86
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 ## Current Position
 
 Phase: 12 (add-ipc-bridge-nodes-and-cross-language-boundary-visualizati) — EXECUTING
-Plan: 1 of 5
+Plan: 2 of 5 (Plan 01 Wave 0 scaffold complete; next is Plan 12-02 Wave 1 Rust scanners)
 Status: Executing Phase 12
-Last activity: 2026-04-21 -- Phase 12 execution started
+Last activity: 2026-04-21 -- Phase 12 Plan 01 (Wave 0 scaffold) shipped
 
 Progress: [██████████] 100%
 
@@ -74,6 +74,7 @@ Progress: [██████████] 100%
 | Phase 19 P02 | 11 min | 2 tasks (3 commits) | 1 file |
 | Phase 19 P03 | 10 min | 3 tasks (3 commits) | 4 files |
 | Phase 19 P04 | 15 min | 2 tasks (3 commits) | 4 files |
+| Phase 12 P01 | 14 min | 2 tasks (2 commits) | 16 files |
 
 ## Accumulated Context
 
@@ -130,6 +131,10 @@ Recent decisions affecting current work:
 - [Phase 19]: Plan 04: ToolUseCard selector consumption uses stable-slice + useMemo to avoid an infinite-render loop — returning a fresh `{toolUse, toolResult}` object inside `useChatStore(selector)` breaks useSyncExternalStore's Object.is equality (caught by `EventCard.test.tsx > dispatches tool_use` failing with Maximum update depth exceeded). Module-level `EMPTY_EVENTS = Object.freeze([])` sentinel preserves stable ref for agents with no events yet — same pattern Phase 10 ChatTranscript already applies.
 - [Phase 19]: Plan 04: Status dot uses `bg-primary` (green #8eff71) + `bg-error` (red #ff7351) + `bg-on-surface-variant/30` (grey/pending) — NOT the RESEARCH sketch's `bg-status-success`/`bg-status-error` (those tokens don't exist in theme.css). Matches Command Horizon vocabulary already in StatusBadge / RadarPulse / ConflictNavBadge / PendingCountBadge.
 - [Phase 19]: Plan 04: `{primary, secondary?}` summary structure preserves D-02.5 single-line truncation — primary is raw text, secondary is a nested `<span>` with a `·` separator, both inside the same `flex-1 truncate` container. Test assertions use `container.textContent.toContain(primary)` (raw text node) + `getByText(secondary)` (nested span).
+- [Phase 12]: Plan 01: forceBoundary placement locked to `src/workers/forces/forceBoundary.ts` (resolves D-37 open question). Aligns with Phase 11 D-30 deferred cleanup; keeps custom forces discoverable from graphSimCore import path. BoundaryForce contract + 3 tuning constants (BOUNDARY_TARGET_Y_MAGNITUDE=300, BOUNDARY_DEADBAND=5, FORCE_BOUNDARY_BASE_STRENGTH=0.15) shipped with no-op tick body for Wave 2 to fill.
+- [Phase 12]: Plan 01: Type-only imports (`type BoundaryForce, type BoundaryNode`) cannot sit behind `void marker;` guards — TS6196 trips on type-only imports AND on `type _Alias = T;` aliases. Wave-0 workaround: drop the type imports entirely from forceBoundary.test.ts; re-add in Wave 2 when mkBoundaryNode() signature-bearing helpers consume the types naturally. Inline comment anchors the next-wave action.
+- [Phase 12]: Plan 01: 13 Rust `#[test] panic!("pending: V-12-XX")` stubs in pipeline/ipc_bridges/mod.rs + 44 frontend `.todo` entries across 7 files establish the Wave-0 RED-stage contract. Observable invariant: `cargo test --lib pipeline::ipc_bridges 2>&1 | grep 'pending: V-12-' | wc -l == 13`. Waves 1-3 flip these without structural file edits.
+- [Phase 12]: Plan 01: HandlerHit / BindingCommand / CalleeHit scanner structs get `#[allow(dead_code)]` — Wave 1 consumes them but Wave 0 cannot without breaking cargo lib warnings. Minimum-surface-area annotation; preferred over gating the full module behind `#[cfg(test)]` (would hide the types from Wave 1 non-test consumers).
 - [Phase 11.1]: Post-ship defensive fix — wheel-triggered extreme zoom-in was blanking canvas + minimap instantly with no recovery (pan/zoom-out/force-edit all inert). Root cause confirmed by user smoke: NaN/Infinity propagation in viewport state — `ctx.setTransform(NaN,…)` silently no-ops, NaN self-perpetuates through min/max/+. Static review found no injection path (WebKitGTK pinch-deltaY candidate, untestable). Shipped Option B (defensive guard without diagnosis): `sanitizeViewport(next, prev)` wrapper on `useCanvasZoomPan.setViewport` falls back per-axis on non-finite input + reapplies [0.05, 20] zoom clamp; store-level `radarStore.setViewport` filters non-finite fields from incoming partial (covers `AgentManifestRow` + `RadarMinimap` call sites that bypass the hook). 7 new tests lock the invariant. Commits: 6878f48 (test restore post-revert) + 7b13735 (hook guard) + 383ca24 (store guard) + 06a8f90 (debug session resolved).
 
 ### Roadmap Evolution
@@ -172,9 +177,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T10:22:58.660Z
-Stopped at: Phase 12 UI-SPEC approved (--auto)
-Resume file: .planning/phases/12-add-ipc-bridge-nodes-and-cross-language-boundary-visualizati/12-UI-SPEC.md
+Last session: 2026-04-21T11:31:24Z
+Stopped at: Phase 12 Plan 01 (Wave 0 scaffold) complete — next is Plan 12-02 Wave 1 Rust scanners
+Resume file: .planning/phases/12-add-ipc-bridge-nodes-and-cross-language-boundary-visualizati/12-02-PLAN.md
 Active debug sessions:
 
   - resolved: .planning/debug/resolved/radar-zoom-blanks-canvas.md (Phase 11.1 NaN/Infinity viewport corruption fixed)
