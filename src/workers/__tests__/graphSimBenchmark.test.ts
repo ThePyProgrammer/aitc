@@ -44,7 +44,6 @@
 
 import { describe, it, expect } from 'vitest';
 import { makeGraphSimCore, createBufferPool } from '../graphSimCore';
-import type { WorkerOut } from '../graphSimProtocol';
 import { seedGraph, DEFAULT_FORCE_CONFIG } from './fixtures/tiny-graph';
 
 const BENCH_ENABLED = !!process.env.RUN_BENCHMARKS;
@@ -109,7 +108,7 @@ describe.skipIf(!BENCH_ENABLED)('graphSimCore — perf harness (D-31..D-34)', ()
     const ticksEmitted: number[] = [];
     const core = makeGraphSimCore(
       {
-        onTick: (msg: WorkerOut & { type: 'tick' }) => {
+        onTick: (msg) => {
           ticksEmitted.push(msg.alpha);
           // Return the buffer immediately so the pool (cap 3) does not
           // saturate and halt subsequent emits mid-settle.
