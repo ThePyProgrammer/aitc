@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useCommsStore } from '../commsStore';
-import type { ApprovalRequest, ChatMessage } from '../commsStore';
+import type { ApprovalRequest } from '../commsStore';
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -47,16 +47,6 @@ const mockRequest2: ApprovalRequest = {
   toolName: null,
   toolInputJson: null,
   sessionId: null,
-};
-
-const mockMessage: ChatMessage = {
-  id: 1,
-  agentId: 'agent-001',
-  direction: 'outbound',
-  content: 'Why this change?',
-  deliveryStatus: 'delivered',
-  approvalRequestId: 1,
-  createdAt: '2026-04-10T12:05:00Z',
 };
 
 describe('commsStore', () => {
@@ -221,31 +211,6 @@ describe('commsStore', () => {
     expect(request?.status).toBe('pending');
   });
 
-  it('sendMessage calls invoke send_chat_message and appends to messages', async () => {
-    mockInvoke.mockResolvedValueOnce(mockMessage);
-
-    await useCommsStore.getState().sendMessage('agent-001', 'Why this change?');
-
-    expect(mockInvoke).toHaveBeenCalledWith('send_chat_message', {
-      agentId: 'agent-001',
-      content: 'Why this change?',
-    });
-    const messages = useCommsStore.getState().messages['agent-001'];
-    expect(messages).toBeDefined();
-    expect(messages.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('fetchMessages calls invoke list_chat_messages and sets messages for agentId', async () => {
-    mockInvoke.mockResolvedValueOnce([mockMessage]);
-
-    await useCommsStore.getState().fetchMessages('agent-001');
-
-    expect(mockInvoke).toHaveBeenCalledWith('list_chat_messages', { agentId: 'agent-001' });
-    const messages = useCommsStore.getState().messages['agent-001'];
-    expect(messages).toHaveLength(1);
-    expect(messages[0].content).toBe('Why this change?');
-  });
-
   it('selectedRequest returns the selected request object', () => {
     useCommsStore.setState({
       requests: [mockRequest, mockRequest2],
@@ -261,7 +226,6 @@ describe('commsStore', () => {
       requests: [mockRequest],
       selectedRequestId: 1,
       editingRequestId: 1,
-      messages: { 'agent-001': [mockMessage] },
       error: 'some error',
       isLoading: true,
     });
@@ -272,7 +236,6 @@ describe('commsStore', () => {
     expect(state.requests).toHaveLength(0);
     expect(state.selectedRequestId).toBeNull();
     expect(state.editingRequestId).toBeNull();
-    expect(state.messages).toEqual({});
     expect(state.error).toBeNull();
     expect(state.isLoading).toBe(false);
   });

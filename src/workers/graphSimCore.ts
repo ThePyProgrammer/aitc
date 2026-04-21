@@ -9,13 +9,52 @@
 // References: 11-CONTEXT.md D-22/D-23; 11-RESEARCH.md §Example A;
 //             11-PATTERNS.md §graphSimCore.ts.
 
-import { type SimulationLinkDatum } from 'd3-force';
-import { type ClusterNode } from '../views/Radar/forceCluster';
+import {
+  forceSimulation,
+  forceLink,
+  forceManyBody,
+  forceCenter,
+  forceCollide,
+  type Simulation,
+  type SimulationLinkDatum,
+} from 'd3-force';
+import {
+  forceCluster,
+  forceClusterCollide,
+  type ClusterNode,
+} from '../views/Radar/forceCluster';
 import type {
   InitMessage,
   TopologyMessage,
   ForceConfig,
 } from './graphSimProtocol';
+import {
+  LINK_DISTANCE,
+  CHARGE_THETA,
+  CHARGE_DISTANCE_MAX,
+  COLLIDE_RADIUS,
+  ALPHA_DECAY,
+  VELOCITY_DECAY,
+  MAX_TICKS,
+  FORCE_CONFIG_ALPHA,
+  INITIAL_POSITION_SEED,
+} from './graphSimConfig';
+
+/**
+ * mulberry32 PRNG — byte-deterministic across the simulation core and
+ * tests (RESEARCH §Don't Hand-Roll / §Pitfall 1). Seed comes from the
+ * shared INITIAL_POSITION_SEED so worker + unit tests produce identical
+ * initial positions every run.
+ */
+function mulberry32(seed: number): () => number {
+  let t = seed;
+  return () => {
+    t = (t + 0x6d2b79f5) | 0;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 export interface SimNode extends ClusterNode {
   id: string;
@@ -108,21 +147,253 @@ export function createBufferPool(nodeCount: number): BufferPool {
 }
 
 /**
- * Wave 0 stub. Wave 1 replaces the body with the full factory from
- * 11-RESEARCH.md §Example A + §Pattern 2 + §Pattern 3 (ping-pong pool).
+ * Pure d3-force orchestration factory (D-22, D-23). See 11-RESEARCH.md
+ * §Example A + §Pattern 2 (manual tick loop) + §Pattern 3 (ping-pong
+ * buffer pool) + §Pattern 4 (sequence counter).
+ *
+ * The returned core exposes 8 methods and drives d3-force via callbacks
+ * rather than message-posting — the Wave 2 worker shim wires the
+ * callbacks to transfer-based messaging at the worker boundary.
  */
 export function makeGraphSimCore(
-  _cb: GraphSimCallbacks,
-  _opts?: MakeGraphSimCoreOpts,
+  cb: GraphSimCallbacks,
+  opts?: MakeGraphSimCoreOpts,
 ): GraphSimCore {
+  // Declare `scheduled` BEFORE `schedule` so the default scheduler's
+  // closure captures the already-initialised outer binding (TDZ fix
+  // per 11-02-PLAN pseudocode + checker feedback #5).
+  let scheduled: ReturnType<typeof setTimeout> | null = null;
+  const schedule =
+    opts?.schedule ??
+    ((fn: () => void) => {
+      // Default scheduler — setTimeout(fn, 0) yields to the event loop
+      // between ticks (RESEARCH §Pattern 2, §Pitfall 3). Stores the
+      // timer id on the outer binding so dispose() can cancel it.
+      scheduled = setTimeout(fn, 0);
+    });
+
+  let sim: Simulation<SimNode, SimEdge> | null = null;
+  let simNodes: SimNode[] = [];
+  let ids: string[] = [];
+  let idIndex: Map<string, number> = new Map();
+  let sequence = 0;
+  let paused = true;
+  let pool: BufferPool | null = null;
+  let tickCount = 0;
+
+  function writePositions(buf: Float32Array): void {
+    for (let i = 0; i < simNodes.length; i++) {
+      buf[i * 2] = simNodes[i].x ?? 0;
+      buf[i * 2 + 1] = simNodes[i].y ?? 0;
+    }
+  }
+
+  function emitTick(): void {
+    if (!pool || !sim) return;
+    const buf = pool.acquire();
+    if (!buf) return; // backpressure — D-09 skip
+    writePositions(buf);
+    cb.onTick({ positions: buf, alpha: sim.alpha(), sequence });
+  }
+
+  function emitSettled(): void {
+    if (!sim) return;
+    if (!pool) return;
+    const buf = pool.acquire();
+    if (!buf) {
+      // Rare — main holds all 3. Allocate a one-off and call it done.
+      const standalone = new Float32Array(simNodes.length * 2);
+      writePositions(standalone);
+      cb.onSettled({ positions: standalone, alpha: sim.alpha(), sequence });
+      return;
+    }
+    writePositions(buf);
+    cb.onSettled({ positions: buf, alpha: sim.alpha(), sequence });
+  }
+
+  function tickLoop(): void {
+    if (!sim || paused) return;
+    try {
+      if (sim.alpha() <= sim.alphaMin()) {
+        paused = true;
+        emitSettled();
+        return;
+      }
+      sim.tick();
+      tickCount++;
+      emitTick();
+      schedule(tickLoop);
+    } catch (err) {
+      paused = true;
+      cb.onError({
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+    }
+  }
+
+  function buildSim(
+    nodes: InitMessage['nodes'],
+    edges: InitMessage['edges'],
+    cfg: ForceConfig,
+  ): void {
+    const rng = mulberry32(INITIAL_POSITION_SEED);
+    simNodes = nodes.map((n, i) => ({
+      id: n.id,
+      dirKey: n.dirKey,
+      dirDepth: n.dirDepth,
+      // RESEARCH §Pitfall 1 — move useGraphLayout.ts:107-108 initial
+      // position seeding into the core so tests are byte-deterministic.
+      x: (rng() - 0.5) * 200,
+      y: (rng() - 0.5) * 200,
+      fx: n.fx ?? undefined,
+      fy: n.fy ?? undefined,
+      index: i,
+    } as SimNode));
+    ids = simNodes.map((n) => n.id);
+    idIndex = new Map(ids.map((id, i) => [id, i]));
+    const simEdges: SimEdge[] = edges.map((e) => ({
+      source: e.source,
+      target: e.target,
+      kind: e.kind,
+    }));
+
+    sim = forceSimulation<SimNode>(simNodes)
+      .force(
+        'link',
+        forceLink<SimNode, SimEdge>(simEdges)
+          .id((n) => (n as SimNode).id)
+          .distance(LINK_DISTANCE)
+          .strength(cfg.linkStrength),
+      )
+      .force(
+        'charge',
+        forceManyBody<SimNode>()
+          .strength(cfg.chargeStrength)
+          .theta(CHARGE_THETA)
+          .distanceMax(CHARGE_DISTANCE_MAX),
+      )
+      .force('center', forceCenter(0, 0).strength(cfg.centerStrength))
+      .force('collide', forceCollide(COLLIDE_RADIUS))
+      .force('cluster', forceCluster().strength(cfg.clusterStrength))
+      .force('clusterCollide', forceClusterCollide())
+      .alphaDecay(ALPHA_DECAY)
+      .velocityDecay(VELOCITY_DECAY)
+      .stop();
+    sim.randomSource(mulberry32(INITIAL_POSITION_SEED));
+
+    // (Re)allocate buffer pool for the new node count.
+    pool = createBufferPool(simNodes.length);
+    tickCount = 0;
+  }
+
+  function fastSettle(): void {
+    if (!sim) return;
+    for (let i = 0; i < MAX_TICKS && sim.alpha() > sim.alphaMin(); i++) {
+      sim.tick();
+    }
+  }
+
   return {
-    init(_msg: InitMessage): void {},
-    topology(_msg: TopologyMessage): void {},
-    updateConfig(_cfg: ForceConfig): void {},
-    pin(_id: string, _x: number, _y: number): void {},
-    unpin(_id: string): void {},
-    tick(): void {},
-    returnBuffer(_buf: ArrayBuffer): void {},
-    dispose(): void {},
+    init(msg: InitMessage): void {
+      if (scheduled !== null) {
+        clearTimeout(scheduled);
+        scheduled = null;
+      }
+      sequence = msg.sequence;
+      buildSim(msg.nodes, msg.edges, msg.config);
+      sim!.alpha(msg.alpha);
+      if (msg.fastSettle) fastSettle();
+      paused = false;
+      emitTick();
+      schedule(tickLoop);
+    },
+
+    topology(msg: TopologyMessage): void {
+      if (scheduled !== null) {
+        clearTimeout(scheduled);
+        scheduled = null;
+      }
+      sequence = msg.sequence;
+      buildSim(msg.nodes, msg.edges, msg.config);
+      // Matches existing rewarm behavior: reheat to FORCE_CONFIG_ALPHA,
+      // run a bounded fast-settle, then resume the tick loop.
+      sim!.alpha(FORCE_CONFIG_ALPHA);
+      fastSettle();
+      paused = false;
+      emitTick();
+      schedule(tickLoop);
+    },
+
+    updateConfig(cfg: ForceConfig): void {
+      if (!sim) return;
+      (sim.force('link') as ReturnType<typeof forceLink>).strength(
+        cfg.linkStrength,
+      );
+      (sim.force('charge') as ReturnType<typeof forceManyBody>).strength(
+        cfg.chargeStrength,
+      );
+      (sim.force('center') as ReturnType<typeof forceCenter>).strength(
+        cfg.centerStrength,
+      );
+      (sim.force('cluster') as ReturnType<typeof forceCluster>).strength(
+        cfg.clusterStrength,
+      );
+      sim.alpha(FORCE_CONFIG_ALPHA).restart();
+      if (paused) {
+        paused = false;
+        schedule(tickLoop);
+      }
+      // Emit a tick immediately so consumers observe the reheated alpha.
+      emitTick();
+    },
+
+    pin(id: string, x: number, y: number): void {
+      const i = idIndex.get(id);
+      if (i === undefined || !sim) return;
+      const n = simNodes[i];
+      n.fx = x;
+      n.fy = y;
+      n.x = x;
+      n.y = y;
+      if (paused) {
+        sim.alpha(FORCE_CONFIG_ALPHA).restart();
+        paused = false;
+        schedule(tickLoop);
+      }
+    },
+
+    unpin(id: string): void {
+      const i = idIndex.get(id);
+      if (i === undefined) return;
+      simNodes[i].fx = null;
+      simNodes[i].fy = null;
+    },
+
+    tick(): void {
+      // Test-only synchronous step; does NOT call schedule.
+      if (!sim) return;
+      sim.tick();
+      tickCount++;
+      emitTick();
+    },
+
+    returnBuffer(buf: ArrayBuffer): void {
+      pool?.returnBuffer(buf);
+    },
+
+    dispose(): void {
+      paused = true;
+      if (scheduled !== null) {
+        clearTimeout(scheduled);
+        scheduled = null;
+      }
+      sim?.stop();
+      sim = null;
+      simNodes = [];
+      ids = [];
+      idIndex.clear();
+      pool = null;
+    },
   };
 }

@@ -2,8 +2,11 @@
 //
 // COMM-01: Approval request queue management with real-time updates.
 // COMM-02: Approve/deny/ask-more-info/approve-with-edits workflow.
-// COMM-03: Chat messaging to agents.
 // COMM-06: Edit-mode freeze prevents incoming updates for the request being edited (Pitfall 3).
+//
+// Phase 10 Plan 06 (D-21): Chat messaging moved to chatStore (Plan 05).
+// The Phase 4 messages map / sendMessage / fetchMessages / ChatMessage type
+// were removed from this store — all chat goes through `src/stores/chatStore.ts`.
 //
 // All mutations go through Tauri invoke for backend validation.
 
@@ -29,21 +32,10 @@ export interface ApprovalRequest {
   sessionId: string | null;
 }
 
-export interface ChatMessage {
-  id: number;
-  agentId: string;
-  direction: 'inbound' | 'outbound';
-  content: string;
-  deliveryStatus: 'delivered' | 'queued' | 'unsupported';
-  approvalRequestId: number | null;
-  createdAt: string;
-}
-
 interface CommsStore {
   requests: ApprovalRequest[];
   selectedRequestId: number | null;
   editingRequestId: number | null;
-  messages: Record<string, ChatMessage[]>;
   isLoading: boolean;
   error: string | null;
   // Phase 8: session-scoped always-allow decisions keyed by agent_id -> set of tool_names.
@@ -61,8 +53,6 @@ interface CommsStore {
     opts?: { alwaysAllowForSession?: boolean }
   ) => Promise<void>;
   setEditing: (id: number | null) => void;
-  sendMessage: (agentId: string, content: string) => Promise<void>;
-  fetchMessages: (agentId: string) => Promise<void>;
   subscribeToApprovals: () => Promise<UnlistenFn>;
   pendingCount: () => number;
   selectedRequest: () => ApprovalRequest | undefined;
@@ -74,7 +64,6 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
   requests: [],
   selectedRequestId: null,
   editingRequestId: null,
-  messages: {},
   isLoading: false,
   error: null,
   sessionAlwaysAllow: new Map<string, Set<string>>(),
@@ -190,31 +179,6 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
     set({ editingRequestId: id });
   },
 
-  sendMessage: async (agentId, content) => {
-    try {
-      const message = await invoke<ChatMessage>('send_chat_message', { agentId, content });
-      set((s) => ({
-        messages: {
-          ...s.messages,
-          [agentId]: [...(s.messages[agentId] || []), message],
-        },
-      }));
-    } catch (e) {
-      set({ error: String(e) });
-    }
-  },
-
-  fetchMessages: async (agentId) => {
-    try {
-      const messages = await invoke<ChatMessage[]>('list_chat_messages', { agentId });
-      set((s) => ({
-        messages: { ...s.messages, [agentId]: messages },
-      }));
-    } catch (e) {
-      set({ error: String(e) });
-    }
-  },
-
   subscribeToApprovals: async () => {
     // WR-04: Listen to all three approval events for real-time state sync.
     // Previously only listened to 'approval-request-created', missing
@@ -262,7 +226,6 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
       requests: [],
       selectedRequestId: null,
       editingRequestId: null,
-      messages: {},
       isLoading: false,
       error: null,
       sessionAlwaysAllow: new Map<string, Set<string>>(),
