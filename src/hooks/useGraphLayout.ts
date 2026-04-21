@@ -1,52 +1,34 @@
-// D-03, D-11, D-23, VIZN-01, VIZN-04, VIZN-05.
-// Continuous d3-force simulation — inspired by ResearchOS NoteGraphView.
+// D-01..D-04, D-12, D-16, D-18, D-25, D-27, D-28 — Phase 11 Worker-lifecycle
+// client for the d3-force simulation. Replaces the Phase 7 main-thread
+// simulation. Public UseGraphLayoutResult surface is preserved; only
+// simNodesRef shape changes per D-25.
 //
-// Architecture (replaces batch-settle):
-//   • Simulation runs via d3's internal rAF loop (not manual ticks).
-//   • On each tick, node x/y positions update in-place on the SimNode array.
-//   • RadarCanvas reads positions from `simNodesRef` each frame — no Zustand
-//     round-trip for live animation (avoids React re-renders at 60fps).
-//   • When alpha cools (simulation stops), we commit final positions to the
-//     store and rebuild the quadtree.
-//   • Force config changes: update forces in-place + `.alpha(0.35).restart()`
-//     — nodes glide to new equilibrium.
-//   • Custom forces (forceCluster) read strength from refs so slider
-//     changes apply immediately on the next tick.
+// The worker is to this hook what Channel<FileEventBatch> is to
+// usePipelineChannel — a long-lived message source constructed in
+// useEffect and torn down in cleanup (StrictMode-safe per Pattern 6).
+//
+// References: 11-CONTEXT.md D-01..D-04, D-12, D-16, D-18, D-25, D-27, D-28;
+//             11-RESEARCH.md §Pattern 4 (sequence guard),
+//                           §Pattern 6 (StrictMode cleanup),
+//                           §Example B / §Pattern 7 (worker+mock shim);
+//             11-PATTERNS.md §src/hooks/useGraphLayout.ts.
 
-import { useEffect, useRef, useCallback, type MutableRefObject } from 'react';
-import {
-  forceSimulation,
-  forceLink,
-  forceManyBody,
-  forceCenter,
-  forceCollide,
-  type Simulation,
-  type SimulationLinkDatum,
-} from 'd3-force';
+import { useEffect, useRef, type MutableRefObject } from 'react';
 import { quadtree, type Quadtree } from 'd3-quadtree';
-import { forceCluster, forceClusterCollide, type ClusterNode } from '../views/Radar/forceCluster';
 import {
   useRadarStore,
   type GraphNode,
-  type GraphEdge,
+  type ForceConfig,
 } from '../stores/radarStore';
-// Phase 11 (D-29): tuning constants now live in src/workers/graphSimConfig.ts
-// so the worker + graphSimCore can import them without pulling in React or
-// zustand. The hook keeps its existing exports via the `export ... from`
-// re-export below so useGraphLayout.test.ts:15-23 continues to resolve the
-// same symbols from this module without churn.
 import {
-  LINK_DISTANCE,
-  CHARGE_THETA,
-  CHARGE_DISTANCE_MAX,
-  COLLIDE_RADIUS,
-  ALPHA_DECAY,
-  VELOCITY_DECAY,
-  MAX_TICKS,
-  FORCE_CONFIG_ALPHA,
+  QUADTREE_REBUILD_TICK_INTERVAL,
   REWARM_NODE_COUNT_THRESHOLD,
   REWARM_PERCENT_THRESHOLD,
 } from '../workers/graphSimConfig';
+import type { WorkerIn, WorkerOut } from '../workers/graphSimProtocol';
+
+// Re-export all Phase 7 tuning constants so existing test imports at
+// useGraphLayout.test.ts:15-23 keep working (Wave 0 already did this).
 export {
   LINK_DISTANCE,
   LINK_STRENGTH,
@@ -65,213 +47,348 @@ export {
   FORCE_CONFIG_ALPHA,
 } from '../workers/graphSimConfig';
 
-export interface SimNode extends ClusterNode {
-  id: string;
+// D-25: hot-path position ref shape — consumed by RadarCanvas (Wave 3).
+export interface LivePositions {
+  ids: string[];
+  positions: Float32Array;
+  idIndex: Map<string, number>;
 }
 
-interface SimEdge extends SimulationLinkDatum<SimNode> {
-  source: string | SimNode;
-  target: string | SimNode;
-  kind: string;
-}
+type QNode = { id: string; x: number; y: number };
 
 export interface UseGraphLayoutResult {
-  quadtreeRef: MutableRefObject<Quadtree<SimNode> | null>;
-  /** Ref to the live simulation nodes — RadarCanvas reads this each rAF frame. */
-  simNodesRef: MutableRefObject<SimNode[]>;
+  quadtreeRef: MutableRefObject<Quadtree<QNode> | null>;
+  /** Ref to the live simulation positions — RadarCanvas reads this each rAF
+   *  frame. See LivePositions shape above (D-25). */
+  simNodesRef: MutableRefObject<LivePositions>;
   /** True while the simulation is actively ticking (alpha > alphaMin). */
   isSimulatingRef: MutableRefObject<boolean>;
   /** Callback to mark the canvas dirty — set by RadarCanvas. */
   markDirtyRef: MutableRefObject<() => void>;
 }
 
+function makeEmptyLivePositions(): LivePositions {
+  return {
+    ids: [],
+    positions: new Float32Array(0),
+    idIndex: new Map(),
+  };
+}
+
+/**
+ * shouldRewarm — carried from Phase 7 useGraphLayout.ts:207-220. Decides
+ * whether node-id churn between two topology snapshots crosses the rewarm
+ * threshold. Same semantics; thresholds now live in graphSimConfig.ts.
+ */
+function shouldRewarm(prev: Set<string>, next: Set<string>): boolean {
+  let added = 0;
+  let removed = 0;
+  for (const id of next) if (!prev.has(id)) added++;
+  for (const id of prev) if (!next.has(id)) removed++;
+  const mutations = added + removed;
+  if (mutations === 0) return false;
+  const totalForPercent = Math.max(prev.size, next.size, 1);
+  return (
+    mutations >= REWARM_NODE_COUNT_THRESHOLD ||
+    mutations / totalForPercent >= REWARM_PERCENT_THRESHOLD
+  );
+}
+
+function sameConfig(a: ForceConfig, b: ForceConfig): boolean {
+  return (
+    a.centerStrength === b.centerStrength &&
+    a.clusterStrength === b.clusterStrength &&
+    a.linkStrength === b.linkStrength &&
+    a.chargeStrength === b.chargeStrength
+  );
+}
+
 export function useGraphLayout(): UseGraphLayoutResult {
-  const simRef = useRef<Simulation<SimNode, SimEdge> | null>(null);
-  const quadtreeRef = useRef<Quadtree<SimNode> | null>(null);
-  const simNodesRef = useRef<SimNode[]>([]);
+  const workerRef = useRef<Worker | null>(null);
+  const quadtreeRef = useRef<Quadtree<QNode> | null>(null);
+  const simNodesRef = useRef<LivePositions>(makeEmptyLivePositions());
   const isSimulatingRef = useRef(false);
   const markDirtyRef = useRef<() => void>(() => {});
-  const lastNodeIdsRef = useRef<Set<string>>(new Set());
+  // D-12 topology sequence counter — bumped on every init/topology post;
+  // worker tags outbound messages with the current sequence so we can drop
+  // stale ticks after a rewarm.
+  const topologySeqRef = useRef(0);
+  // Track the last ids-set we sent so the rewarm threshold logic can diff.
+  const lastIdsRef = useRef<Set<string>>(new Set());
+  // Track the last ForceConfig we sent so updateConfig doesn't loop on
+  // unrelated store changes.
+  const lastForceConfigRef = useRef<ForceConfig | null>(null);
+  // D-16 per-tick quadtree rebuild counter.
+  const tickCounterRef = useRef(0);
 
-  const graphNodes = useRadarStore((s) => s.graphNodes);
-  const graphEdges = useRadarStore((s) => s.graphEdges);
-  const settledAt = useRadarStore((s) => s.settledAt);
-  const forceConfig = useRadarStore((s) => s.forceConfig);
-
-  // Keep force config in refs so the tick handler reads current values
-  // without needing to rebuild the simulation.
-  const forceConfigRef = useRef(forceConfig);
-  forceConfigRef.current = forceConfig;
-
-  /**
-   * Build a simulation from graph data. For the initial load, we do a
-   * fast synchronous settle (MAX_TICKS) so the graph doesn't appear as
-   * a chaotic blob. After that, the simulation stays alive for smooth
-   * force-config transitions.
-   */
-  const buildSimulation = useCallback(
-    (nodes: GraphNode[], edges: GraphEdge[], fastSettle: boolean) => {
-      // Stop any existing sim.
-      if (simRef.current) simRef.current.stop();
-
-      const simNodes: SimNode[] = nodes.map((n) => ({
-        id: n.id,
-        dirKey: n.dirKey,
-        dirDepth: n.dirDepth,
-        x: n.x ?? (Math.random() - 0.5) * 200,
-        y: n.y ?? (Math.random() - 0.5) * 200,
-        fx: n.fx ?? null,
-        fy: n.fy ?? null,
-      }));
-      const simEdges: SimEdge[] = edges.map((e) => ({
-        source: typeof e.source === 'string' ? e.source : (e.source as SimNode).id,
-        target: typeof e.target === 'string' ? e.target : (e.target as SimNode).id,
-        kind: e.kind,
-      }));
-
-      const cfg = forceConfigRef.current;
-      const sim = forceSimulation<SimNode>(simNodes)
-        .force(
-          'link',
-          forceLink<SimNode, SimEdge>(simEdges)
-            .id((n) => n.id)
-            .distance(LINK_DISTANCE)
-            .strength(cfg.linkStrength),
-        )
-        .force(
-          'charge',
-          forceManyBody<SimNode>()
-            .strength(cfg.chargeStrength)
-            .theta(CHARGE_THETA)
-            .distanceMax(CHARGE_DISTANCE_MAX),
-        )
-        .force('center', forceCenter(0, 0).strength(cfg.centerStrength))
-        .force('collide', forceCollide(COLLIDE_RADIUS))
-        .force('cluster', forceCluster().strength(cfg.clusterStrength))
-        .force('clusterCollide', forceClusterCollide())
-        .alphaDecay(ALPHA_DECAY)
-        .velocityDecay(VELOCITY_DECAY)
-        .stop(); // we control when it runs
-
-      simRef.current = sim;
-      simNodesRef.current = simNodes;
-
-      if (fastSettle) {
-        // Synchronous initial settle so the graph appears stable on first paint.
-        for (let i = 0; i < MAX_TICKS && sim.alpha() > sim.alphaMin(); i++) {
-          sim.tick();
-        }
-      }
-
-      // Commit positions to the store (for hover hit-testing, minimap, etc.)
-      const positions = new Map<string, { x: number; y: number }>();
-      for (const n of simNodes) {
-        positions.set(n.id, { x: n.x ?? 0, y: n.y ?? 0 });
-      }
-      quadtreeRef.current = quadtree<SimNode>()
-        .x((n) => n.x ?? 0)
-        .y((n) => n.y ?? 0)
-        .addAll(simNodes);
-      useRadarStore.getState().commitSettledPositions(positions);
-
-      // Now let the simulation run continuously via d3's internal rAF.
-      // On each tick: mark canvas dirty so it redraws with live positions.
-      // On end: commit final positions + rebuild quadtree.
-      sim.on('tick', () => {
-        isSimulatingRef.current = true;
-        markDirtyRef.current();
-      });
-      sim.on('end', () => {
-        isSimulatingRef.current = false;
-        // Commit final positions to store + rebuild quadtree.
-        const finalPositions = new Map<string, { x: number; y: number }>();
-        for (const n of sim.nodes()) {
-          finalPositions.set(n.id, { x: n.x ?? 0, y: n.y ?? 0 });
-        }
-        quadtreeRef.current = quadtree<SimNode>()
-          .x((n) => n.x ?? 0)
-          .y((n) => n.y ?? 0)
-          .addAll(sim.nodes());
-        useRadarStore.getState().commitSettledPositions(finalPositions);
-      });
-
-      // Restart the simulation (d3's internal rAF loop takes over).
-      sim.alpha(fastSettle ? 0.01 : 1).restart();
-
-      return positions;
-    },
-    [],
-  );
-
-  /** Decide whether node-id churn crosses the rewarm thresholds. */
-  function shouldRewarm(currentIds: Set<string>): boolean {
-    const prev = lastNodeIdsRef.current;
-    let added = 0;
-    let removed = 0;
-    for (const id of currentIds) if (!prev.has(id)) added++;
-    for (const id of prev) if (!currentIds.has(id)) removed++;
-    const mutations = added + removed;
-    if (mutations === 0) return false;
-    const totalForPercent = Math.max(currentIds.size, prev.size, 1);
-    return (
-      mutations >= REWARM_NODE_COUNT_THRESHOLD ||
-      mutations / totalForPercent >= REWARM_PERCENT_THRESHOLD
-    );
+  function buildQuadtree(ids: string[], positions: Float32Array): Quadtree<QNode> {
+    const nodes: QNode[] = [];
+    for (let i = 0; i < ids.length; i++) {
+      nodes.push({ id: ids[i], x: positions[i * 2], y: positions[i * 2 + 1] });
+    }
+    return quadtree<QNode>()
+      .x((n) => n.x)
+      .y((n) => n.y)
+      .addAll(nodes);
   }
 
-  // Initial build when graph data lands without positions (settledAt === null).
-  useEffect(() => {
-    if (graphNodes.length === 0) return;
-    if (settledAt !== null) return;
-    buildSimulation(graphNodes, graphEdges, true);
-    lastNodeIdsRef.current = new Set(graphNodes.map((n) => n.id));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphNodes, graphEdges, settledAt]);
+  function materializePositionMap(
+    ids: string[],
+    positions: Float32Array,
+  ): Map<string, { x: number; y: number }> {
+    const out = new Map<string, { x: number; y: number }>();
+    for (let i = 0; i < ids.length; i++) {
+      out.set(ids[i], { x: positions[i * 2], y: positions[i * 2 + 1] });
+    }
+    return out;
+  }
 
-  // Re-warm when graph data mutates past the threshold.
-  useEffect(() => {
-    if (settledAt === null) return;
-    if (graphNodes.length === 0) return;
-    const currentIds = new Set(graphNodes.map((n) => n.id));
-    if (!shouldRewarm(currentIds)) return;
-    buildSimulation(graphNodes, graphEdges, true);
-    lastNodeIdsRef.current = currentIds;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graphNodes, graphEdges]);
+  function returnBufferToWorker(buf: ArrayBuffer): void {
+    const w = workerRef.current;
+    if (!w) return;
+    if (buf.byteLength === 0) return; // already detached
+    try {
+      w.postMessage(
+        { type: 'returnBuffer', buffer: buf } satisfies WorkerIn,
+        { transfer: [buf] },
+      );
+    } catch {
+      // Buffer already detached or worker terminated — drop silently.
+    }
+  }
 
-  // When forceConfig changes: update existing sim forces in-place and
-  // alpha-restart. Nodes glide smoothly to new equilibrium — no rebuild.
-  const prevForceConfigRef = useRef(forceConfig);
-  useEffect(() => {
-    const sim = simRef.current;
-    if (!sim) return;
-    if (settledAt === null) return;
-    const prev = prevForceConfigRef.current;
+  function handleWorkerMessage(evt: MessageEvent<WorkerOut>): void {
+    const msg = evt.data;
+    // D-12 — stale message for a superseded topology. Return the buffer so
+    // the pool can reuse it; don't write to simNodesRef.
     if (
-      prev.centerStrength === forceConfig.centerStrength &&
-      prev.clusterStrength === forceConfig.clusterStrength &&
-      prev.linkStrength === forceConfig.linkStrength &&
-      prev.chargeStrength === forceConfig.chargeStrength
-    ) return;
-    prevForceConfigRef.current = forceConfig;
-    // Update all forces in-place on the existing simulation.
-    const centerForce = sim.force('center') as ReturnType<typeof forceCenter> | undefined;
-    if (centerForce) centerForce.strength(forceConfig.centerStrength);
-    const clusterForce = sim.force('cluster') as ReturnType<typeof forceCluster> | undefined;
-    if (clusterForce) clusterForce.strength(forceConfig.clusterStrength);
-    const linkForce = sim.force('link') as ReturnType<typeof forceLink> | undefined;
-    if (linkForce) linkForce.strength(forceConfig.linkStrength);
-    const chargeForce = sim.force('charge') as ReturnType<typeof forceManyBody> | undefined;
-    if (chargeForce) chargeForce.strength(forceConfig.chargeStrength);
-    // Alpha-restart — d3's rAF loop picks up immediately, nodes glide.
-    sim.alpha(FORCE_CONFIG_ALPHA).restart();
-  }, [forceConfig, settledAt]);
+      (msg.type === 'tick' || msg.type === 'settled') &&
+      msg.sequence < topologySeqRef.current
+    ) {
+      returnBufferToWorker(msg.positions.buffer);
+      return;
+    }
+    switch (msg.type) {
+      case 'tick': {
+        // D-25 hot-path: swap the positions Float32Array into simNodesRef
+        // without going through Zustand. Preserve ids/idIndex which were
+        // pinned at init/topology send time.
+        const prev = simNodesRef.current.positions;
+        simNodesRef.current = {
+          ids: simNodesRef.current.ids,
+          positions: msg.positions,
+          idIndex: simNodesRef.current.idIndex,
+        };
+        // D-06 ping-pong: return the previously-held buffer for pool reuse.
+        if (prev.byteLength > 0) {
+          returnBufferToWorker(prev.buffer);
+        }
+        tickCounterRef.current++;
+        // D-16 quadtree rebuild cadence during active sim.
+        if (tickCounterRef.current % QUADTREE_REBUILD_TICK_INTERVAL === 0) {
+          quadtreeRef.current = buildQuadtree(
+            simNodesRef.current.ids,
+            msg.positions,
+          );
+        }
+        isSimulatingRef.current = true;
+        markDirtyRef.current();
+        break;
+      }
+      case 'settled': {
+        const prev = simNodesRef.current.positions;
+        simNodesRef.current = {
+          ids: simNodesRef.current.ids,
+          positions: msg.positions,
+          idIndex: simNodesRef.current.idIndex,
+        };
+        if (prev.byteLength > 0) {
+          returnBufferToWorker(prev.buffer);
+        }
+        // D-16 — primary quadtree rebuild trigger at settle.
+        quadtreeRef.current = buildQuadtree(
+          simNodesRef.current.ids,
+          msg.positions,
+        );
+        // D-28 — commit final positions so minimap/persistence consumers see
+        // them. Build the Map once from the Float32Array + ids.
+        const map = materializePositionMap(
+          simNodesRef.current.ids,
+          msg.positions,
+        );
+        useRadarStore.getState().commitSettledPositions(map);
+        isSimulatingRef.current = false;
+        tickCounterRef.current = 0;
+        markDirtyRef.current();
+        break;
+      }
+      case 'error': {
+        // D-04 — no fallback; log + proceed with stale positions.
+        console.error('[graphSim]', msg.message, msg.stack);
+        break;
+      }
+      default: {
+        const _exhaustive: never = msg;
+        void _exhaustive;
+      }
+    }
+  }
 
-  // Cleanup on unmount.
+  // ─── Worker lifecycle (StrictMode-safe cleanup per Pattern 6) ────────────
+  // Lives for the whole hook lifetime (D-01). Empty deps — worker lifetime
+  // is NOT tied to graph lifetime.
   useEffect(() => {
-    return () => {
-      if (simRef.current) simRef.current.stop();
+    // D-02 — literal-inline Vite pattern; the URL must be a literal so
+    // Rolldown's static detector emits the worker chunk.
+    const worker = new Worker(new URL('../workers/graphSim.worker.ts', import.meta.url), { type: 'module' });
+    workerRef.current = worker;
+    worker.onmessage = handleWorkerMessage;
+    worker.onerror = (e) => {
+      // D-04 — no fallback; surface the error for observability.
+      console.error('[graphSim.worker]', e?.message ?? e);
     };
+
+    return () => {
+      worker.onmessage = null;
+      worker.onerror = null;
+      try {
+        worker.postMessage({ type: 'dispose' } satisfies WorkerIn);
+      } catch {
+        /* worker may already be terminated */
+      }
+      worker.terminate();
+      workerRef.current = null;
+      isSimulatingRef.current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── init / topology on graphNodes|graphEdges change ─────────────────────
+  // Extract `handler` so we can invoke it once synchronously at mount to
+  // cover the mount-after-setState ordering (tests set store state then
+  // mount; zustand's subscribe() only fires on subsequent writes).
+  useEffect(() => {
+    const handler = (s: ReturnType<typeof useRadarStore.getState>): void => {
+      const w = workerRef.current;
+      if (!w) return;
+      const nodes = s.graphNodes;
+      const edges = s.graphEdges;
+      if (nodes.length === 0) return;
+
+      const currentIds = new Set(nodes.map((n) => n.id));
+      const isFirst = lastIdsRef.current.size === 0;
+      const rewarm = !isFirst && shouldRewarm(lastIdsRef.current, currentIds);
+      if (!isFirst && !rewarm) return;
+
+      topologySeqRef.current++;
+      const ids = nodes.map((n) => n.id);
+      // Update ids/idIndex immediately so tick-message handling can map
+      // positions back to nodes even before the first tick lands. Positions
+      // stay as the prior Float32Array (possibly empty) until first tick.
+      simNodesRef.current = {
+        ids,
+        positions: simNodesRef.current.positions,
+        idIndex: new Map(ids.map((id, i) => [id, i])),
+      };
+      tickCounterRef.current = 0;
+      lastIdsRef.current = currentIds;
+
+      const payload = {
+        sequence: topologySeqRef.current,
+        nodes: nodes.map((n) => ({
+          id: n.id,
+          dirKey: n.dirKey,
+          dirDepth: n.dirDepth,
+          fx: n.fx ?? null,
+          fy: n.fy ?? null,
+        })),
+        edges: edges.map((e) => ({
+          source:
+            typeof e.source === 'string'
+              ? e.source
+              : (e.source as GraphNode).id,
+          target:
+            typeof e.target === 'string'
+              ? e.target
+              : (e.target as GraphNode).id,
+          kind: e.kind,
+        })),
+        config: s.forceConfig,
+      };
+
+      if (isFirst) {
+        w.postMessage({
+          type: 'init',
+          ...payload,
+          alpha: 1,
+          fastSettle: true,
+        } satisfies WorkerIn);
+      } else {
+        w.postMessage({
+          type: 'topology',
+          ...payload,
+        } satisfies WorkerIn);
+      }
+      isSimulatingRef.current = true;
+    };
+    const unsub = useRadarStore.subscribe(handler);
+    // Drive once synchronously for the mount-after-setState case — if the
+    // store already has graphNodes at mount, zustand's subscribe only fires
+    // on the NEXT write, which would miss the initial init. Invoking
+    // handler here closes that gap.
+    handler(useRadarStore.getState());
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── updateConfig on forceConfig change ──────────────────────────────────
+  useEffect(() => {
+    const unsub = useRadarStore.subscribe((s) => {
+      const w = workerRef.current;
+      if (!w) return;
+      const cfg = s.forceConfig;
+      if (lastForceConfigRef.current && sameConfig(cfg, lastForceConfigRef.current)) {
+        return;
+      }
+      lastForceConfigRef.current = cfg;
+      // No sim yet — the first init will carry the config inline.
+      if (lastIdsRef.current.size === 0) return;
+      w.postMessage({ type: 'updateConfig', config: cfg } satisfies WorkerIn);
+      isSimulatingRef.current = true;
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── pin/unpin on pinnedNodeIds Set diff ─────────────────────────────────
+  useEffect(() => {
+    let prevPins = new Set<string>();
+    const unsub = useRadarStore.subscribe((s) => {
+      const w = workerRef.current;
+      if (!w) return;
+      const next = s.pinnedNodeIds;
+      const added: string[] = [];
+      const removed: string[] = [];
+      for (const id of next) if (!prevPins.has(id)) added.push(id);
+      for (const id of prevPins) if (!next.has(id)) removed.push(id);
+      for (const id of added) {
+        const n = s.graphNodes.find((x) => x.id === id);
+        if (n && n.fx != null && n.fy != null) {
+          w.postMessage({
+            type: 'pin',
+            id,
+            x: n.fx,
+            y: n.fy,
+          } satisfies WorkerIn);
+        }
+      }
+      for (const id of removed) {
+        w.postMessage({ type: 'unpin', id } satisfies WorkerIn);
+      }
+      prevPins = new Set(next);
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return { quadtreeRef, simNodesRef, isSimulatingRef, markDirtyRef };

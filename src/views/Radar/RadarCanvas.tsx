@@ -543,16 +543,20 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       // When the d3 simulation is actively ticking, read live positions
       // from simNodesRef (updated each tick) so nodes animate smoothly.
       // When idle, fall back to the store positions (s.graphNodes / s.positions).
+      // Phase 11 D-25: simNodesRef.current is LivePositions
+      // ({ ids, positions: Float32Array, idIndex }), not SimNode[]. The
+      // metadata (dirKey/dirDepth) needed for folder-hull rendering stays in
+      // s.graphNodes; only the per-tick {x,y} reads go through the Float32Array.
+      // Wave 3 will further optimize this hot path per §Pattern 5 (xyPool).
       const simulating = isSimulatingRef.current;
-      let liveNodes = s.graphNodes;
+      const live = simNodesRef.current;
+      const liveNodes = s.graphNodes;
       let livePositions = s.positions;
-      if (simulating && simNodesRef.current.length > 0) {
-        liveNodes = simNodesRef.current as typeof s.graphNodes;
+      if (simulating && live.positions.byteLength > 0) {
+        const { ids, positions } = live;
         simPositionMap.clear();
-        for (const n of simNodesRef.current) {
-          if (n.x !== undefined && n.y !== undefined) {
-            simPositionMap.set(n.id, { x: n.x, y: n.y });
-          }
+        for (let i = 0; i < ids.length; i++) {
+          simPositionMap.set(ids[i], { x: positions[i * 2], y: positions[i * 2 + 1] });
         }
         livePositions = simPositionMap;
       }
