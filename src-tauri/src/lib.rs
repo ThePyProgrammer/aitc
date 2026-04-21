@@ -114,6 +114,7 @@ pub fn run() {
         .typ::<agents::notifications::NotificationPrefs>()
         .typ::<agents::registry::RegistryStats>()
         .typ::<conflict::ConflictAlert>()
+        .typ::<conflict::GateReason>()
         .typ::<comms::types::ApprovalRequest>()
         // Phase 10 D-21: the Phase 4 chat type was removed; the
         // replacement AgentEvent type is registered below.
@@ -226,6 +227,21 @@ pub fn run() {
                 agents::hook_waiters::WaiterRegistry::new_arc();
             app.manage(waiters.clone());
 
+            // Phase 17 D-15/D-16: ConflictEngine shared between /hook (query
+            // via could_conflict_with) and pipeline/commands.rs conflict_task
+            // (mutate via process_batch). tokio::sync::Mutex because both
+            // sides are async; tight lock scoping enforced at each callsite
+            // (Pitfall 1). Default 5000ms matches ConflictState::new(5000)
+            // above — the user-configurable window (D-03) is read fresh per
+            // hook request via ConflictState::get_window_ms, so the engine's
+            // internal `window` field is essentially only used by
+            // process_batch's eviction policy.
+            let conflict_engine: Arc<tokio::sync::Mutex<conflict::engine::ConflictEngine>> =
+                Arc::new(tokio::sync::Mutex::new(
+                    conflict::engine::ConflictEngine::new(std::time::Duration::from_millis(5000)),
+                ));
+            app.manage(conflict_engine.clone());
+
             // Phase 8 Pitfall 6: auto-heal `settings.local.json` AITC entries
             // in every previously-accepted repo so a sidecar-path upgrade
             // (e.g., user updated AITC) doesn't leave stale absolute paths
@@ -267,6 +283,7 @@ pub fn run() {
             let waiters_for_server = waiters.clone();
             let app_for_server = app.handle().clone();
             let app_for_port = app.handle().clone();
+            let engine_for_server = conflict_engine.clone();
             tauri::async_runtime::spawn(async move {
                 match agents::self_register::start_registration_server(
                     registry_clone,
@@ -276,6 +293,7 @@ pub fn run() {
                     9417,
                     chat_sessions_for_server,
                     mcp_state_for_server,
+                    engine_for_server,
                 )
                 .await
                 {
