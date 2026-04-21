@@ -30,20 +30,6 @@ export function CommsTabBar({
       <button
         type="button"
         role="tab"
-        aria-selected={active === 'requests'}
-        onClick={() => onTabChange('requests')}
-        className={`px-4 pb-2 flex items-center gap-2 font-headline text-[11px] uppercase tracking-widest transition-colors duration-150 ${
-          active === 'requests'
-            ? 'border-b-2 border-primary text-primary'
-            : 'border-b-2 border-transparent text-on-surface-variant hover:text-on-surface'
-        }`}
-      >
-        REQUESTS
-        <UnreadBadge count={pendingRequests} />
-      </button>
-      <button
-        type="button"
-        role="tab"
         aria-selected={active === 'chat'}
         onClick={() => onTabChange('chat')}
         className={`px-4 pb-2 flex items-center gap-2 font-headline text-[11px] uppercase tracking-widest transition-colors duration-150 ${
@@ -54,6 +40,20 @@ export function CommsTabBar({
       >
         CHAT
         <UnreadBadge count={unreadChat} />
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={active === 'requests'}
+        onClick={() => onTabChange('requests')}
+        className={`px-4 pb-2 flex items-center gap-2 font-headline text-[11px] uppercase tracking-widest transition-colors duration-150 ${
+          active === 'requests'
+            ? 'border-b-2 border-primary text-primary'
+            : 'border-b-2 border-transparent text-on-surface-variant hover:text-on-surface'
+        }`}
+      >
+        REQUESTS
+        <UnreadBadge count={pendingRequests} />
       </button>
     </div>
   );

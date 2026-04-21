@@ -25,7 +25,7 @@ describe('CommsTabBar', () => {
         onTabChange={() => {}}
       />,
     );
-    const [requestsTab, chatTab] = screen.getAllByRole('tab');
+    const [chatTab, requestsTab] = screen.getAllByRole('tab');
     expect(requestsTab).toHaveAttribute('aria-selected', 'false');
     expect(chatTab).toHaveAttribute('aria-selected', 'true');
   });
