@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 11 code-complete; manual Tauri prod-build smoke pending user action in 11-VERIFICATION.md
-last_updated: "2026-04-21T02:51:44.259Z"
+stopped_at: Phase 11 closed (passed); Phase 11.1 pending (zoom-scroll lag fix)
+last_updated: "2026-04-21T04:17:01.755Z"
 last_activity: 2026-04-21
 progress:
   total_phases: 17
@@ -133,6 +133,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T02:51:44.249Z
-Stopped at: Phase 11 code-complete; manual Tauri prod-build smoke pending user action in 11-VERIFICATION.md
+Last session: 2026-04-21T04:17:01.747Z
+Stopped at: Phase 11 closed (passed); Phase 11.1 pending (zoom-scroll lag fix)
 Resume file: .planning/phases/11-move-d3-force-simulation-to-a-webworker-with-transferable-fl/11-VERIFICATION.md

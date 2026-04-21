@@ -216,13 +216,18 @@ Plans:
 
 ### Phase 11: Move d3-force simulation to a WebWorker with Transferable Float32Arrays for non-blocking layout computation
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Relocate the d3-force simulation from the React main thread into a dedicated WebWorker; positions flow back as Transferable Float32Array; zero visual change; success = no main-thread long tasks >50ms during a 5k-node settle. (Completed 2026-04-21.)
+**Requirements**: VIZN-04 (performance — in spirit, no new REQ-IDs)
 **Depends on:** Phase 10
-**Plans:** 0 plans
+**Plans:** 4/4 plans complete
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 11 to break down)
+- [x] 11-01-PLAN.md -- Wave 0: scaffold src/workers/ module stubs + test files + graphSimConfig extraction
+- [x] 11-02-PLAN.md -- Wave 1: pure graphSimCore + BufferPool (3-cap) + 12 core tests + 5 pool tests green
+- [x] 11-03-PLAN.md -- Wave 2: graphSim.worker.ts postMessage shim (53 LOC) + useGraphLayout Worker-client rewrite + 13 mocked-Worker tests green
+- [x] 11-04-PLAN.md -- Wave 3: RadarCanvas hot path reads Float32Array + benchmark harness (D-31..D-34) + VERIFICATION.md
+
+**Verification status:** Passed (2026-04-21). User-confirmed manual smoke: worker loads cleanly in Tauri prod build, visual invariance preserved, force-config sliders "damn responsive" (live D-31 proxy witness — sim is off main thread). Zoom-scroll lag surfaced during manual smoke; not a Phase 11 regression (hot-path gate short-circuits when sim is settled); carried to Phase 11.1.
 
 ### Phase 12: Add IPC bridge nodes and cross-language boundary visualization — parse tauri-specta bindings.ts for the command surface, cross-reference invoke() callers with #[tauri::command] handlers, render bridge nodes on a visible frontend/backend boundary line
 
