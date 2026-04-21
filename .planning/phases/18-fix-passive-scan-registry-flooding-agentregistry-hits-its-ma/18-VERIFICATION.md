@@ -1,13 +1,14 @@
 ---
 phase: 18-fix-passive-scan-registry-flooding-agentregistry-hits-its-ma
 verified: 2026-04-21T14:10:00Z
-status: human_needed
+accepted: 2026-04-21
+status: passed
 score: 18/18 must-haves verified (all automated)
 overrides_applied: 0
-human_verification:
+deferred_manual_verification:
   - test: "Live soak test against a dev machine with 3+ concurrent `claude --input-format stream-json` sessions for 10 minutes"
     expected: "After 10 min of idle/chat exchange, `getRegistryStats` returns passive_count ≤ 5 AND capacity_hits_since_start == 0 — the D-01/D-02 filter holds in practice, not just in unit tests"
-    why_human: "Requires live CLI + Tauri runtime + real time; explicitly called out in VALIDATION.md § Manual-Only Verifications as the sole live-environment field validation for D-01. Unit tests prove the filter logic; this proves the production scenario that motivated Phase 18 is actually resolved. Optional per VALIDATION.md ('optional soak-test evidence, not a phase gate') but the phase goal 'drop subprocess children whose parent is an in-scope candidate' ultimately means 'flood no longer happens in real usage' — only a human can observe that."
+    why_deferred: "Optional per VALIDATION.md ('optional soak-test evidence, not a phase gate'). Accepted by user at phase close; will run opportunistically the next time concurrent agents are deployed. If soak reveals live PPIDs diverge from the unit-test model, file a follow-up decimal phase."
 ---
 
 # Phase 18: Fix Passive-Scan Registry Flooding Verification Report
@@ -15,7 +16,8 @@ human_verification:
 **Phase Goal:** Scope `passive_bridge::bridge_tick` to drop subprocess children whose parent is itself an in-scope allowlisted candidate (D-01/D-02 hybrid filter: cwd-in-repo + parent-PID-in-candidate-set), formalize `MAX_AGENTS = 1000` as an intentional emergency ceiling with an explanatory doc comment (D-03), and expose a read-only `get_registry_stats` Tauri command backed by a new `capacity_hits_since_start: AtomicU64` on `AgentRegistry` for post-hoc debugging (D-04). Preserve AGNT-03 (externally-launched agents with non-candidate shell parents still register).
 
 **Verified:** 2026-04-21T14:10:00Z
-**Status:** human_needed (all automated criteria PASS; optional live soak remains)
+**Accepted:** 2026-04-21 — user closed phase; optional soak deferred as non-blocking field validation.
+**Status:** passed (18/18 automated gates green; optional live soak deferred per VALIDATION.md)
 **Re-verification:** No — initial verification
 
 ---
