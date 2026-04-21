@@ -16,8 +16,9 @@ import { ChatView } from './CommsHub/ChatView';
 export function CommsView() {
   const [searchParams, setSearchParams] = useSearchParams();
   // T-10-33: narrow `?tab=` to the two allowed values before use.
+  // Default is CHAT (matches the tab-bar render order — CHAT appears first).
   const activeTab: CommsTab =
-    searchParams.get('tab') === 'chat' ? 'chat' : 'requests';
+    searchParams.get('tab') === 'requests' ? 'requests' : 'chat';
 
   const fetchRequests = useCommsStore((s) => s.fetchRequests);
   const subscribeToApprovals = useCommsStore((s) => s.subscribeToApprovals);
