@@ -762,7 +762,9 @@ mod tests {
                 resolved_at TEXT, \
                 tool_name TEXT, \
                 tool_input_json TEXT, \
-                hook_session_id TEXT \
+                hook_session_id TEXT, \
+                conflict_with_agent_id TEXT, \
+                gate_reason TEXT \
              )",
         )
         .execute(&pool)
@@ -802,12 +804,18 @@ mod tests {
 
     /// Build a fresh registry, waiters, and mock AppHandle, then bind an
     /// axum server on 127.0.0.1:0. Returns (base_url, registry, waiters,
-    /// pool).
+    /// pool, engine).
+    ///
+    /// Phase 17 Plan 04: tuple grew from 4 to 5 elements to expose the
+    /// shared `Arc<tokio::sync::Mutex<ConflictEngine>>`. Plan 05's
+    /// integration tests will use the handle to seed synthetic write
+    /// records and assert the /hook gate branch consults it.
     pub(crate) async fn spawn_hook_server() -> (
         String,
         Arc<AgentRegistry>,
         Arc<WaiterRegistry>,
         sqlx::SqlitePool,
+        Arc<tokio::sync::Mutex<crate::conflict::engine::ConflictEngine>>,
     ) {
         let mut registry_inner = AgentRegistry::new();
         registry_inner.register_adapter(Arc::new(crate::agents::claude_code::ClaudeCodeAdapter));
@@ -822,6 +830,14 @@ mod tests {
         let chat_sessions =
             crate::chat_runtime::session_registry::LiveSessionRegistry::new_arc();
         let mcp_state = crate::mcp::McpState::new_arc();
+        // Phase 17 Plan 04: construct the shared engine + seed ConflictState on
+        // the mock app so Plan 05's hook gate branch can read
+        // `get_window_ms()` and `engine.lock().await` from managed state.
+        let engine = Arc::new(tokio::sync::Mutex::new(
+            crate::conflict::engine::ConflictEngine::new(std::time::Duration::from_millis(5000)),
+        ));
+        app_handle.manage(crate::conflict::ConflictState::new(5000));
+        app_handle.manage(engine.clone());
         let router = build_router(
             registry.clone(),
             pool.clone(),
@@ -830,18 +846,25 @@ mod tests {
             rate_limiter,
             chat_sessions,
             mcp_state,
+            engine.clone(),
         );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;
         });
-        (format!("http://127.0.0.1:{port}"), registry, waiters, pool)
+        (
+            format!("http://127.0.0.1:{port}"),
+            registry,
+            waiters,
+            pool,
+            engine,
+        )
     }
 
     #[tokio::test]
     async fn hook_allows_passthrough_tools_without_row() {
-        let (base, _reg, _waiters, pool) = spawn_hook_server().await;
+        let (base, _reg, _waiters, pool, _engine) = spawn_hook_server().await;
         let my_pid = std::process::id();
 
         let body = serde_json::json!({
@@ -871,7 +894,7 @@ mod tests {
 
     #[tokio::test]
     async fn hook_gates_edit_and_blocks_until_approved() {
-        let (base, _reg, waiters, pool) = spawn_hook_server().await;
+        let (base, _reg, waiters, pool, _engine) = spawn_hook_server().await;
         let my_pid = std::process::id();
 
         let body = serde_json::json!({
@@ -940,7 +963,7 @@ mod tests {
 
     #[tokio::test]
     async fn hook_gates_protected_path_even_on_read() {
-        let (base, _reg, waiters, pool) = spawn_hook_server().await;
+        let (base, _reg, waiters, pool, _engine) = spawn_hook_server().await;
         let my_pid = std::process::id();
         sqlx::query("INSERT INTO protected_paths (glob_pattern) VALUES ('**/.env')")
             .execute(&pool)
@@ -996,7 +1019,7 @@ mod tests {
 
     #[tokio::test]
     async fn hook_creates_passive_stub_when_no_agent_matches() {
-        let (base, reg, waiters, pool) = spawn_hook_server().await;
+        let (base, reg, waiters, pool, _engine) = spawn_hook_server().await;
         let my_pid = std::process::id();
 
         let body = serde_json::json!({
@@ -1052,7 +1075,7 @@ mod tests {
 
     #[tokio::test]
     async fn hook_honors_always_allow_fast_path() {
-        let (base, reg, waiters, pool) = spawn_hook_server().await;
+        let (base, reg, waiters, pool, _engine) = spawn_hook_server().await;
         let my_pid = std::process::id();
 
         // Pre-register a KAGENT for this pid so resolve_or_create_agent resolves it.
@@ -1105,7 +1128,7 @@ mod tests {
 
     #[tokio::test]
     async fn hook_session_binding_is_idempotent() {
-        let (base, reg, waiters, pool) = spawn_hook_server().await;
+        let (base, reg, waiters, pool, _engine) = spawn_hook_server().await;
         let my_pid = std::process::id();
 
         // First /hook call binds session_id → agent_id.
@@ -1182,7 +1205,7 @@ mod tests {
 
     #[tokio::test]
     async fn hook_rejects_non_object_tool_input() {
-        let (base, _reg, _waiters, _pool) = spawn_hook_server().await;
+        let (base, _reg, _waiters, _pool, _engine) = spawn_hook_server().await;
         let my_pid = std::process::id();
         let body = serde_json::json!({
             "pid": my_pid,
@@ -1201,7 +1224,7 @@ mod tests {
 
     #[tokio::test]
     async fn hook_rejects_dead_pid() {
-        let (base, _reg, _waiters, _pool) = spawn_hook_server().await;
+        let (base, _reg, _waiters, _pool, _engine) = spawn_hook_server().await;
         // A PID extremely unlikely to be live. sysinfo will return None for it.
         let dead_pid: u32 = 0; // PID 0 is never a process on Linux/Mac.
         let body = serde_json::json!({
@@ -1228,7 +1251,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_initialize_returns_session_header_on_real_router() {
-        let (base, _reg, _waiters, _pool) = spawn_hook_server().await;
+        let (base, _reg, _waiters, _pool, _engine) = spawn_hook_server().await;
         let resp = reqwest::Client::new()
             .post(format!("{base}/mcp"))
             .header("X-AITC-Session", "claude-cc-1")
@@ -1262,7 +1285,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_tools_list_without_session_returns_404() {
-        let (base, _reg, _waiters, _pool) = spawn_hook_server().await;
+        let (base, _reg, _waiters, _pool, _engine) = spawn_hook_server().await;
         let resp = reqwest::Client::new()
             .post(format!("{base}/mcp"))
             .json(&serde_json::json!({
@@ -1279,7 +1302,7 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_tools_call_request_user_input_after_initialize_succeeds() {
-        let (base, _reg, _waiters, pool) = spawn_hook_server().await;
+        let (base, _reg, _waiters, pool, _engine) = spawn_hook_server().await;
         let client = reqwest::Client::new();
 
         // 1. initialize → grab session id.
