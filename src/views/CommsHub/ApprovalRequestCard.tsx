@@ -102,6 +102,29 @@ export function ApprovalRequestCard({ request }: ApprovalRequestCardProps) {
         </span>
       </div>
 
+      {/* Phase 17 D-22: Conflict / Protected-path line. Renders nothing on
+          legacy rows (both fields null) or when gateReason is unrecognised. */}
+      {request.gateReason === 'file_conflict' && (
+        <div className={`mt-1 ${contentOpacity}`}>
+          <span
+            className="font-headline text-[10px] uppercase tracking-widest text-error"
+            data-testid="conflict-line"
+          >
+            ⚠ CONFLICT with {request.conflictWithAgentId ?? 'unknown'}
+          </span>
+        </div>
+      )}
+      {request.gateReason === 'protected_path' && (
+        <div className={`mt-1 ${contentOpacity}`}>
+          <span
+            className="font-headline text-[10px] uppercase tracking-widest text-[#ffd16f]"
+            data-testid="protected-path-line"
+          >
+            🔒 PROTECTED path
+          </span>
+        </div>
+      )}
+
       {/* Preview line (pretool_use only) */}
       {preview && (
         <div className={`mt-2 ${contentOpacity}`}>
