@@ -34,6 +34,11 @@ pub async fn ensure_schema(pool: &Pool<Sqlite>) -> Result<(), String> {
 /// Read the configured PreToolUse-gated tool allowlist. Bootstraps the D-19
 /// default on first read so every instance starts gated on Edit/Write/Bash
 /// etc. even if the user never touches the settings UI.
+///
+/// Phase 17 D-19: the `/hook` handler no longer calls this — tool-category
+/// gating was replaced by conflict-triggered gating. Helper retained for a
+/// future power-user "strict mode" settings surface. Do NOT delete.
+#[allow(dead_code)]
 pub async fn get_pretool_gated_tools(pool: &Pool<Sqlite>) -> Result<Vec<String>, String> {
     ensure_schema(pool).await?;
     let row = sqlx::query_scalar::<_, String>(

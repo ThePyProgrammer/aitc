@@ -18,7 +18,6 @@
 use crate::agents::adapter::{AgentInfo, AgentState};
 use crate::agents::hook_waiters::{HookDecision, WaiterEntry, WaiterRegistry};
 use crate::agents::registry::AgentRegistry;
-use crate::comms::app_settings::get_pretool_gated_tools;
 use crate::comms::commands::create_approval_request_internal;
 use axum::{
     extract::{DefaultBodyLimit, Extension},
@@ -156,7 +155,39 @@ async fn protected_path_matches(pool: &sqlx::SqlitePool, file_path: &str) -> boo
 /// When session_id is present and the binding either does not exist or
 /// points to an unknown agent, rebind to whatever the PID-path resolves to
 /// so a /hook with session_id re-asserts attribution each call.
+///
+/// Phase 17 D-15b amendment (17-RESEARCH §Pitfall 5): after the canonical
+/// `agent_id` is resolved, acquire the engine lock briefly and record the
+/// PID→agent_id mapping so future `process_batch` write records carry
+/// `KAGENT-*` / `PASSIVE-*` IDs instead of falling through to the
+/// `format!("PID-{pid}")` default. Without this wire-up the liveness gate
+/// in `hook_handler` (which does `registry.get_agent(other_id)`) never
+/// matches and conflicts are under-gated.
 async fn resolve_or_create_agent(
+    registry: &AgentRegistry,
+    waiters: &WaiterRegistry,
+    engine: &Arc<Mutex<crate::conflict::engine::ConflictEngine>>,
+    pid: u32,
+    session_id: Option<&str>,
+    cwd: Option<&str>,
+) -> String {
+    let agent_id = resolve_or_create_agent_inner(registry, waiters, pid, session_id, cwd).await;
+
+    // D-15b: propagate PID→agent_id into the shared engine so write records
+    // carry canonical IDs (not `PID-{pid}`). Lock held only for the single
+    // HashMap insert — drop before any further await.
+    {
+        let mut eng = engine.lock().await;
+        eng.update_pid_mapping(pid, agent_id.clone());
+    }
+
+    agent_id
+}
+
+/// Inner resolver — unchanged 3-branch lookup from Phase 8. Split out of
+/// `resolve_or_create_agent` so the D-15b engine wire-up can happen at a
+/// single post-resolution site (Phase 17 Plan 05 Task 2).
+async fn resolve_or_create_agent_inner(
     registry: &AgentRegistry,
     waiters: &WaiterRegistry,
     pid: u32,
@@ -215,12 +246,6 @@ async fn hook_handler<R: tauri::Runtime>(
     Extension(app): Extension<tauri::AppHandle<R>>,
     Json(body): Json<HookRequest>,
 ) -> axum::response::Response {
-    // Phase 17 Plan 04 breadcrumb — Plan 05 rewrites the gate branch below
-    // to call `engine.lock().await.could_conflict_with(...)`. The Extension
-    // is plumbed here so Plan 05 is a pure-behavioral diff rather than a
-    // wiring + behavior diff. Until then, the handle is intentionally unused.
-    let _engine_handle_for_plan_05 = engine;
-
     // T-08-Rate.
     if !rate_limiter.check().await {
         return (
@@ -263,33 +288,181 @@ async fn hook_handler<R: tauri::Runtime>(
     let agent_id = resolve_or_create_agent(
         &registry,
         &waiters,
+        &engine,
         body.pid,
         body.session_id.as_deref(),
         body.cwd.as_deref(),
     )
     .await;
 
-    // Always-allow fast path (D-22).
+    // Always-allow fast path (D-08 — run first so cached sessions bypass
+    // every downstream check). Unchanged from Phase 8.
     if waiters.is_always_allowed(&agent_id, &body.tool_name).await {
         return (StatusCode::OK, Json(AitcDecisionResponse::Allow)).into_response();
     }
 
-    // Tool allowlist (D-19/D-20) OR protected-path match (D-21).
-    let gated_tools = get_pretool_gated_tools(&pool).await.unwrap_or_default();
-    let file_path = body
-        .tool_input
-        .get("file_path")
-        .and_then(|v| v.as_str());
-    let tool_gated = gated_tools.iter().any(|t| t == &body.tool_name);
-    let path_gated = if let Some(fp) = file_path {
-        protected_path_matches(&pool, fp).await
-    } else {
-        false
+    // -----------------------------------------------------------------
+    // Phase 17 D-01..D-18 gate-decision rewrite: replace the Phase 8
+    // tool-category allowlist (D-19/D-20, removed) with a conflict-query
+    // against the shared ConflictEngine, preserving the protected_paths
+    // OR-branch (D-07). See 17-CONTEXT.md for the locked semantics.
+    //
+    // Phase 17 D-04 amendment (17-RESEARCH §5): `AgentState` has NO
+    // `Terminated` variant — terminated agents are *removed* from the
+    // registry, not transitioned. The liveness gate therefore reduces to
+    // `registry.get_agent(&id).await.is_some()`.
+    // -----------------------------------------------------------------
+
+    use crate::conflict::canonicalize::canonicalize_for_conflict;
+    use std::path::{Path, PathBuf};
+
+    // D-06: derive the conflict-check path from `tool_input` based on the
+    // tool_name. Canonicalization flows through the shared helper so the
+    // HashMap-key parity with the pipeline's write path is guaranteed
+    // (T-17-05 mitigation). `gate_file_path_str` feeds both the
+    // protected_paths glob check and the approval row's `file_path` column.
+    let (canonical_path, gate_file_path_str): (Option<PathBuf>, Option<String>) = match body
+        .tool_name
+        .as_str()
+    {
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => body
+            .tool_input
+            .get("file_path")
+            .and_then(|v| v.as_str())
+            .map(|p| {
+                let canon = canonicalize_for_conflict(Path::new(p));
+                let s = canon.to_string_lossy().into_owned();
+                (Some(canon), Some(s))
+            })
+            .unwrap_or((None, None)),
+        "Bash" => {
+            // D-09..D-13: best-effort Bash path extraction; Safelisted +
+            // ParseFailed + empty Targets all collapse to (None, None) →
+            // no conflict query → allow (D-10 + D-11).
+            let cmd = body
+                .tool_input
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let cwd_str = body.cwd.as_deref().unwrap_or(".");
+            let cwd_path = Path::new(cwd_str);
+            match crate::agents::bash_paths::extract_target_paths(cmd, cwd_path) {
+                crate::agents::bash_paths::BashParseResult::Targets(v) if !v.is_empty() => {
+                    // v1 policy: take the first target. Multi-target Bash
+                    // commands (`cp a b && rm c`) are rare and the approval
+                    // row is one-path-one-row; extra targets fall through
+                    // to the filesystem-watcher path for post-write
+                    // convergence per D-17's accepted race.
+                    let canon = canonicalize_for_conflict(&v[0]);
+                    let s = canon.to_string_lossy().into_owned();
+                    (Some(canon), Some(s))
+                }
+                _ => (None, None),
+            }
+        }
+        // D-06: Read/LS/Grep/Glob/WebFetch/WebSearch/Task/MCP pass through.
+        // They still honor protected_paths (handled below) but never drive
+        // a conflict query.
+        _ => (None, None),
     };
-    if !tool_gated && !path_gated {
-        // Pass-through tool — no row, no waiter. D-01 fast path.
+
+    // D-07: protected_paths OR-branch — unchanged semantics from Phase 8.
+    // Checked against the RAW `tool_input.file_path` so Read/LS/Grep also
+    // gate on protected globs (D-06 explicitly preserves this: "Read-vs-
+    // write gating is an explicit defer; users who want it can add globs
+    // to `protected_paths`"). For write-class tools this matches the
+    // canonical form via `gate_file_path_str`; for pass-through tools it
+    // falls back to the raw JSON value so gating is still possible.
+    let raw_file_path_for_glob: Option<String> = gate_file_path_str.clone().or_else(|| {
+        body.tool_input
+            .get("file_path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    });
+    let path_gated: bool = match &raw_file_path_for_glob {
+        Some(p) => protected_path_matches(&pool, p).await,
+        None => false,
+    };
+
+    // D-14/D-14b/D-15: conflict query against the shared ConflictEngine.
+    // Pitfall 1: scope the lock tightly; drop BEFORE any DB call or await.
+    // D-05 self-exclusion via `except_agent_id = agent_id`. D-04 liveness
+    // gate via `registry.get_agent(&id).await.is_some()` (amended per
+    // RESEARCH §5 — there is NO Terminated variant).
+    let conflict_other: Option<String> = match &canonical_path {
+        Some(p) => {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            // Fresh-read window each request — routes around the engine's
+            // `self.window` staleness (RESEARCH §1) by passing the live
+            // `ConflictState::get_window_ms()` as an explicit argument.
+            // `Manager` trait brings `app.state::<T>()` into scope.
+            use tauri::Manager;
+            let window_ms: i64 = app
+                .state::<crate::conflict::types::ConflictState>()
+                .get_window_ms() as i64;
+
+            let t0 = std::time::Instant::now();
+            let raw = {
+                let eng = engine.lock().await;
+                eng.could_conflict_with(p, &agent_id, now_ms, window_ms)
+            };
+            let elapsed = t0.elapsed();
+            tracing::debug!(
+                kind = "hook_lock_wait",
+                elapsed_us = elapsed.as_micros() as u64,
+                agent = %agent_id,
+                "engine lock acquire + could_conflict_with"
+            );
+
+            match raw {
+                Some(id) if registry.get_agent(&id).await.is_some() => Some(id),
+                // D-04 liveness gate: ghost record from an agent no longer
+                // in the registry (crashed / reaped). Under-gate fail-safe.
+                _ => None,
+            }
+        }
+        None => None,
+    };
+
+    // D-20/D-21: compose gate decision. Both-or-neither invariant for
+    // (conflict_with_agent_id, gate_reason) enforced at this single site
+    // (T-17-07 mitigation — no DB CHECK constraint needed).
+    let (should_gate, gate_reason, conflict_with): (bool, &str, Option<&str>) =
+        match (conflict_other.as_deref(), path_gated) {
+            (Some(id), _) => (true, "file_conflict", Some(id)),
+            (None, true) => (true, "protected_path", None),
+            _ => (false, "", None),
+        };
+
+    if !should_gate {
+        let allow_reason = if canonical_path.is_some() {
+            "no_conflict"
+        } else if body.tool_name == "Bash" {
+            "safelisted_or_parse_fail"
+        } else {
+            "passthrough"
+        };
+        tracing::debug!(
+            kind = "hook_allow",
+            agent = %agent_id,
+            tool = %body.tool_name,
+            reason = allow_reason,
+            "instant allow"
+        );
         return (StatusCode::OK, Json(AitcDecisionResponse::Allow)).into_response();
     }
+
+    tracing::info!(
+        kind = "hook_gate",
+        reason = gate_reason,
+        agent = %agent_id,
+        file = ?gate_file_path_str,
+        conflict_with = ?conflict_with,
+        "gating PreToolUse"
+    );
 
     // Derive a minimal diff_content preview so Phase 4's ApprovalRequestCard
     // preview path keeps working until Plan 05's ToolPreview reads
@@ -311,15 +484,27 @@ async fn hook_handler<R: tauri::Runtime>(
     let tool_input_str =
         serde_json::to_string(&body.tool_input).unwrap_or_else(|_| "{}".into());
 
+    // Row `file_path`: prefer the canonical form (so it matches the engine's
+    // HashMap key) when we have one; fall back to the raw tool_input path
+    // so protected_path gates on Read/LS still show a useful file in the
+    // approval card.
+    let row_file_path: Option<&str> = gate_file_path_str
+        .as_deref()
+        .or(raw_file_path_for_glob.as_deref());
+
     let req = match create_approval_request_internal(
         &agent_id,
         "pretool_use",
-        file_path,
+        // D-02/D-21: canonical when available (file_conflict path), raw
+        // otherwise (protected_path on a non-write tool).
+        row_file_path,
         diff_preview.as_deref(),
         "high",
         Some(&body.tool_name),
         Some(&tool_input_str),
         body.session_id.as_deref(),
+        conflict_with,
+        Some(gate_reason),
         &pool,
         &app,
     )
@@ -870,6 +1055,7 @@ mod tests {
         let (base, _reg, _waiters, pool, _engine) = spawn_hook_server().await;
         let my_pid = std::process::id();
 
+        // D-06: Read is always pass-through regardless of conflict state.
         let body = serde_json::json!({
             "pid": my_pid,
             "tool_name": "Read",
@@ -893,12 +1079,97 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(cnt, 0, "pass-through tool must not insert a row");
+
+        // Phase 17 extension: Edit on a file with no other-agent conflict
+        // records must ALSO pass through without a row. This verifies the
+        // old tool-category allowlist (D-19/D-20) is gone — the gate is now
+        // purely conflict-driven.
+        let body_edit = serde_json::json!({
+            "pid": my_pid,
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": "/tmp/fresh_phase17.rs",
+                "old_string": "a",
+                "new_string": "b",
+            },
+        });
+        let resp_edit = tokio::time::timeout(
+            std::time::Duration::from_millis(2000),
+            client.post(format!("{base}/hook")).json(&body_edit).send(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(resp_edit.status(), 200);
+        let decoded_edit: AitcDecisionResponseDe = resp_edit.json().await.unwrap();
+        assert!(
+            matches!(decoded_edit, AitcDecisionResponseDe::Allow),
+            "D-18: Edit with no conflicting agent must instant-allow"
+        );
+
+        let (cnt2,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM approval_requests")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            cnt2, 0,
+            "no-conflict Edit must not insert a row (tool-category gating removed)"
+        );
     }
 
     #[tokio::test]
     async fn hook_gates_edit_and_blocks_until_approved() {
-        let (base, _reg, waiters, pool, _engine) = spawn_hook_server().await;
+        let (base, reg, waiters, pool, engine) = spawn_hook_server().await;
         let my_pid = std::process::id();
+
+        // Phase 17 pivot: under the new conflict-triggered gating an Edit
+        // only gates when another LIVE agent recently wrote the same file.
+        // Seed KAGENT-A with a write to /x.ts 500ms ago and register the
+        // agent in the registry so the D-04 liveness check passes.
+        let other_pid: u32 = 99_001;
+        let adapter = crate::agents::generic::passive_sentinel_adapter();
+        reg.upsert_agent(
+            "KAGENT-A".into(),
+            AgentInfo {
+                id: "KAGENT-A".into(),
+                agent_type: "claude-code".into(),
+                protocol: "cli".into(),
+                state: AgentState::Running,
+                pid: Some(other_pid),
+                cwd: None,
+                intent: None,
+            },
+            adapter,
+            false,
+        )
+        .await
+        .unwrap();
+        {
+            let mut eng = engine.lock().await;
+            eng.update_pid_mapping(other_pid, "KAGENT-A".into());
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            // Use the canonical-for-conflict form so the HashMap key matches
+            // what `could_conflict_with` sees from the hook side.
+            let canon =
+                crate::conflict::canonicalize::canonicalize_for_conflict(std::path::Path::new(
+                    "/x.ts",
+                ));
+            let batch = crate::pipeline::events::FileEventBatch {
+                events: vec![crate::pipeline::events::FileEvent {
+                    path: canon,
+                    kind: crate::pipeline::events::FileEventKind::Modify,
+                    timestamp_ms: now_ms - 500,
+                    attribution: crate::pipeline::events::Attribution::Pid(other_pid),
+                }],
+                batch_id: 1,
+                dropped_batches: 0,
+            };
+            eng.process_batch(&batch);
+        }
 
         let body = serde_json::json!({
             "pid": my_pid,
@@ -1006,6 +1277,29 @@ mod tests {
                 break id;
             }
         };
+
+        // Phase 17 extension: verify the row carries `gate_reason =
+        // 'protected_path'` with `conflict_with_agent_id` IS NULL. Both
+        // columns were added by migration 007 and are populated by the
+        // hook_handler composition match in Plan 05 Task 2.
+        let (gate_reason, conflict_with): (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT gate_reason, conflict_with_agent_id \
+             FROM approval_requests WHERE id = ?",
+        )
+        .bind(row_id)
+        .fetch_one(&pool_clone)
+        .await
+        .unwrap();
+        assert_eq!(
+            gate_reason.as_deref(),
+            Some("protected_path"),
+            "D-20: protected-path gates must carry gate_reason='protected_path'"
+        );
+        assert!(
+            conflict_with.is_none(),
+            "D-21: protected-path gates must leave conflict_with_agent_id NULL"
+        );
+
         waiters_clone
             .signal(row_id, HookDecision::Deny("denied".into()))
             .await;
@@ -1022,52 +1316,39 @@ mod tests {
 
     #[tokio::test]
     async fn hook_creates_passive_stub_when_no_agent_matches() {
-        let (base, reg, waiters, pool, _engine) = spawn_hook_server().await;
+        let (base, reg, _waiters, _pool, _engine) = spawn_hook_server().await;
         let my_pid = std::process::id();
 
+        // Phase 17 pivot: Bash `echo hi` is now safelisted (D-11) and
+        // produces an instant Allow with no row. The PASSIVE stub creation
+        // still happens inside `resolve_or_create_agent` regardless of gate
+        // outcome — that's what this test's name asserts, so drop the
+        // row-polling loop and just verify the stub was created after a
+        // 200 OK. Under the old tool-category allowlist Bash was gated so
+        // a pending row was the convenient wait-point; post-Phase 17 we
+        // verify the resolver directly.
         let body = serde_json::json!({
             "pid": my_pid,
             "tool_name": "Bash",
             "tool_input": {"command": "echo hi"},
         });
 
-        let pool_clone = pool.clone();
-        let waiters_clone = waiters.clone();
-        let post_task = tokio::spawn(async move {
+        let resp = tokio::time::timeout(
+            std::time::Duration::from_millis(2000),
             reqwest::Client::new()
                 .post(format!("{base}/hook"))
                 .json(&body)
-                .timeout(std::time::Duration::from_secs(5))
-                .send()
-                .await
-                .unwrap()
-                .json::<AitcDecisionResponseDe>()
-                .await
-                .unwrap()
-        });
-
-        // Wait for the row to appear, then signal Allow.
-        let row_id: i64 = loop {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            let found: Option<(i64,)> = sqlx::query_as(
-                "SELECT id FROM approval_requests WHERE status='pending' LIMIT 1",
-            )
-            .fetch_optional(&pool_clone)
-            .await
-            .unwrap();
-            if let Some((id,)) = found {
-                break id;
-            }
-        };
-        waiters_clone.signal(row_id, HookDecision::Allow).await;
-
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            post_task,
+                .send(),
         )
         .await
         .unwrap()
         .unwrap();
+        assert_eq!(resp.status(), 200);
+        let decoded: AitcDecisionResponseDe = resp.json().await.unwrap();
+        assert!(
+            matches!(decoded, AitcDecisionResponseDe::Allow),
+            "D-11: safelisted Bash must instant-allow"
+        );
 
         let passive_id = format!("PASSIVE-{my_pid}");
         assert!(
@@ -1367,5 +1648,518 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_type, "system_note");
         assert_eq!(events[0].payload_json["prompt"], "Confirm deployment?");
+    }
+
+    // =====================================================================
+    // Phase 17 — conflict-triggered PreToolUse gating integration tests.
+    //
+    // Names locked by VALIDATION.md per-task contract. Do not rename. Each
+    // test exercises one decision rule from CONTEXT.md:
+    //   - D-04 liveness gate      → hook_allows_when_conflicting_agent_was_removed
+    //   - D-05 self-exclusion     → hook_allows_when_only_same_agent_wrote_path
+    //   - D-03 window boundary    → hook_allows_when_other_agent_write_outside_window
+    //   - D-10 parse-failure      → bash_parse_failure_allows
+    //   - D-14/D-15 two-agent     → hook_gates_edit_when_other_agent_recently_wrote_same_path
+    //   - D-21 row metadata       → gate_row_carries_conflict_with_agent_id
+    // T-17-04 latency perf test lives in `conflict::engine::tests::phase17::
+    // lock_contention_under_burst` (Plan 02's canonical home; `#[ignore]`).
+    // =====================================================================
+    mod phase17 {
+        use super::*;
+        use crate::conflict::engine::ConflictEngine;
+        use crate::pipeline::events::{Attribution, FileEvent, FileEventBatch, FileEventKind};
+        use std::path::{Path, PathBuf};
+        use std::sync::Arc;
+
+        fn now_ms() -> i64 {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64
+        }
+
+        /// Seed the engine with a single synthetic write by `(pid_a,
+        /// agent_id_a)` to `path` at `(now_ms - age_ms)`. `update_pid_mapping`
+        /// is called first so the engine's record carries the canonical
+        /// agent_id (D-15b). Path is canonicalized via the shared helper so
+        /// the hook side's `could_conflict_with` finds it in the HashMap.
+        async fn seed_other_agent_write(
+            engine: &Arc<tokio::sync::Mutex<ConflictEngine>>,
+            path: &Path,
+            pid_a: u32,
+            agent_id_a: &str,
+            age_ms: i64,
+        ) {
+            let canon = crate::conflict::canonicalize::canonicalize_for_conflict(path);
+            let mut eng = engine.lock().await;
+            eng.update_pid_mapping(pid_a, agent_id_a.to_string());
+            let batch = FileEventBatch {
+                events: vec![FileEvent {
+                    path: canon,
+                    kind: FileEventKind::Modify,
+                    timestamp_ms: now_ms() - age_ms,
+                    attribution: Attribution::Pid(pid_a),
+                }],
+                batch_id: 1,
+                dropped_batches: 0,
+            };
+            eng.process_batch(&batch);
+        }
+
+        /// Register an agent in the registry with the given pid + state.
+        /// Uses the passive_sentinel_adapter to avoid real-adapter coupling.
+        async fn register_agent(reg: &AgentRegistry, id: &str, pid: u32) {
+            let adapter = crate::agents::generic::passive_sentinel_adapter();
+            reg.upsert_agent(
+                id.to_string(),
+                AgentInfo {
+                    id: id.to_string(),
+                    agent_type: "claude-code".into(),
+                    protocol: "cli".into(),
+                    state: AgentState::Running,
+                    pid: Some(pid),
+                    cwd: None,
+                    intent: None,
+                },
+                adapter,
+                false,
+            )
+            .await
+            .unwrap();
+        }
+
+        /// D-14/D-15 two-agent end-to-end: KAGENT-A wrote /tmp/phase17_a.rs
+        /// 500ms ago; KAGENT-B's Edit on the same path hits /hook and gates
+        /// with gate_reason='file_conflict', conflict_with_agent_id='KAGENT-A'.
+        #[tokio::test]
+        async fn hook_gates_edit_when_other_agent_recently_wrote_same_path() {
+            let (base, reg, waiters, pool, engine) = spawn_hook_server().await;
+
+            let path_str = "/tmp/phase17_gates_edit_when_other.rs";
+            let other_pid: u32 = 77_101;
+            register_agent(&reg, "KAGENT-A", other_pid).await;
+            seed_other_agent_write(&engine, Path::new(path_str), other_pid, "KAGENT-A", 500).await;
+
+            let my_pid = std::process::id();
+            // The hook's resolve_or_create_agent auto-creates PASSIVE-{my_pid};
+            // we use that identity (rather than a synthetic KAGENT-B) so the
+            // live-PID check inside hook_handler always passes.
+
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "session_id": "phase17-sess-1",
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": path_str,
+                    "old_string": "a",
+                    "new_string": "b",
+                },
+            });
+
+            let pool_clone = pool.clone();
+            let waiters_clone = waiters.clone();
+            let post_task = tokio::spawn(async move {
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .timeout(std::time::Duration::from_secs(5))
+                    .send()
+                    .await
+                    .unwrap()
+                    .json::<AitcDecisionResponseDe>()
+                    .await
+                    .unwrap()
+            });
+
+            // Wait for the gated row, then signal Allow.
+            let row_id: i64 = loop {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                let found: Option<(i64,)> = sqlx::query_as(
+                    "SELECT id FROM approval_requests \
+                     WHERE status='pending' AND tool_name='Edit' LIMIT 1",
+                )
+                .fetch_optional(&pool_clone)
+                .await
+                .unwrap();
+                if let Some((id,)) = found {
+                    break id;
+                }
+            };
+
+            let (gate_reason, conflict_with): (Option<String>, Option<String>) = sqlx::query_as(
+                "SELECT gate_reason, conflict_with_agent_id \
+                 FROM approval_requests WHERE id = ?",
+            )
+            .bind(row_id)
+            .fetch_one(&pool_clone)
+            .await
+            .unwrap();
+            assert_eq!(gate_reason.as_deref(), Some("file_conflict"));
+            assert_eq!(conflict_with.as_deref(), Some("KAGENT-A"));
+
+            waiters_clone.signal(row_id, HookDecision::Allow).await;
+            let decoded =
+                tokio::time::timeout(std::time::Duration::from_secs(2), post_task)
+                    .await
+                    .unwrap()
+                    .unwrap();
+            assert!(matches!(decoded, AitcDecisionResponseDe::Allow));
+        }
+
+        /// D-05 self-exclusion: an agent's own prior writes must never gate
+        /// its next tool call. Seed a write under `PASSIVE-{my_pid}`, then
+        /// POST /hook as the same PID — must return Allow with no row.
+        #[tokio::test]
+        async fn hook_allows_when_only_same_agent_wrote_path() {
+            let (base, _reg, _waiters, pool, engine) = spawn_hook_server().await;
+
+            let path_str = "/tmp/phase17_self_write.rs";
+            let my_pid = std::process::id();
+            let self_agent_id = format!("PASSIVE-{my_pid}");
+            seed_other_agent_write(
+                &engine,
+                Path::new(path_str),
+                my_pid,
+                &self_agent_id,
+                500,
+            )
+            .await;
+
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": path_str,
+                    "old_string": "a",
+                    "new_string": "b",
+                },
+            });
+            let resp = tokio::time::timeout(
+                std::time::Duration::from_millis(2000),
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .send(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(resp.status(), 200);
+            let decoded: AitcDecisionResponseDe = resp.json().await.unwrap();
+            assert!(matches!(decoded, AitcDecisionResponseDe::Allow));
+
+            let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM approval_requests")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(cnt, 0, "D-05: self-write must not gate");
+        }
+
+        /// D-03 window boundary: a write by another agent older than the
+        /// configured window must NOT gate. Use the default 5000ms window
+        /// and seed a record 6000ms old.
+        #[tokio::test]
+        async fn hook_allows_when_other_agent_write_outside_window() {
+            let (base, reg, _waiters, pool, engine) = spawn_hook_server().await;
+
+            let path_str = "/tmp/phase17_out_of_window.rs";
+            let other_pid: u32 = 77_102;
+            register_agent(&reg, "KAGENT-OLD", other_pid).await;
+            // 6000ms old > 5000ms default window => must not gate.
+            seed_other_agent_write(&engine, Path::new(path_str), other_pid, "KAGENT-OLD", 6000)
+                .await;
+
+            let my_pid = std::process::id();
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": path_str,
+                    "old_string": "a",
+                    "new_string": "b",
+                },
+            });
+            let resp = tokio::time::timeout(
+                std::time::Duration::from_millis(2000),
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .send(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(resp.status(), 200);
+            let decoded: AitcDecisionResponseDe = resp.json().await.unwrap();
+            assert!(matches!(decoded, AitcDecisionResponseDe::Allow));
+
+            let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM approval_requests")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(cnt, 0, "D-03: outside-window write must not gate");
+        }
+
+        /// D-04 liveness gate: if the engine's record points to an agent
+        /// that's no longer in the registry (crashed / reaped), the hook
+        /// must Allow — under-gate fail-safe, not false-gate.
+        #[tokio::test]
+        async fn hook_allows_when_conflicting_agent_was_removed() {
+            let (base, reg, _waiters, pool, engine) = spawn_hook_server().await;
+
+            let path_str = "/tmp/phase17_ghost_agent.rs";
+            let ghost_pid: u32 = 77_103;
+            register_agent(&reg, "KAGENT-GHOST", ghost_pid).await;
+            seed_other_agent_write(
+                &engine,
+                Path::new(path_str),
+                ghost_pid,
+                "KAGENT-GHOST",
+                500,
+            )
+            .await;
+            // Simulate the ghost agent crashing / being reaped: registry
+            // entry goes away, engine record survives (stale window).
+            reg.remove_agent("KAGENT-GHOST").await;
+
+            let my_pid = std::process::id();
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": path_str,
+                    "old_string": "a",
+                    "new_string": "b",
+                },
+            });
+            let resp = tokio::time::timeout(
+                std::time::Duration::from_millis(2000),
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .send(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(resp.status(), 200);
+            let decoded: AitcDecisionResponseDe = resp.json().await.unwrap();
+            assert!(
+                matches!(decoded, AitcDecisionResponseDe::Allow),
+                "D-04: ghost conflict must under-gate, not false-gate"
+            );
+
+            let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM approval_requests")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(cnt, 0);
+        }
+
+        /// D-10 parse-failure fallback: a Bash command that shlex cannot
+        /// tokenize (unterminated quote) maps to ParseFailed → Allow.
+        #[tokio::test]
+        async fn bash_parse_failure_allows() {
+            let (base, _reg, _waiters, pool, _engine) = spawn_hook_server().await;
+
+            let my_pid = std::process::id();
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "tool_name": "Bash",
+                "tool_input": {
+                    "command": "echo \"unterminated",
+                    "cwd": "/tmp",
+                },
+            });
+            let resp = tokio::time::timeout(
+                std::time::Duration::from_millis(2000),
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .send(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(resp.status(), 200);
+            let decoded: AitcDecisionResponseDe = resp.json().await.unwrap();
+            assert!(
+                matches!(decoded, AitcDecisionResponseDe::Allow),
+                "D-10: bash parse failure must allow"
+            );
+
+            let (cnt,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM approval_requests")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(cnt, 0);
+        }
+
+        /// D-21 approval-row shape: a file_conflict gate populates BOTH
+        /// `gate_reason='file_conflict'` AND `conflict_with_agent_id=<peer>`
+        /// (T-17-07 both-or-neither invariant).
+        #[tokio::test]
+        async fn gate_row_carries_conflict_with_agent_id() {
+            let (base, reg, waiters, pool, engine) = spawn_hook_server().await;
+
+            let path_str = "/tmp/phase17_row_metadata.rs";
+            let other_pid: u32 = 77_104;
+            register_agent(&reg, "KAGENT-PEER", other_pid).await;
+            seed_other_agent_write(
+                &engine,
+                Path::new(path_str),
+                other_pid,
+                "KAGENT-PEER",
+                300,
+            )
+            .await;
+
+            let my_pid = std::process::id();
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "session_id": "phase17-row-sess",
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": path_str,
+                    "content": "new file",
+                },
+            });
+
+            let pool_clone = pool.clone();
+            let waiters_clone = waiters.clone();
+            let post_task = tokio::spawn(async move {
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .timeout(std::time::Duration::from_secs(5))
+                    .send()
+                    .await
+                    .unwrap()
+                    .json::<AitcDecisionResponseDe>()
+                    .await
+                    .unwrap()
+            });
+
+            let row_id: i64 = loop {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                let found: Option<(i64,)> = sqlx::query_as(
+                    "SELECT id FROM approval_requests WHERE status='pending' LIMIT 1",
+                )
+                .fetch_optional(&pool_clone)
+                .await
+                .unwrap();
+                if let Some((id,)) = found {
+                    break id;
+                }
+            };
+
+            // Introspect the DB columns directly — mirrors what the
+            // frontend ApprovalRequestCard will read via bindings.
+            let (tool_name, file_path, gate_reason, conflict_with): (
+                String,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ) = sqlx::query_as(
+                "SELECT tool_name, file_path, gate_reason, conflict_with_agent_id \
+                 FROM approval_requests WHERE id = ?",
+            )
+            .bind(row_id)
+            .fetch_one(&pool_clone)
+            .await
+            .unwrap();
+            assert_eq!(tool_name, "Write");
+            assert_eq!(gate_reason.as_deref(), Some("file_conflict"));
+            assert_eq!(conflict_with.as_deref(), Some("KAGENT-PEER"));
+            // file_path column carries the canonical form for HashMap parity.
+            assert!(
+                file_path.as_deref().map_or(false, |p| p.ends_with(
+                    "phase17_row_metadata.rs"
+                )),
+                "canonical file_path must end with the original filename, got {file_path:?}"
+            );
+
+            waiters_clone.signal(row_id, HookDecision::Allow).await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), post_task)
+                .await
+                .unwrap();
+        }
+
+        /// D-15b regression: `resolve_or_create_agent` must wire
+        /// `update_pid_mapping` into the engine so process_batch records
+        /// carry the canonical KAGENT-*/PASSIVE-* id (never `PID-{pid}`).
+        #[tokio::test]
+        async fn update_pid_mapping_wired_via_resolve_or_create_agent() {
+            let (base, _reg, _waiters, _pool, engine) = spawn_hook_server().await;
+
+            let my_pid = std::process::id();
+            // A harmless passthrough POST — drives resolve_or_create_agent
+            // through the auto-create PASSIVE-{pid} branch.
+            let body = serde_json::json!({
+                "pid": my_pid,
+                "tool_name": "Read",
+                "tool_input": {"file_path": "/etc/hostname"},
+            });
+            let resp = tokio::time::timeout(
+                std::time::Duration::from_millis(2000),
+                reqwest::Client::new()
+                    .post(format!("{base}/hook"))
+                    .json(&body)
+                    .send(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(resp.status(), 200);
+
+            // Now process a write batch through the engine under `my_pid`.
+            // If update_pid_mapping was NOT called, the record would use
+            // format!("PID-{my_pid}"); with D-15b wired it must use
+            // `PASSIVE-{my_pid}`.
+            let expected_id = format!("PASSIVE-{my_pid}");
+            let canonical = crate::conflict::canonicalize::canonicalize_for_conflict(
+                Path::new("/tmp/phase17_pid_mapping.rs"),
+            );
+            {
+                let mut eng = engine.lock().await;
+                let batch = FileEventBatch {
+                    events: vec![FileEvent {
+                        path: canonical.clone(),
+                        kind: FileEventKind::Modify,
+                        timestamp_ms: now_ms(),
+                        attribution: Attribution::Pid(my_pid),
+                    }],
+                    batch_id: 2,
+                    dropped_batches: 0,
+                };
+                eng.process_batch(&batch);
+            }
+
+            // The engine's could_conflict_with returns the record's
+            // canonical agent_id when queried with a DIFFERENT except_id.
+            let found = {
+                let eng = engine.lock().await;
+                eng.could_conflict_with(&canonical, "PID-999999", now_ms() + 10, 5000)
+            };
+            assert_eq!(
+                found.as_deref(),
+                Some(expected_id.as_str()),
+                "D-15b: update_pid_mapping must route PID→canonical id at resolve time; got {found:?}, expected {expected_id}"
+            );
+        }
+
+        /// Placeholder pointing at the T-17-04 opt-in perf test's canonical
+        /// home in `conflict::engine::tests::phase17::lock_contention_under_
+        /// burst`. Kept as a grep-discoverable breadcrumb per VALIDATION
+        /// §"latency" row; the real test is `#[ignore]` in engine.rs.
+        #[ignore]
+        #[allow(dead_code)]
+        #[tokio::test]
+        async fn lock_contention_under_burst_placeholder_see_conflict_engine_tests() {
+            // Intentionally empty — see the real test at:
+            //   cargo test --package aitc --lib \
+            //     conflict::engine::tests::phase17::lock_contention_under_burst \
+            //     -- --ignored --nocapture
+        }
     }
 }
