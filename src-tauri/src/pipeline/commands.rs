@@ -176,12 +176,31 @@ pub async fn start_watch(
     // Spawn conflict engine task: processes batches from broadcast channel,
     // detects conflicts, emits Tauri events for real-time frontend push (CNFL-02),
     // and dispatches OS notifications for conflict state (D-09).
-    let conflict_window_ms = conflict_state.get_window_ms();
+    //
+    // Phase 17 D-15: engine is now shared with /hook via Tauri managed
+    // state (registered in lib.rs setup). We no longer construct a local
+    // ConflictEngine here. The engine's internal window is baked at
+    // lib.rs startup from 5000ms — the /hook path routes around that
+    // staleness by passing fresh window_ms into could_conflict_with per
+    // request (D-14b). Hot-swapping the engine's eviction-policy window
+    // here would require a watch-channel from ConflictState and is
+    // out-of-scope for Phase 17.
+    let engine: Arc<tokio::sync::Mutex<ConflictEngine>> = app_handle
+        .state::<Arc<tokio::sync::Mutex<ConflictEngine>>>()
+        .inner()
+        .clone();
     let app_handle_clone = app_handle.clone();
     let conflict_task = tokio::spawn(async move {
-        let mut engine = ConflictEngine::new(Duration::from_millis(conflict_window_ms));
         while let Ok(batch) = conflict_rx.recv().await {
-            let alerts = engine.process_batch(&batch);
+            // Pitfall 1 / T-17-04: scope the lock TIGHTLY. process_batch is
+            // synchronous (no .await inside), so the mutex is held for a
+            // handful of microseconds per batch. The lock MUST be released
+            // before the alert-dispatch loop so the /hook handler's
+            // could_conflict_with query is not starved during burst writes.
+            let alerts = {
+                let mut eng = engine.lock().await;
+                eng.process_batch(&batch)
+            };
             for alert in alerts {
                 // Push to frontend in real time via Tauri event (CNFL-02)
                 emit_conflict_event(&app_handle_clone, &alert);
