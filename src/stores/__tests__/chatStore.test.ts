@@ -25,7 +25,7 @@ const mockChannel: ChatChannel = {
   currentSessionId: null,
 };
 
-const mockEvent: AgentEvent = {
+const mockUserEvent: AgentEvent = {
   id: 1,
   agentId: 'claude-cc-001',
   sessionId: '0d836c4f',
@@ -36,6 +36,61 @@ const mockEvent: AgentEvent = {
   createdAt: '2026-04-17T12:00:00Z',
   deliveryStatus: 'queued',
 };
+
+function mkAssistant(
+  id: number,
+  streaming: boolean,
+  overrides: Partial<AgentEvent> = {},
+): AgentEvent {
+  return {
+    id,
+    agentId: 'claude-cc-001',
+    sessionId: '0d836c4f',
+    eventType: 'assistant_text',
+    payloadJson: { content: 'OK', streaming },
+    approvalRequestId: null,
+    sequenceNumber: id,
+    createdAt: '2026-04-17T12:00:00Z',
+    deliveryStatus: null,
+    ...overrides,
+  };
+}
+
+function mkUser(
+  id: number,
+  deliveryStatus: AgentEvent['deliveryStatus'],
+  overrides: Partial<AgentEvent> = {},
+): AgentEvent {
+  return {
+    id,
+    agentId: 'claude-cc-001',
+    sessionId: '0d836c4f',
+    eventType: 'user_text',
+    payloadJson: { content: 'hi' },
+    approvalRequestId: null,
+    sequenceNumber: id,
+    createdAt: '2026-04-17T12:00:00Z',
+    deliveryStatus,
+    ...overrides,
+  };
+}
+
+// Invoker to simulate the listen(() => handler) registration pattern.
+// Returns a map of eventName → handler so tests can trigger them manually.
+function installListenMock() {
+  const handlers = new Map<
+    string,
+    // payload is loosely typed — each test will cast.
+    (ev: { payload: unknown }) => void
+  >();
+  mockListen.mockImplementation(async (eventName, handler) => {
+    handlers.set(eventName as string, handler as never);
+    return () => {
+      // noop unlisten
+    };
+  });
+  return handlers;
+}
 
 describe('chatStore', () => {
   beforeEach(() => {
@@ -57,8 +112,53 @@ describe('chatStore', () => {
     expect(state.isLoading).toBe(false);
   });
 
+  it('loadInitialEvents reverses backend newest-first into oldest-first', async () => {
+    const newestFirst: AgentEvent[] = [
+      mkUser(3, 'delivered'),
+      mkUser(2, 'delivered'),
+      mkUser(1, 'delivered'),
+    ];
+    mockInvoke.mockResolvedValueOnce(newestFirst);
+    await useChatStore.getState().loadInitialEvents('claude-cc-001');
+    const events = useChatStore.getState().eventsByAgent['claude-cc-001'] ?? [];
+    expect(events.map((e) => e.id)).toEqual([1, 2, 3]);
+    expect(mockInvoke).toHaveBeenCalledWith('list_agent_events', {
+      agentId: 'claude-cc-001',
+      beforeId: null,
+      limit: 50,
+    });
+  });
+
+  it('loadOlder prepends older events in oldest-first order', async () => {
+    // Existing array is oldest→newest [10, 11].
+    useChatStore.setState({
+      eventsByAgent: {
+        'claude-cc-001': [mkUser(10, 'delivered'), mkUser(11, 'delivered')],
+      },
+    });
+    // Backend returns newest-first [9, 8, 7].
+    mockInvoke.mockResolvedValueOnce([
+      mkUser(9, 'delivered'),
+      mkUser(8, 'delivered'),
+      mkUser(7, 'delivered'),
+    ]);
+    await useChatStore.getState().loadOlder('claude-cc-001');
+    const events = useChatStore.getState().eventsByAgent['claude-cc-001'] ?? [];
+    expect(events.map((e) => e.id)).toEqual([7, 8, 9, 10, 11]);
+    expect(mockInvoke).toHaveBeenCalledWith('list_agent_events', {
+      agentId: 'claude-cc-001',
+      beforeId: 10,
+      limit: 50,
+    });
+  });
+
+  it('loadOlder no-ops when current array is empty (no beforeId)', async () => {
+    await useChatStore.getState().loadOlder('claude-cc-001');
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
   it('sendMessage optimistic-appends the returned event', async () => {
-    mockInvoke.mockResolvedValueOnce(mockEvent);
+    mockInvoke.mockResolvedValueOnce(mockUserEvent);
     await useChatStore.getState().sendMessage('claude-cc-001', 'hello');
     expect(mockInvoke).toHaveBeenCalledWith('send_chat_message_to_agent', {
       agentId: 'claude-cc-001',
@@ -69,7 +169,37 @@ describe('chatStore', () => {
     expect(state.eventsByAgent['claude-cc-001'][0].id).toBe(1);
   });
 
-  it('subscribeToChat wires all six listeners', async () => {
+  it('sendMessage dedupes when the event-appended listener races first', async () => {
+    // Pre-seed the array as if the listener fired first.
+    useChatStore.setState({
+      eventsByAgent: { 'claude-cc-001': [mockUserEvent] },
+    });
+    mockInvoke.mockResolvedValueOnce(mockUserEvent);
+    await useChatStore.getState().sendMessage('claude-cc-001', 'hello');
+    const events = useChatStore.getState().eventsByAgent['claude-cc-001'] ?? [];
+    expect(events).toHaveLength(1);
+  });
+
+  it('clearThread empties the agent array', async () => {
+    useChatStore.setState({
+      eventsByAgent: { 'claude-cc-001': [mockUserEvent] },
+    });
+    mockInvoke.mockResolvedValueOnce(3);
+    await useChatStore.getState().clearThread('claude-cc-001');
+    expect(mockInvoke).toHaveBeenCalledWith('clear_agent_thread', {
+      agentId: 'claude-cc-001',
+    });
+    expect(useChatStore.getState().eventsByAgent['claude-cc-001']).toEqual([]);
+  });
+
+  it('markRead resets unread to 0', async () => {
+    useChatStore.setState({ unreadByAgent: { 'claude-cc-001': 7 } });
+    mockInvoke.mockResolvedValueOnce(undefined);
+    await useChatStore.getState().markRead('claude-cc-001');
+    expect(useChatStore.getState().unreadByAgent['claude-cc-001']).toBe(0);
+  });
+
+  it('subscribeToChat wires all nine listeners', async () => {
     mockListen.mockImplementation(async () => () => {});
     await useChatStore.getState().subscribeToChat();
     const calls = mockListen.mock.calls.map((c) => c[0]);
@@ -81,53 +211,175 @@ describe('chatStore', () => {
         'agent-session-started',
         'agent-session-ended',
         'agent-delivery-updated',
+        'agent-thread-cleared',
+        'agent-events-marked-read',
+        'agent-session-resumed',
       ]),
     );
+    expect(calls.length).toBe(9);
   });
 
-  it('unread count increments only when agent not selected', async () => {
-    let appendHandler:
-      | ((payload: { payload: AgentEvent }) => void)
-      | undefined;
-    mockListen.mockImplementation(async (event, handler) => {
-      if (event === 'agent-event-appended') {
-        appendHandler = handler as never;
-      }
-      return () => {};
-    });
+  it('agent-event-appended increments unread when agent is not selected', async () => {
+    const handlers = installListenMock();
     await useChatStore.getState().subscribeToChat();
-    expect(appendHandler).toBeDefined();
-
-    // Not selected: unread should increment.
-    appendHandler!({ payload: mockEvent });
-    expect(useChatStore.getState().unreadByAgent['claude-cc-001']).toBe(1);
-
-    // Selected + visible: unread should NOT increment.
-    useChatStore.setState({ selectedAgentId: 'claude-cc-001' });
-    // document.visibilityState in jsdom defaults to 'visible'.
-    appendHandler!({ payload: { ...mockEvent, id: 2 } });
-    expect(useChatStore.getState().unreadByAgent['claude-cc-001']).toBe(1);
+    const handler = handlers.get('agent-event-appended')!;
+    handler({ payload: mockUserEvent });
+    expect(
+      useChatStore.getState().unreadByAgent['claude-cc-001'],
+    ).toBe(1);
   });
 
-  it('markRead resets unread to 0', async () => {
+  it('agent-event-appended does NOT increment when agent is selected AND visible', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    useChatStore.setState({ selectedAgentId: 'claude-cc-001' });
+    const handler = handlers.get('agent-event-appended')!;
+    handler({ payload: mockUserEvent });
+    // jsdom defaults visibilityState to 'visible'.
+    expect(
+      useChatStore.getState().unreadByAgent['claude-cc-001'] ?? 0,
+    ).toBe(0);
+  });
+
+  it('agent-event-appended dedupes by event id', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    const handler = handlers.get('agent-event-appended')!;
+    handler({ payload: mockUserEvent });
+    handler({ payload: mockUserEvent }); // duplicate
+    const events = useChatStore.getState().eventsByAgent['claude-cc-001'] ?? [];
+    expect(events).toHaveLength(1);
+  });
+
+  it('agent-turn-complete flips last streaming assistant_text to streaming:false', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
     useChatStore.setState({
-      unreadByAgent: { 'claude-cc-001': 7 },
+      eventsByAgent: {
+        'claude-cc-001': [
+          mkAssistant(10, false),
+          mkAssistant(11, true),
+        ],
+      },
     });
-    mockInvoke.mockResolvedValueOnce(undefined);
-    await useChatStore.getState().markRead('claude-cc-001');
+    const handler = handlers.get('agent-turn-complete')!;
+    handler({
+      payload: {
+        agentId: 'claude-cc-001',
+        sessionId: null,
+        terminalReason: 'end_turn',
+        isError: false,
+      },
+    });
+    const events = useChatStore.getState().eventsByAgent['claude-cc-001'];
+    const streamed = events.find((e) => e.id === 11)!;
+    expect(
+      (streamed.payloadJson as { streaming?: boolean }).streaming,
+    ).toBe(false);
+  });
+
+  it('agent-turn-complete flips last delivered user_text to consumed', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    useChatStore.setState({
+      eventsByAgent: {
+        'claude-cc-001': [
+          mkUser(100, 'delivered'),
+          mkUser(101, 'delivered'),
+          mkAssistant(102, false),
+        ],
+      },
+    });
+    const handler = handlers.get('agent-turn-complete')!;
+    handler({
+      payload: {
+        agentId: 'claude-cc-001',
+        sessionId: null,
+        terminalReason: 'end_turn',
+        isError: false,
+      },
+    });
+    const events = useChatStore.getState().eventsByAgent['claude-cc-001'];
+    const consumed = events.find((e) => e.id === 101)!;
+    expect(consumed.deliveryStatus).toBe('consumed');
+    // The earlier one should remain delivered.
+    const earlier = events.find((e) => e.id === 100)!;
+    expect(earlier.deliveryStatus).toBe('delivered');
+  });
+
+  it('agent-delivery-updated propagates across all agents', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    useChatStore.setState({
+      eventsByAgent: {
+        a: [mkUser(42, 'queued', { agentId: 'a' })],
+        b: [mkUser(43, 'queued', { agentId: 'b' })],
+      },
+    });
+    const handler = handlers.get('agent-delivery-updated')!;
+    handler({ payload: { eventId: 42, status: 'delivered' } });
+    const state = useChatStore.getState();
+    expect(state.eventsByAgent['a'][0].deliveryStatus).toBe('delivered');
+    expect(state.eventsByAgent['b'][0].deliveryStatus).toBe('queued');
+  });
+
+  it('agent-thread-cleared empties the target agent', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    useChatStore.setState({
+      eventsByAgent: { 'claude-cc-001': [mockUserEvent] },
+    });
+    const handler = handlers.get('agent-thread-cleared')!;
+    handler({ payload: 'claude-cc-001' });
+    expect(
+      useChatStore.getState().eventsByAgent['claude-cc-001'] ?? [],
+    ).toEqual([]);
+  });
+
+  it('agent-events-marked-read zeros unread for that agent', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    useChatStore.setState({ unreadByAgent: { 'claude-cc-001': 5 } });
+    const handler = handlers.get('agent-events-marked-read')!;
+    handler({ payload: 'claude-cc-001' });
     expect(useChatStore.getState().unreadByAgent['claude-cc-001']).toBe(0);
   });
 
-  it('totalUnread sums unreadByAgent', () => {
-    useChatStore.setState({
-      unreadByAgent: { a: 2, b: 5, c: 0 },
+  it('agent-session-ended sets archived=true on matching channel', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    useChatStore.setState({ channels: [mockChannel] });
+    const handler = handlers.get('agent-session-ended')!;
+    handler({
+      payload: {
+        agentId: 'claude-cc-001',
+        sessionId: null,
+        reason: 'completed',
+        exitCode: 0,
+      },
     });
+    expect(useChatStore.getState().channels[0].archived).toBe(true);
+  });
+
+  it('agent-session-resumed sets archived=false on matching channel', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    useChatStore.setState({
+      channels: [{ ...mockChannel, archived: true }],
+    });
+    const handler = handlers.get('agent-session-resumed')!;
+    handler({ payload: 'claude-cc-001' });
+    expect(useChatStore.getState().channels[0].archived).toBe(false);
+  });
+
+  it('totalUnread sums unreadByAgent', () => {
+    useChatStore.setState({ unreadByAgent: { a: 2, b: 5, c: 0 } });
     expect(useChatStore.getState().totalUnread()).toBe(7);
   });
 
   it('reset zeros everything', () => {
     useChatStore.setState({
-      eventsByAgent: { a: [mockEvent] },
+      eventsByAgent: { a: [mockUserEvent] },
       channels: [mockChannel],
       selectedAgentId: 'a',
       unreadByAgent: { a: 3 },
