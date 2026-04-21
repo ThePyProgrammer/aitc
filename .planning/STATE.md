@@ -140,6 +140,7 @@ None yet.
 | 260414-k8p | Cross-OS CI (Linux/Windows/macOS + Arch container) | 2026-04-14 | e29775b, 0346d38, d8678f9 |
 | 260415-gke | Modal Change-Repo dialog (replace inline confirm) | 2026-04-15 | ab94b96, c273caa |
 | 260421-igz | Rename top bar title AI_CONTROL_CENTRE → AI_CMD_CENTRE | 2026-04-21 | 236b46e |
+| 260421-fast | Rename top bar title AI_CMD_CENTRE → AI_CONTROL_CENTRE | 2026-04-21 | 3cffd8b |
 
 ## Session Continuity
 
