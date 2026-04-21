@@ -17,6 +17,7 @@ pub mod commands;
 pub mod deps;
 pub mod events;
 pub mod ignore_filter;
+pub mod ipc_bridges;
 pub mod passive_bridge;
 pub mod pipeline_state;
 pub mod port_file;
