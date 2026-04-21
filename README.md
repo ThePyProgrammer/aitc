@@ -127,11 +127,7 @@ Wave 3 — "things you only find out by actually running this"
   20   Diff-aware agent polling            ← 3, 10     ⏳ planning
 ```
 
-**Status (2026-04-21):** Waves 0 and 1 are done. Phase 10's residual transcript-polish gaps got split out to Phase 19 so they wouldn't gate the ship.
-
-Wave 2 is where the scope creep lives and we're in it. **Phase 11** (d3-force in a dedicated Worker) and **Phase 11.1** (zoom-scroll lag) both shipped today; 11.1's smoke caught two hotfix-worthy regressions that landed same-session — details in the phase summary. Low-zoom perf is parked for a future Phase 11.2.
-
-Wave 3 collects the reality checks — things that only break once you actually run the app with multiple long-lived agents. None of these four are blocked by Wave 2; all could be picked up in parallel. **Phase 18** (registry flooding) shipped 2026-04-21. **Phase 19** (chat-transcript polish) is 4/4 code-complete; three human-UAT items remain in [`19-HUMAN-UAT.md`](.planning/phases/19-polish-phase-10-chat-transcript-rendering-four-related-gaps-/19-HUMAN-UAT.md). **Phase 17** (conflict-triggered gating) remains drafted; see [`17-CONTEXT.md`](.planning/phases/17-conflict-triggered-pretooluse-gating-replace-tool-category-g/17-CONTEXT.md) for the three unresolved design questions. **Phase 20** (diff-aware agent polling) is planning — perf-only, no schema change, no visual change.
+**Status (as of 2026-04-21):** 13 of 21 phases shipped (all of Waves 0–1, plus 11, 11.1, 18), + 1 coded awaiting UAT (19). Phases 12, 13, 14 (Wave 2 radar polish) are each independently unblocked; Phases 17 and 20 (Wave 3) are pickable in parallel.
 
 Ground truth: [`.planning/STATE.md`](.planning/STATE.md) + [`.planning/ROADMAP.md`](.planning/ROADMAP.md). GSD updates them automatically. Please do not hand-edit the checkboxes, you will make me sad.
 
