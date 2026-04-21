@@ -120,15 +120,16 @@ Wave 2: "the radar should be sicker"
   ├── 15 Enhanced ATC agent overlay (TCAS)   → 14         ⏳ planning
   └── 16 Typed edges + Louvain communities   → 15         ⏳ planning
 
-Wave 3: "actually the whole gating model is wrong"
-  └── 17 Conflict-triggered gate             → 16         ⏳ drafted (17-CONTEXT.md)
+Wave 3: "things you only find out by actually running this"
+  ├── 17 Conflict-triggered gate             → 16         ⏳ drafted (17-CONTEXT.md)
+  └── 18 Fix passive-scan registry flooding  → 17         ⏳ planning
 ```
 
 **Status (2026-04-21):** Waves 0 and 1 are basically done. All of v1.0 shipped. Phase 7 replaced the original squarified-treemap radar with the force-directed graph (RIP, you served us well). Phase 8 shipped the Claude Code hook plumbing. Phase 9 shipped Arsenal. Phase 10 (Chat UI) has **all 6 plans coded** — blocked only on the Plan 06 Task 3 human-verify UAT checkpoint (see `10-06-CHECKPOINT.md`).
 
 Wave 2 is where the scope creep lives and we're in it. **Phase 11** shipped 2026-04-21 — d3-force now runs in a dedicated Worker with transferable `Float32Array` position buffers, prod build passed smoke, force-config sliders are "damn responsive" per the operator. Manual UAT surfaced a zoom-scroll lag on settled graphs, filed as **Phase 11.1** (INSERTED) — the hot-path gate short-circuits correctly when the sim is settled, so the render loop is byte-identical to Phase 7 and this is a pre-existing issue that Phase 11's perf surfacing merely exposed. Suspects: wheel events firing at 120–240Hz on trackpads outrunning rAF, `drawFolderHulls` recomputing convex hulls per frame even on static positions, and the Zustand viewport-writeback cascade. Scope is performance-only; no visual change; no new capability.
 
-Wave 3 is **Phase 17** (conflict-triggered gating), added 2026-04-21 after I got too annoyed with the current "every Edit/Write/Bash prompts you" model and yelled at Claude about it. See [`17-CONTEXT.md`](.planning/phases/17-conflict-triggered-pretooluse-gating-replace-tool-category-g/17-CONTEXT.md) for the three unresolved design questions.
+Wave 3 collects the reality checks — things that only break once you actually run the app with multiple long-lived agents. **Phase 17** (conflict-triggered gating) exists because the "every Edit/Write/Bash prompts you" model became unusable in a multi-agent session; see [`17-CONTEXT.md`](.planning/phases/17-conflict-triggered-pretooluse-gating-replace-tool-category-g/17-CONTEXT.md) for the three unresolved design questions. **Phase 18** was filed after `AgentRegistry` hit its `MAX_AGENTS=100` cap within seconds of startup — `passive_bridge.bridge_tick` was registering a `PASSIVE-{pid}` for every `claude`/`codex`/`opencode`-named process on the box, including unrelated CLI sessions in other terminals and short-lived subprocesses that Phase 10's long-lived stream-json runtime spawns (MCP handlers, `aitc-hook` fires, node helpers). Pre-existing bug from Phase 3/6, amplified by Phase 10. Fix needs to scope passive registration to self-registered PIDs **or** cwd-in-active-repo with a narrow command-line match, plus raise the ceiling as a safety net.
 
 Ground truth: [`.planning/STATE.md`](.planning/STATE.md) + [`.planning/ROADMAP.md`](.planning/ROADMAP.md). GSD updates them automatically. Please do not hand-edit the checkboxes, you will make me sad.
 
