@@ -697,7 +697,19 @@ export type ApprovalHistoryRecord = { id: number; sessionId: number | null; agen
  * Claude Code PreToolUse context for pretool_use rows. These are `Option`
  * because write_access rows (Phase 4 protected-path trigger) don't have them.
  */
-export type ApprovalRequest = { id: number; agentId: string; requestType: string; filePath: string | null; diffContent: string | null; status: string; urgency: string; responseNote: string | null; editedContent: string | null; createdAt: string; resolvedAt: string | null; toolName: string | null; toolInputJson: string | null; sessionId: string | null }
+export type ApprovalRequest = { id: number; agentId: string; requestType: string; filePath: string | null; diffContent: string | null; status: string; urgency: string; responseNote: string | null; editedContent: string | null; createdAt: string; resolvedAt: string | null; toolName: string | null; toolInputJson: string | null; sessionId: string | null; 
+/**
+ * Phase 17 D-21: the OTHER agent whose recent write triggered the
+ * `file_conflict` gate. `None` on legacy rows, protected_path gates,
+ * and future non-conflict gate reasons.
+ */
+conflictWithAgentId: string | null; 
+/**
+ * Phase 17 D-20/D-21: one of `'file_conflict' | 'protected_path' |
+ * 'unknown'` (GateReason enum string, see `conflict::types::GateReason`).
+ * `None` on legacy rows predating migration 007.
+ */
+gateReason: string | null }
 /**
  * Which process we believe authored the file event.
  * 
@@ -782,6 +794,16 @@ export type FileEventBatch = { events: FileEvent[]; batchId: number; droppedBatc
  * Remove+Create pair (the debouncer already does that work).
  */
 export type FileEventKind = { kind: "create" } | { kind: "modify" } | { kind: "remove" } | { kind: "rename"; from: string; to: string }
+/**
+ * Phase 17 D-20: reason a PreToolUse row was gated. Persisted as a string at
+ * the DB boundary (serde rename_all="snake_case") so migration 007's
+ * nullable TEXT column round-trips cleanly. `specta::Type` auto-exports a TS
+ * union `'file_conflict' | 'protected_path' | 'unknown'` to `src/bindings.ts`.
+ * 
+ * Registered in `lib.rs` specta builder via `.typ::<conflict::types::GateReason>()`
+ * (Plan 04 wires this alongside the engine State registration).
+ */
+export type GateReason = "file_conflict" | "protected_path" | "unknown"
 /**
  * Resolution choice for a single hunk in the merge UI.
  */
