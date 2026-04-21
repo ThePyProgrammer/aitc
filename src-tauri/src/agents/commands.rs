@@ -28,6 +28,24 @@ pub async fn list_agents(
     Ok(registry.all_agents().await)
 }
 
+/// Phase 18 D-04: read-only diagnostic snapshot of the agent registry.
+///
+/// Returns counts by ID-prefix (PASSIVE-*, KAGENT-*), `launched_by_aitc`
+/// count, and the lifetime monotonic `capacity_hits_since_start`
+/// counter. Intended for post-hoc debugging of "why did a KAGENT launch
+/// fail with 'Registry at capacity'?" questions.
+///
+/// Safe to poll at any cadence — single read-lock acquisition + one
+/// atomic load inside `snapshot_stats()`; does not contend with the
+/// `upsert_agent` write path.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_registry_stats(
+    registry: tauri::State<'_, Arc<AgentRegistry>>,
+) -> Result<crate::agents::registry::RegistryStats, String> {
+    Ok(registry.snapshot_stats().await)
+}
+
 /// List adapter types whose launch binary resolves on PATH.
 ///
 /// Used by the Deploy dialog to hide agent types that aren't installed,
