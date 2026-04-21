@@ -36,6 +36,9 @@ export const DEFAULT_FORCE_CONFIG: ForceConfig = {
   clusterStrength: 0.08,
   linkStrength: 0.3,
   chargeStrength: -80,
+  // Phase 12 (D-29, D-30): boundaryStrength is a required field on ForceConfig.
+  // Fixture mirrors the radarStore DEFAULT_FORCE_CONFIG default.
+  boundaryStrength: 0.15,
 };
 
 export const tinyGraph = {

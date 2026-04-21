@@ -99,7 +99,10 @@ function sameConfig(a: ForceConfig, b: ForceConfig): boolean {
     a.centerStrength === b.centerStrength &&
     a.clusterStrength === b.clusterStrength &&
     a.linkStrength === b.linkStrength &&
-    a.chargeStrength === b.chargeStrength
+    a.chargeStrength === b.chargeStrength &&
+    // Phase 12 (D-30): boundaryStrength is part of the equality so slider
+    // changes trigger updateConfig → alpha-restart in the worker.
+    a.boundaryStrength === b.boundaryStrength
   );
 }
 
@@ -309,6 +312,11 @@ export function useGraphLayout(): UseGraphLayoutResult {
           dirDepth: n.dirDepth,
           fx: n.fx ?? null,
           fy: n.fy ?? null,
+          // Phase 12 (D-10, D-37): kind + language ride init/topology only.
+          // Passing them through updateConfig would orphan the assignment
+          // because buildSim is not re-invoked (Pitfall 2).
+          kind: n.kind,
+          language: n.language,
         })),
         edges: edges.map((e) => ({
           source:

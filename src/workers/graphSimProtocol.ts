@@ -17,6 +17,10 @@ export interface ForceConfig {
   clusterStrength: number;
   linkStrength: number;
   chargeStrength: number;
+  // Phase 12 (D-29, D-30): forceBoundary strength (0..1). Routes TS-language
+  // nodes toward y<0 and Rust-language nodes toward y>0. Defaults to 0.15
+  // per DEFAULT_FORCE_CONFIG on the store side.
+  boundaryStrength: number;
 }
 
 export interface InitMessage {
@@ -28,6 +32,11 @@ export interface InitMessage {
     dirDepth: number;
     fx?: number | null;
     fy?: number | null;
+    // Phase 12 (D-10, D-37): kind + language ride the init/topology messages
+    // only — never updateConfig. Pitfall 2: sending them through updateConfig
+    // would silently orphan the assignment since buildSim is not re-invoked.
+    kind?: 'file' | 'bridge';
+    language?: 'ts' | 'rust';
   }[];
   edges: { source: string; target: string; kind: string }[];
   config: ForceConfig;

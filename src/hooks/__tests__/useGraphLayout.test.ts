@@ -435,11 +435,142 @@ describe('useGraphLayout — Phase 11 Worker client', () => {
   });
 });
 
-// Phase 12 Wave 0 scaffold. Wave 2 flips `.todo` → real `it(...)` bodies.
+// Phase 12 Wave 3 — real `it(...)` bodies flipped from Wave 0 `.todo` stubs.
 // Witness V-12-20 + D-37 worker-protocol guard.
 describe('Phase 12 boundaryStrength + kind/language propagation', () => {
-  it.todo('V-12-20: boundaryStrength changes trigger updateConfig worker message with the new strength');
-  it.todo('V-12-20: boundaryStrength change alpha-restarts the sim');
-  it.todo('kind + language fields propagate onto InitMessage.nodes[] via the payload map');
-  it.todo('D-37: kind/language NOT sent through updateConfig (only through init/topology) — Pitfall 2 guard');
+  beforeEach(() => {
+    workers.length = 0;
+    vi.stubGlobal('Worker', MockWorker);
+    useRadarStore.getState().reset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('V-12-20: boundaryStrength changes trigger updateConfig worker message with the new strength', async () => {
+    renderHook(() => useGraphLayout());
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: seedGraphNodes(5),
+        graphEdges: [],
+      });
+    });
+    const w = workers[0];
+    // Init must carry the default boundaryStrength on its config.
+    const init = w.postedMessages.find((m) => m.type === 'init');
+    expect(init).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((init as any).config.boundaryStrength).toBe(0.15);
+
+    // Drop prior posts so we can observe only the next updateConfig batch.
+    w.postedMessages.length = 0;
+    await act(async () => {
+      useRadarStore.getState().setForceConfig({ boundaryStrength: 0.42 });
+    });
+    const updates = w.postedMessages.filter(
+      (m): m is Extract<WorkerIn, { type: 'updateConfig' }> =>
+        m.type === 'updateConfig',
+    );
+    expect(updates.length).toBeGreaterThan(0);
+    expect(updates[updates.length - 1].config.boundaryStrength).toBe(0.42);
+  });
+
+  it('V-12-20: boundaryStrength change alpha-restarts the sim via updateConfig', async () => {
+    const { result } = renderHook(() => useGraphLayout());
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: seedGraphNodes(5),
+        graphEdges: [],
+      });
+    });
+    const w = workers[0];
+    w.postedMessages.length = 0;
+    await act(async () => {
+      useRadarStore.getState().setForceConfig({ boundaryStrength: 0.3 });
+    });
+    // The updateConfig handler flips isSimulatingRef = true (alpha restart).
+    // More importantly, the worker receives an updateConfig message with the
+    // new strength — the alpha-restart is driven by the subsequent sim.tick
+    // loop inside graphSimCore.updateConfig.
+    expect(result.current.isSimulatingRef.current).toBe(true);
+    const updates = w.postedMessages.filter((m) => m.type === 'updateConfig');
+    expect(updates.length).toBeGreaterThan(0);
+  });
+
+  it('kind + language fields propagate onto InitMessage.nodes[] via the payload map', async () => {
+    renderHook(() => useGraphLayout());
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: [
+          {
+            id: 'src/app.ts',
+            dirKey: 'src',
+            dirDepth: 1,
+            kind: 'file',
+            language: 'ts',
+          },
+          {
+            id: 'src-tauri/src/lib.rs',
+            dirKey: 'src-tauri/src',
+            dirDepth: 2,
+            kind: 'file',
+            language: 'rust',
+          },
+          {
+            id: 'bridge:ping',
+            dirKey: 'bridge',
+            dirDepth: 0,
+            kind: 'bridge',
+            fy: 0,
+            fx: 0,
+          },
+        ],
+        graphEdges: [],
+      });
+    });
+    const w = workers[0];
+    const init = w.postedMessages.find((m) => m.type === 'init');
+    expect(init).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const initNodes = (init as any).nodes as Array<{
+      id: string;
+      kind?: string;
+      language?: string;
+    }>;
+    const byId = new Map(initNodes.map((n) => [n.id, n]));
+    expect(byId.get('src/app.ts')!.kind).toBe('file');
+    expect(byId.get('src/app.ts')!.language).toBe('ts');
+    expect(byId.get('src-tauri/src/lib.rs')!.kind).toBe('file');
+    expect(byId.get('src-tauri/src/lib.rs')!.language).toBe('rust');
+    expect(byId.get('bridge:ping')!.kind).toBe('bridge');
+  });
+
+  it('D-37: kind/language NOT sent through updateConfig (only through init/topology) — Pitfall 2 guard', async () => {
+    renderHook(() => useGraphLayout());
+    await act(async () => {
+      useRadarStore.setState({
+        graphNodes: seedGraphNodes(5),
+        graphEdges: [],
+      });
+    });
+    const w = workers[0];
+    // Drop init/topology posts; focus only on what updateConfig carries.
+    await act(async () => {
+      useRadarStore.getState().setForceConfig({ boundaryStrength: 0.25 });
+    });
+    const updates = w.postedMessages.filter(
+      (m): m is Extract<WorkerIn, { type: 'updateConfig' }> =>
+        m.type === 'updateConfig',
+    );
+    expect(updates.length).toBeGreaterThan(0);
+    for (const u of updates) {
+      // updateConfig carries ONLY `config`; never nodes[] or edges[].
+      expect(u).not.toHaveProperty('nodes');
+      expect(u).not.toHaveProperty('edges');
+      // Config payload has no kind/language (those live on node entries only).
+      expect(u.config).not.toHaveProperty('kind');
+      expect(u.config).not.toHaveProperty('language');
+    }
+  });
 });

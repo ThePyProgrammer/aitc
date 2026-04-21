@@ -23,6 +23,7 @@ import {
   forceClusterCollide,
   type ClusterNode,
 } from '../views/Radar/forceCluster';
+import { forceBoundary, type BoundaryNode } from './forces/forceBoundary';
 import type {
   InitMessage,
   TopologyMessage,
@@ -56,7 +57,9 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-export interface SimNode extends ClusterNode {
+// Phase 12: widened to carry BoundaryNode (kind/language) alongside ClusterNode
+// (dirKey/dirDepth) so forceBoundary can route nodes by language.
+export interface SimNode extends ClusterNode, BoundaryNode {
   id: string;
 }
 
@@ -242,6 +245,11 @@ export function makeGraphSimCore(
       id: n.id,
       dirKey: n.dirKey,
       dirDepth: n.dirDepth,
+      // Phase 12 (D-10, D-16): propagate kind + language so forceBoundary
+      // can skip bridges + route files by language. Default undefined kind
+      // to 'file' for BC with any Phase-7-era payloads on the wire.
+      kind: n.kind ?? 'file',
+      language: n.language,
       // RESEARCH §Pitfall 1 — move useGraphLayout.ts:107-108 initial
       // position seeding into the core so tests are byte-deterministic.
       x: (rng() - 0.5) * 200,
@@ -277,6 +285,10 @@ export function makeGraphSimCore(
       .force('collide', forceCollide(COLLIDE_RADIUS))
       .force('cluster', forceCluster().strength(cfg.clusterStrength))
       .force('clusterCollide', forceClusterCollide())
+      // Phase 12 (D-29, D-37): forceBoundary registered alongside forceCluster.
+      // buildSim is the only place where the force is newly instantiated —
+      // updateConfig mutates .strength() on the existing instance.
+      .force('boundary', forceBoundary().strength(cfg.boundaryStrength))
       .alphaDecay(ALPHA_DECAY)
       .velocityDecay(VELOCITY_DECAY)
       .stop();
@@ -338,6 +350,11 @@ export function makeGraphSimCore(
       );
       (sim.force('cluster') as ReturnType<typeof forceCluster>).strength(
         cfg.clusterStrength,
+      );
+      // Phase 12 (D-29, D-30, D-37): update boundary strength in place.
+      // The force instance was registered in buildSim; here we just tune it.
+      (sim.force('boundary') as ReturnType<typeof forceBoundary>).strength(
+        cfg.boundaryStrength,
       );
       sim.alpha(FORCE_CONFIG_ALPHA).restart();
       if (paused) {
