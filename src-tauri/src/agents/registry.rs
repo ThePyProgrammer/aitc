@@ -12,12 +12,27 @@ use tokio::sync::RwLock;
 
 /// Maximum number of agents the registry will accept (T-03-03 mitigation).
 ///
-/// Raised 100 → 1000 pending Phase 18 (passive-scan flooding). The original
-/// 100 was set when passive detection was young and the worst case was a
-/// couple of PASSIVE-{pid} entries per repo. Phase 10's long-lived sessions
-/// + any developer running multiple claude CLIs machine-wide overflow it
-/// within seconds of boot. 1000 is a cheap safety net — HashMap handles it
-/// trivially — and Phase 18 will properly scope passive registration.
+/// **Why 1000 and not configurable:** this is an emergency ceiling, not the
+/// intended operating constraint. Phase 18's D-01/D-02 scoping (cwd-in-repo
+/// + parent-PID-in-list filter inside `passive_bridge::bridge_tick`) is the
+/// real capacity control. Under normal operation a developer with three
+/// concurrent AITC launches plus five externally-detected standalone agents
+/// fills roughly eight entries — two orders of magnitude below the cap.
+///
+/// **Why not 100:** that was the original Phase 3 value (T-03-03) set when
+/// passive detection was young. Phase 10's long-lived stream-json sessions
+/// each fork MCP helpers + node shims + hook sidecar fires; without
+/// subprocess-child filtering the 100 cap filled within seconds (commit
+/// 62612b3 raised it to 1000 as a hotfix pending Phase 18).
+///
+/// **Why not exposed to users:** no use case has emerged; the settings
+/// surface is the wrong place to absorb what should always be an
+/// emergency-only ceiling. If a user ever legitimately hits 1000, revisit
+/// the scoping policy (Phase 18 D-01/D-02), not the constant.
+///
+/// See `capacity_hits_since_start` below for runtime observability of how
+/// often this cap is actually approached (exposed to callers via the
+/// `get_registry_stats` Tauri command, Phase 18 D-04).
 const MAX_AGENTS: usize = 1000;
 
 /// Maximum stdout ring buffer lines per agent.
