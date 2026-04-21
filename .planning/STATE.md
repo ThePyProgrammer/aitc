@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 12 UI-SPEC approved (--auto)
-last_updated: "2026-04-21T11:19:07.176Z"
-last_activity: 2026-04-21 -- Phase 12 planning complete
+last_updated: "2026-04-21T11:20:05.079Z"
+last_activity: 2026-04-21 -- Phase 12 execution started
 progress:
   total_phases: 21
   completed_phases: 14
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-07)
 
 **Core value:** A developer can see exactly what every AI agent is doing across their codebase in real time, prevent destructive conflicts between concurrent agents, and approve/deny agent actions from a single command center.
-**Current focus:** Phase 19 — polish-phase-10-chat-transcript-rendering-four-related-gaps-
+**Current focus:** Phase 12 — add-ipc-bridge-nodes-and-cross-language-boundary-visualizati
 
 ## Current Position
 
-Phase: 19 (polish-phase-10-chat-transcript-rendering-four-related-gaps-) — AWAITING UAT
-Plan: 4 of 4 (all plans complete)
-Status: Ready to execute
-Last activity: 2026-04-21 -- Phase 12 planning complete
+Phase: 12 (add-ipc-bridge-nodes-and-cross-language-boundary-visualizati) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 12
+Last activity: 2026-04-21 -- Phase 12 execution started
 
 Progress: [██████████] 100%
 
