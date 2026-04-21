@@ -120,6 +120,7 @@ Recent decisions affecting current work:
 - [Phase 19]: Plan 02: V-19-04 (D-23 regression guard) asserted via observable proxy — zero DB rows after an AssistantText with @user and no TurnComplete. Direct `dispatch_chat_notification` capture would need a testing seam (feature flag / callback probe); the notification helper uses `catch_unwind` + OS-level dispatch, not easily mockable. Zero-row + V-19-01 (turn completes with one row) + V-19-02 (interrupted flushes one row) triangulate the Pitfall 1 surface.
 - [Phase 19]: Plan 02: Model-merge precedence `model.or_else(|| prior_buffer.model)` — envelope's `Some` wins; idle-flush's `None` preserves prior. Pitfall 7 (model-lost across idle flushes) covered by V-19-03 assertion that the envelope's model survives.
 - [Phase 19]: Plan 02: Pre-existing `conflict::engine::tests` failures (`test_conflict_detected_different_pids_within_window`, `test_custom_window_duration`) discovered during full `cargo test --lib` run. Two-layer pre-existence evidence (HEAD vs commit 339549d before test additions) reproduces identical failures. Logged to `deferred-items.md` as D-03 (Phase 03 module scope; unrelated to chat_runtime).
+- [Phase 11.1]: Post-ship defensive fix — wheel-triggered extreme zoom-in was blanking canvas + minimap instantly with no recovery (pan/zoom-out/force-edit all inert). Root cause confirmed by user smoke: NaN/Infinity propagation in viewport state — `ctx.setTransform(NaN,…)` silently no-ops, NaN self-perpetuates through min/max/+. Static review found no injection path (WebKitGTK pinch-deltaY candidate, untestable). Shipped Option B (defensive guard without diagnosis): `sanitizeViewport(next, prev)` wrapper on `useCanvasZoomPan.setViewport` falls back per-axis on non-finite input + reapplies [0.05, 20] zoom clamp; store-level `radarStore.setViewport` filters non-finite fields from incoming partial (covers `AgentManifestRow` + `RadarMinimap` call sites that bypass the hook). 7 new tests lock the invariant. Commits: 6878f48 (test restore post-revert) + 7b13735 (hook guard) + 383ca24 (store guard) + 06a8f90 (debug session resolved).
 
 ### Roadmap Evolution
 
@@ -160,6 +161,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T07:55:13.000Z
-Stopped at: Phase 19 Plan 02 (Wave 1 Rust) complete — 3 commits e7de43e..2948369; Plan 03 (Wave 2 frontend MarkdownBody) next
-Resume file: .planning/phases/19-polish-phase-10-chat-transcript-rendering-four-related-gaps-/19-03-PLAN.md
+Last session: 2026-04-21T16:05:00Z
+Stopped at: Phase 11.1 blanking-on-extreme-zoom RESOLVED via defensive setViewport guards (6878f48, 7b13735, 383ca24, 06a8f90); user smoke confirmed. Opening fresh debug session for cold-boot "stuck on building graph" symptom. Phase 19 Plan 02 also shipped in parallel (e7de43e..2948369..177871c); next is Plan 03 (Wave 2 frontend MarkdownBody).
+Resume file: .planning/debug/ (new session for cold-boot stuck-on-building-graph) + .planning/phases/19-polish-phase-10-chat-transcript-rendering-four-related-gaps-/19-03-PLAN.md (for Phase 19 continuation)
+Active debug sessions:
+  - resolved: .planning/debug/resolved/radar-zoom-blanks-canvas.md (Phase 11.1 NaN/Infinity viewport corruption fixed)
+  - awaiting_human_verify: .planning/debug/squarify-not-a-function.md (Phase 6 treemap interop — pending user smoke)
+  - investigating (opening next): cold-boot "stuck on building graph" — pause/resume monitoring recovers; suspect fetchGraph timing or pipeline-bridge debounce window on cold boot
