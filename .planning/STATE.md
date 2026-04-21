@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 12 Plan 02 (Wave 1 Rust scanners) complete
-last_updated: "2026-04-21T11:57:47Z"
-last_activity: 2026-04-21 -- Phase 12 Plan 02 (Wave 1) shipped
+stopped_at: Phase 12 Plan 03 (Wave 2 Tauri IPC surface) complete
+last_updated: "2026-04-21T13:31:40Z"
+last_activity: 2026-04-21 -- Phase 12 Plan 03 (Wave 2) shipped
 progress:
   total_phases: 21
   completed_phases: 14
   total_plans: 74
-  completed_plans: 65
-  percent: 88
+  completed_plans: 66
+  percent: 89
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 ## Current Position
 
 Phase: 12 (add-ipc-bridge-nodes-and-cross-language-boundary-visualizati) — EXECUTING
-Plan: 3 of 5 (Plan 02 Wave 1 Rust parsers complete; next is Plan 12-03 Wave 2 Tauri command + frontend store/worker)
+Plan: 4 of 5 (Plan 03 Wave 2 Tauri IPC surface complete; next is Plan 12-04 Wave 3 frontend store widening + GraphRenderer drawBridgeNodes/drawBoundaryLine + BridgeSelection/BridgeTooltip)
 Status: Executing Phase 12
-Last activity: 2026-04-21 -- Phase 12 Plan 02 (Wave 1 Rust parsers) shipped
+Last activity: 2026-04-21 -- Phase 12 Plan 03 (Wave 2 Tauri IPC surface) shipped
 
 Progress: [██████████] 100%
 
@@ -76,6 +76,7 @@ Progress: [██████████] 100%
 | Phase 19 P04 | 15 min | 2 tasks (3 commits) | 4 files |
 | Phase 12 P01 | 14 min | 2 tasks (2 commits) | 16 files |
 | Phase 12 P02 | 13 min | 3 tasks (3 commits) | 6 files |
+| Phase 12 P03 | 12 min | 2 tasks (2 commits) | 4 files |
 
 ## Accumulated Context
 
@@ -143,6 +144,11 @@ Recent decisions affecting current work:
 - [Phase 12]: Plan 02: Dangling detection via empty-string / zero-line sentinels rather than Option<T> — handler-absent → `handler_file=""` + `handler_line=0` + `tracing::warn!`; caller-absent → `caller_files=[]` + `tracing::info!`. Frontend-friendly DTO shape; serde default works; avoids nullable wire types.
 - [Phase 12]: Plan 02: Ping caller-count assertion corrected from plan's 4 (3 literal + 1 typed) to actual 3 (2 literal + 1 typed) after reading sample_caller_literal.ts — the fixture has 2 valid ping invokes on lines 7+9 plus 1 variable-callee skip on line 12. Plan author's bookkeeping error; fixture is source of truth.
 - [Phase 12]: Plan 02: Pre-existing `conflict::engine::tests` failures (`test_conflict_detected_different_pids_within_window`, `test_custom_window_duration`) reproduced on clean tip via stash + `cargo test --lib conflict::engine`. Logged as D-02 in 12-deferred-items.md. Phase 03 module scope; out of Phase 12 per "only fix own bugs" memory rule.
+- [Phase 12]: Plan 03: `get_ipc_bridges` async Tauri command mirrors `get_dependency_graph` shape exactly — `state.inner.lock().await` → `match guard.as_ref()` → Some-branch wraps `build_ipc_bridges(&active.repo_root.clone())` in `tauri::async_runtime::spawn_blocking` with `JoinError → String` mapping; None-branch returns `Ok(Vec::new())`. Lives immediately after `get_dependency_graph` in `pipeline/commands.rs` for discoverability.
+- [Phase 12]: Plan 03: `EdgeKind` widened via *append-only* variant addition (Invokes + Handles at the end) — no renumbering, no `#[non_exhaustive]` attribute. Exhaustive-match consumers would break at compile time if any exist (none did on main today; Plan 04 will add `drawEdges` arms). Preserves serde/specta binding stability for all prior variants.
+- [Phase 12]: Plan 03: V-12-13 witness placed in `pipeline::commands::tests::get_ipc_bridges_smoke_v_12_13` exercising the None-branch via direct guard inspection (`PipelineState::default()` → `guard.as_ref().is_none()`) rather than constructing a real `tauri::State<'_, PipelineState>` (only available in a running Tauri app). The Some-branch is already covered by Plan 02's `build_ipc_bridges_empty_root_returns_empty`.
+- [Phase 12]: Plan 03: Bindings regen uses canonical Phase 18 D-03 recipe (`cd src-tauri && cargo build --bin aitc && timeout --preserve-status 8 ./target/debug/aitc`). The `./target/debug/aitc` path is relative to `src-tauri/` — the binary boots, runs the debug_assertions-gated specta `.export(...)` inside `pub fn run()`, and the 8-second timeout with `--preserve-status` forwards the exit status. Verified regen produced `+74 -1` lines including all 6 V-12-14 grep-gate symbols.
+- [Phase 12]: Plan 03: D-03 deferred-items entry (bash_paths module missing — RESOLVED by Phase 17 Plan 01 merge `cf9dcff` in absentia between executor sessions) annotated RESOLVED rather than removed. Preserves audit trail of the inverted Wave ordering (Phase 17-03 landed the module index entry before Phase 17-01 created the file) so future planners can see why Wave ordering within a phase matters.
 - [Phase 11.1]: Post-ship defensive fix — wheel-triggered extreme zoom-in was blanking canvas + minimap instantly with no recovery (pan/zoom-out/force-edit all inert). Root cause confirmed by user smoke: NaN/Infinity propagation in viewport state — `ctx.setTransform(NaN,…)` silently no-ops, NaN self-perpetuates through min/max/+. Static review found no injection path (WebKitGTK pinch-deltaY candidate, untestable). Shipped Option B (defensive guard without diagnosis): `sanitizeViewport(next, prev)` wrapper on `useCanvasZoomPan.setViewport` falls back per-axis on non-finite input + reapplies [0.05, 20] zoom clamp; store-level `radarStore.setViewport` filters non-finite fields from incoming partial (covers `AgentManifestRow` + `RadarMinimap` call sites that bypass the hook). 7 new tests lock the invariant. Commits: 6878f48 (test restore post-revert) + 7b13735 (hook guard) + 383ca24 (store guard) + 06a8f90 (debug session resolved).
 
 ### Roadmap Evolution
@@ -185,9 +191,9 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T11:31:24Z
-Stopped at: Phase 12 Plan 01 (Wave 0 scaffold) complete — next is Plan 12-02 Wave 1 Rust scanners
-Resume file: .planning/phases/12-add-ipc-bridge-nodes-and-cross-language-boundary-visualizati/12-02-PLAN.md
+Last session: 2026-04-21T13:31:40Z
+Stopped at: Phase 12 Plan 03 (Wave 2 Tauri IPC surface) complete — next is Plan 12-04 Wave 3 frontend store/GraphRenderer
+Resume file: .planning/phases/12-add-ipc-bridge-nodes-and-cross-language-boundary-visualizati/12-04-PLAN.md
 Active debug sessions:
 
   - resolved: .planning/debug/resolved/radar-zoom-blanks-canvas.md (Phase 11.1 NaN/Infinity viewport corruption fixed)
