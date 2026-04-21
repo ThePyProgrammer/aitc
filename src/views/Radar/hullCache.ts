@@ -18,6 +18,19 @@ import { polygonHull, polygonCentroid } from 'd3-polygon';
 import { line, curveCatmullRomClosed } from 'd3-shape';
 import type { GraphNode } from '../../stores/radarStore';
 
+// Phase 11.1 — duplicate of GraphRenderer.ts::shouldRenderHullAtZoom to avoid
+// a circular import (hullCache → GraphRenderer → hullCache). The three-tier
+// zoom gate is small and stable; if it changes, update both copies. The
+// filter MUST run inside the cache build — without it, we pay convex-hull +
+// Catmull-Rom + Path2D construction for every deep-nested directory even
+// though drawFolderHulls skips them at paint time, which dominated the
+// per-rebuild cost on user hardware.
+function shouldBuildHullAtZoom(dirDepth: number, zoom: number): boolean {
+  if (zoom < 0.6) return dirDepth === 0;
+  if (zoom < 2) return dirDepth <= 2;
+  return true;
+}
+
 export interface HullCacheEntry {
   /** Pre-computed closed Catmull-Rom spline Path2D. null when <3 hull points. */
   smoothPath: Path2D | null;
@@ -80,10 +93,14 @@ export function getHullCache(
 
   const paddingRadius = 25 / zoom;
   for (const [dirKey, members] of byDir) {
+    const dirDepth = members[0].dirDepth;
+    // Skip hulls that drawFolderHulls would filter out anyway at the current
+    // zoom. Computing them here is pure waste and dominated the cache-miss
+    // cost for deeply-nested repos.
+    if (!shouldBuildHullAtZoom(dirDepth, zoom)) continue;
     const pts = members.map((n) => [n.x!, n.y!] as [number, number]);
     const padded = paddedHullPoints(pts, paddingRadius);
     const hull = polygonHull(padded);
-    const dirDepth = members[0].dirDepth;
     if (hull && hull.length >= 3) {
       const pathStr = smoothHullLine(hull);
       const smoothPath = pathStr ? new Path2D(pathStr) : null;
