@@ -119,11 +119,34 @@ pub(crate) async fn drive_stream_json_reader<R>(
                     }
                     Ok(None) => {
                         // EOF — subprocess closed stdout.
+                        // D-01.4 support: flush any buffered idle-flush text
+                        // as an AssistantText BEFORE StdoutClosed so the
+                        // aggregator's StdoutClosed arm sees the buffer
+                        // populated and can write the interrupted row. Without
+                        // this, a subprocess that dies mid-stream would lose
+                        // partial text.
+                        if !accumulated_text.is_empty() {
+                            let _ = sink
+                                .send(StreamEvent::AssistantText {
+                                    content: std::mem::take(&mut accumulated_text),
+                                    model: None,
+                                })
+                                .await;
+                        }
                         let _ = sink.send(StreamEvent::StdoutClosed).await;
                         break;
                     }
                     Err(e) => {
                         tracing::warn!(agent_id = %agent_id, err = %e, "stdout read err");
+                        // Same D-01.4 support path for read-error termination.
+                        if !accumulated_text.is_empty() {
+                            let _ = sink
+                                .send(StreamEvent::AssistantText {
+                                    content: std::mem::take(&mut accumulated_text),
+                                    model: None,
+                                })
+                                .await;
+                        }
                         let _ = sink.send(StreamEvent::StdoutClosed).await;
                         break;
                     }
@@ -1120,5 +1143,214 @@ mod tests {
         let out = truncate_for_notification("abcdefghijk", 5);
         assert_eq!(out.chars().count(), 5);
         assert!(out.ends_with('…'));
+    }
+
+    // ----------------------------------------------------------------
+    // Aggregator harness + D-01 coalescing tests (V-19-01..V-19-04)
+    // ----------------------------------------------------------------
+
+    /// Drive `run_event_aggregator` against a hand-built `Vec<StreamEvent>`
+    /// (or reader-sourced events) and return the seeded pool for assertions.
+    ///
+    /// Registers a live session for `agent_id` and binds a deterministic
+    /// session_id so `insert_agent_event`'s auto-sequence path fires.
+    async fn run_aggregator_with_events(
+        agent_id: &str,
+        events: Vec<StreamEvent>,
+    ) -> sqlx::SqlitePool {
+        let pool = crate::db::events::tests::make_pool_with_chat_schema().await;
+        let registry =
+            crate::chat_runtime::session_registry::LiveSessionRegistry::new_arc();
+        let (sess, _rx) =
+            crate::chat_runtime::session_registry::tests::make_live_session(agent_id);
+        registry.register(sess).await;
+        registry
+            .bind_session_id(agent_id, "sess-1".to_string())
+            .await;
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let (tx, rx) = mpsc::channel::<StreamEvent>(64);
+        let handle = spawn_event_aggregator(
+            rx,
+            agent_id.to_string(),
+            pool.clone(),
+            registry.clone(),
+            app_handle,
+        );
+        for ev in events {
+            tx.send(ev).await.expect("aggregator send");
+        }
+        // Closing the channel lets the `while let Some` loop terminate.
+        drop(tx);
+        // Bounded wait — aggregator is pure-in-memory + SQLite-in-memory, so
+        // this should complete in milliseconds.
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), handle).await;
+        pool
+    }
+
+    #[tokio::test]
+    async fn aggregator_coalesces_one_row_per_turn() {
+        // V-19-01 (D-01.1 + D-01.2 + D-01.3): the coalesced fixture emits 3
+        // text_delta chunks + 1 whole-turn assistant envelope + a result row.
+        // The aggregator must fold those into exactly one assistant_text DB
+        // row whose content is the envelope's authoritative "Hello world".
+        let bytes = load_fixture("coalesced_turn.jsonl");
+        let stream_events = run_reader_against_bytes(&bytes).await;
+        let pool = run_aggregator_with_events("A-1", stream_events).await;
+        let rows = crate::db::events::list_events_for_agent(&pool, "A-1", None, 10)
+            .await
+            .expect("list_events_for_agent");
+        let asst_rows: Vec<_> = rows
+            .iter()
+            .filter(|e| e.event_type == "assistant_text")
+            .collect();
+        assert_eq!(
+            asst_rows.len(),
+            1,
+            "exactly one assistant_text row per turn; rows = {:?}",
+            rows.iter()
+                .map(|e| e.event_type.clone())
+                .collect::<Vec<_>>()
+        );
+        let content = asst_rows[0]
+            .payload_json
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert_eq!(
+            content, "Hello world",
+            "envelope content is authoritative (replaces buffered deltas)"
+        );
+    }
+
+    #[tokio::test]
+    async fn aggregator_flushes_interrupted_on_stdout_closed() {
+        // V-19-02 (D-01.4): the interrupted fixture ends at EOF without ever
+        // emitting a TurnComplete. The aggregator's StdoutClosed arm must
+        // flush the buffered 2-delta content ("Par"+"tial" = "Partial") as
+        // ONE assistant_text row. Presence of the row proves the synthetic
+        // flush ran; the concatenation proves idle-flush accumulation is
+        // correct (no envelope to replace, so buffer = last idle-flush).
+        let bytes = load_fixture("interrupted_turn.jsonl");
+        let stream_events = run_reader_against_bytes(&bytes).await;
+        let pool = run_aggregator_with_events("A-1", stream_events).await;
+        let rows = crate::db::events::list_events_for_agent(&pool, "A-1", None, 10)
+            .await
+            .expect("list_events_for_agent");
+        let asst_rows: Vec<_> = rows
+            .iter()
+            .filter(|e| e.event_type == "assistant_text")
+            .collect();
+        assert_eq!(
+            asst_rows.len(),
+            1,
+            "interrupted turn still writes exactly one row"
+        );
+        let content = asst_rows[0]
+            .payload_json
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert_eq!(
+            content, "Partial",
+            "buffered deltas flushed on StdoutClosed"
+        );
+    }
+
+    #[tokio::test]
+    async fn aggregator_whole_turn_envelope_replaces_buffer() {
+        // V-19-03 (D-01.5): when a whole-turn AssistantText envelope (model
+        // is Some) follows buffered idle-flush partials, it REPLACES the
+        // buffer — the envelope's text + model is authoritative. Pitfall 7:
+        // if the envelope omitted the model, the prior idle-flushes' model
+        // must survive; here the envelope explicitly sets it, so we assert
+        // the envelope's model wins.
+        let events = vec![
+            StreamEvent::SessionStarted {
+                session_id: "sess-1".to_string(),
+            },
+            StreamEvent::AssistantText {
+                content: "draft one".to_string(),
+                model: None,
+            },
+            StreamEvent::AssistantText {
+                content: "draft two".to_string(),
+                model: None,
+            },
+            StreamEvent::AssistantText {
+                content: "FINAL".to_string(),
+                model: Some("claude-opus-4-7".to_string()),
+            },
+            StreamEvent::TurnComplete {
+                terminal_reason: "completed".to_string(),
+                is_error: false,
+            },
+        ];
+        let pool = run_aggregator_with_events("A-1", events).await;
+        let rows = crate::db::events::list_events_for_agent(&pool, "A-1", None, 10)
+            .await
+            .expect("list_events_for_agent");
+        let asst_rows: Vec<_> = rows
+            .iter()
+            .filter(|e| e.event_type == "assistant_text")
+            .collect();
+        assert_eq!(asst_rows.len(), 1);
+        assert_eq!(
+            asst_rows[0]
+                .payload_json
+                .get("content")
+                .and_then(|v| v.as_str()),
+            Some("FINAL"),
+            "envelope replaces buffered drafts"
+        );
+        assert_eq!(
+            asst_rows[0]
+                .payload_json
+                .get("model")
+                .and_then(|v| v.as_str()),
+            Some("claude-opus-4-7"),
+            "envelope's model survives"
+        );
+    }
+
+    #[tokio::test]
+    async fn aggregator_fires_at_user_notification_before_flush() {
+        // V-19-04 (D-23 regression guard, Pitfall 1): the @user notification
+        // path must NOT be gated on the DB write. Observable proxy: after a
+        // single AssistantText containing @user with no following TurnComplete,
+        // the DB has NO assistant_text row yet (no flush has fired) — proving
+        // the aggregator did not delay the notification on a DB write, and
+        // also that the buffer-first path doesn't accidentally persist mid-
+        // turn rows.
+        //
+        // Direct notification-capture would need a testing seam in
+        // `dispatch_chat_notification`; the zero-row assertion combined with
+        // V-19-01 (coalesced turn finishes with one row) + V-19-02 (interrupted
+        // turn finishes with one row via StdoutClosed) covers the Pitfall 1
+        // regression surface.
+        let events = vec![
+            StreamEvent::SessionStarted {
+                session_id: "sess-1".to_string(),
+            },
+            StreamEvent::AssistantText {
+                content: "please confirm @user thanks".to_string(),
+                model: None,
+            },
+            // No TurnComplete / StdoutClosed — channel close is the only
+            // termination signal, so the buffer is dropped without a flush.
+        ];
+        let pool = run_aggregator_with_events("A-1", events).await;
+        let rows = crate::db::events::list_events_for_agent(&pool, "A-1", None, 10)
+            .await
+            .expect("list_events_for_agent");
+        let asst_rows: Vec<_> = rows
+            .iter()
+            .filter(|e| e.event_type == "assistant_text")
+            .collect();
+        assert_eq!(
+            asst_rows.len(),
+            0,
+            "no DB row written on AssistantText alone — proves aggregator does not gate @user notification on a DB write"
+        );
     }
 }
