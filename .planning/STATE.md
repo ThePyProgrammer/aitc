@@ -7,7 +7,7 @@ stopped_at: Phase 19 Plan 03 complete — Wave 2 MarkdownBody + AssistantTextCar
 last_updated: "2026-04-21T08:15:00.000Z"
 last_activity: 2026-04-21 -- Phase 19 Plan 03 (Wave 2 MarkdownBody) complete — 3 commits d6697b7..a3c5975
 progress:
-  total_phases: 20
+  total_phases: 21
   completed_phases: 13
   total_plans: 63
   completed_plans: 62
@@ -143,6 +143,7 @@ Recent decisions affecting current work:
 - Phase 11.1 inserted after Phase 11 (2026-04-21): Fix zoom-scroll lag in RadarCanvas — wheel-event rAF coalescing + investigate folder-hull caching + audit Zustand viewport writeback cascade. URGENT — surfaced during Phase 11 manual smoke. Not a Phase 11 regression; performance-only scope; no visual change.
 - Phase 18 added: Fix passive-scan registry flooding. AgentRegistry hits MAX_AGENTS=100 cap within seconds of boot because passive_bridge matches every claude/codex/opencode-named process on the machine (including unrelated CLI sessions + short-lived subprocess children). Surfaced during Phase 10 UAT — new KAGENT launches fail with "Registry at capacity (100)". Scope passive registration to self-registered PIDs or narrow cwd+cmdline matches; raise MAX_AGENTS as a safety net. Pre-existing bug from Phase 3/Phase 6; Phase 10's long-lived sessions amplified it.
 - Phase 19 added: Polish Phase 10 chat transcript rendering. Four UAT-surfaced gaps: (1) repeated assistant_text chunks (aggregator emits one row per content_block_delta flush — merge into one row per turn); (2) richer tool-use card summaries + diff/hunk/exit-code previews matching codey's details-summary aesthetic; (3) markdown rendering via react-markdown + remark-gfm + existing shiki highlighter for code fences / emphasis / lists; (4) filter SessionStart hook noise (4×[HOOK_STARTED] + 4×[HOOK_RESPONSE] per boot) in the parser or collapse to a single system_note. All UI/parser polish on the working Phase 10 pipeline; no schema changes.
+- Phase 20 added (2026-04-21): Diff-aware agent polling — replace the wholesale `set({ agents })` in `src/stores/agentStore.ts:89–93` `fetchAgents()` (2s poll) with a per-agent diff-emit (upsert changed, remove missing, keep untouched by reference) so Zustand's reference-equality selectors let unchanged subscribers (AgentChannelList, Tower, etc.) skip re-render. Currently 20+ agent sessions cause ~30 full-list re-renders per minute for a single state delta. Perf-only; no behavioral or schema change. Surfaced by 2026-04-21 inefficiency survey as highest-ROI frontend perf fix.
 
 ### Pending Todos
 
