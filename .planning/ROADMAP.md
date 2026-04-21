@@ -316,6 +316,6 @@ Plans:
 
 Plans:
 - [x] 18-01-PLAN.md — Wave 1: parent-PID in-candidate-set filter inside `bridge_tick` + `cand_with_parent` helper + 5 new unit/regression tests (parent-drops-children, orphaned-child-registers, child-of-cwd-filtered-parent-promoted, 1+50 flood regression, AGNT-03 preservation). Core fix. (D-01, D-02, D-05, AGNT-03) — completed 2026-04-21, 8min, 7 commits (7355a3f..525a3fe), 12/12 passive_bridge tests pass
-- [ ] 18-02-PLAN.md — Wave 1: `capacity_hits_since_start: AtomicU64` field on `AgentRegistry` + increment on `upsert_agent`'s at-capacity branch + `RegistryStats` struct with specta derives + `snapshot_stats()` method + 2 unit tests. (D-03, D-04, D-05)
+- [x] 18-02-PLAN.md — Wave 1: `capacity_hits_since_start: AtomicU64` field on `AgentRegistry` + increment on `upsert_agent`'s at-capacity branch + `RegistryStats` struct with specta derives + `snapshot_stats()` method + 2 unit tests. (D-03, D-04, D-05) — completed 2026-04-21, 8min, 6 commits (0d9b526..e173800), 11/11 registry tests pass
 - [ ] 18-03-PLAN.md — Wave 2: `get_registry_stats` Tauri command in `agents/commands.rs` + registration in `lib.rs` `collect_commands!` + `RegistryStats` type registration + verified `src/bindings.ts` regen. Depends on 18-02. (D-04)
 - [ ] 18-04-PLAN.md — Wave 2: rewrite `MAX_AGENTS` doc comment with D-03 rationale (why 1000, why not 100, why not configurable) + forward-pointer to 18-02's `capacity_hits_since_start`. Depends on 18-02 (same file, different region). (D-03)

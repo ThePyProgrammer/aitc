@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 18-01 complete; plan 18-02 ready to start
-last_updated: "2026-04-21T05:28:28Z"
-last_activity: 2026-04-21 -- Phase 18-01 completed (parent-PID filter + 5 tests, 7 commits)
+stopped_at: Phase 18-02 complete; plan 18-03 ready to start
+last_updated: "2026-04-21T05:40:32Z"
+last_activity: 2026-04-21 -- Phase 18-02 completed (AgentRegistry capacity counter + RegistryStats + snapshot_stats + 2 tests, 6 commits)
 progress:
   total_phases: 19
   completed_phases: 12
   total_plans: 59
-  completed_plans: 56
-  percent: 95
+  completed_plans: 57
+  percent: 96
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 ## Current Position
 
 Phase: 18 (fix-passive-scan-registry-flooding-agentregistry-hits-its-ma) — EXECUTING
-Plan: 1 of 4 complete (18-01 ✓; 18-02, 18-03, 18-04 pending)
-Status: Executing Phase 18 wave 1 (18-01 complete)
-Last activity: 2026-04-21 -- Phase 18-01 completed (parent-PID filter + 5 tests)
+Plan: 2 of 4 complete (18-01 ✓, 18-02 ✓; 18-03, 18-04 pending)
+Status: Executing Phase 18 wave 1 complete (18-01 + 18-02 both in)
+Last activity: 2026-04-21 -- Phase 18-02 completed (registry capacity counter + RegistryStats + snapshot_stats)
 
-Progress: [██░░░░░░░░] 25%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Progress: [██░░░░░░░░] 25%
 | Phase 10 P05 | 13min | 3 tasks | 24 files |
 | Phase 10 P06 | 14 min | 3 tasks | 13 files |
 | Phase 18 P01 | 8 min | 1 task (7 commits) | 1 file |
+| Phase 18 P02 | 8 min | 1 task (6 commits) | 1 file |
 
 ## Accumulated Context
 
@@ -101,6 +102,9 @@ Recent decisions affecting current work:
 - [Phase 10]: Plan 06: D-21 Phase 4 frontend chat artifacts DELETED — ChatThread.tsx, MiniChatCard.tsx, Phase-4-era ChatInput.tsx (new Phase 10 version at src/components/chat/ChatInput.tsx); commsStore scrubbed of ChatMessage/messages/sendMessage/fetchMessages; TelemetryPanel AGENT_CHANNELS section gone
 - [Phase 18]: Plan 01: D-02 parent-PID filter lives inside bridge_tick after cwd-scope, before reap/upsert — candidate_pids HashSet built from post-cwd in_scope; filter reads ProcessInfo.parent_pid (NOT CandidateProc.parent, which is the seed type). None-branch retention preserves AGNT-03 (shell/PID-1 parents).
 - [Phase 18]: Plan 01: cand_with_parent test helper takes parent_pid: u32 positionally and wraps in Some(); existing cand (parent=None default) preserved for 6+ legacy tests. Flood regression test uses all_agents().len()==1 as the authoritative invariant — 51 candidates fit under MAX_AGENTS=1000 so "no capacity hit" is not a meaningful witness.
+- [Phase 18]: Plan 02: capacity_hits_since_start counter lives on AgentRegistry (not passive_bridge) — registry-level framing matches the existing 'Registry at capacity' error message and counts ALL upsert failures, not just PASSIVE churn. Relaxed ordering; no happens-before with other memory.
+- [Phase 18]: Plan 02: snapshot_stats loads the atomic BEFORE acquiring the read lock (Pitfall 7 / T-18-02) — gives monotonic-lagging semantics, never 'from the future'. No write-lock acquisition, so diagnostic polling does not contend with upsert_agent's write path.
+- [Phase 18]: Plan 02: RegistryStats fields are u32/u64 (not usize) per the authoritative PLAN.md signature — specta/TS-cross-boundary-friendly, avoids platform-dependent usize width. 10,000x MAX_AGENTS headroom for u32 count fields.
 
 ### Roadmap Evolution
 
@@ -139,6 +143,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T05:28:28Z
-Stopped at: Phase 18-01 complete; plan 18-02 ready to start
-Resume file: .planning/phases/18-fix-passive-scan-registry-flooding-agentregistry-hits-its-ma/18-02-PLAN.md
+Last session: 2026-04-21T05:40:32Z
+Stopped at: Phase 18-02 complete; plan 18-03 ready to start
+Resume file: .planning/phases/18-fix-passive-scan-registry-flooding-agentregistry-hits-its-ma/18-03-PLAN.md

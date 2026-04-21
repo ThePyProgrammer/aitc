@@ -19,7 +19,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **AGNT-01**: User can view a live manifest of all active agents with ID, protocol type, status, and current file/process path (Tower Control)
 - [ ] **AGNT-02**: User can launch new agent sessions (Claude Code, Codex, OpenCode) from within the app
-- [ ] **AGNT-03**: System detects and attaches to externally-launched agent processes already running on the codebase
+- [x] **AGNT-03**: System detects and attaches to externally-launched agent processes already running on the codebase
 - [ ] **AGNT-04**: System supports an extensible adapter architecture so new agent types can be added without modifying core logic
 - [ ] **AGNT-05**: User can see agent intent — a summary of why each agent is touching specific files, parsed from agent task metadata/hooks
 - [ ] **AGNT-06**: User can stop/terminate a running agent from the Tower Control view
@@ -127,7 +127,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FMON-05 | Phase 5 | Complete |
 | AGNT-01 | Phase 3 | Pending |
 | AGNT-02 | Phase 3 | Pending |
-| AGNT-03 | Phase 3 | Pending |
+| AGNT-03 | Phase 3 / Phase 18 | Complete |
 | AGNT-04 | Phase 3 | Pending |
 | AGNT-05 | Phase 3 | Pending |
 | AGNT-06 | Phase 3 | Pending |
