@@ -138,6 +138,7 @@ pub fn run() {
     specta_builder
         .export(
             specta_typescript::Typescript::default()
+                .header("// @ts-nocheck\n// specta emits unused TAURI_CHANNEL placeholder + __makeEvents__ helper that\n// its own Channel<T> import then shadows; disable TS checks on this generated file.\n")
                 .bigint(specta_typescript::BigIntExportBehavior::Number),
             "../src/bindings.ts",
         )
