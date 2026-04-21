@@ -29,13 +29,41 @@ const MAX_ZOOM = 20;
 // → 1.04× step to match the pre-refactor single-event zoom curve.
 const ZOOM_OUT_FACTOR = 1 / 1.04;
 
+// Phase 11.1 post-ship defense: a single non-finite value (NaN / ±Infinity)
+// anywhere in the viewport corrupts every subsequent frame — NaN+x=NaN,
+// min(a, max(b, NaN))=NaN, ctx.setTransform(NaN, ...) silently no-ops.
+// The result is a self-perpetuating blank canvas with no console error.
+// Fall back to the previous value for any axis whose next value isn't
+// finite, and reapply the zoom clamp as a belt-and-braces check.
+function sanitizeViewport(
+  next: CanvasViewport,
+  prev: CanvasViewport,
+): CanvasViewport {
+  const zoom = Number.isFinite(next.zoom)
+    ? Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next.zoom))
+    : prev.zoom;
+  const panX = Number.isFinite(next.panX) ? next.panX : prev.panX;
+  const panY = Number.isFinite(next.panY) ? next.panY : prev.panY;
+  return { zoom, panX, panY };
+}
+
 export function useCanvasZoomPan(initialViewport?: Partial<CanvasViewport>) {
-  const [viewport, setViewport] = useState<CanvasViewport>({
+  const [viewport, setViewportRaw] = useState<CanvasViewport>({
     zoom: 1,
     panX: 0,
     panY: 0,
     ...initialViewport,
   });
+
+  const setViewport = useCallback(
+    (updater: CanvasViewport | ((prev: CanvasViewport) => CanvasViewport)) => {
+      setViewportRaw((prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        return sanitizeViewport(next, prev);
+      });
+    },
+    [],
+  );
 
   const isDragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });

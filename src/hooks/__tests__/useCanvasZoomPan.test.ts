@@ -88,4 +88,35 @@ describe('useCanvasZoomPan — direct wheel (post-revert)', () => {
     expect(result.current.viewport.zoom).toBeLessThan(20);
     expect(Number.isFinite(result.current.viewport.zoom)).toBe(true);
   });
+
+  // Phase 11.1 post-ship defense — locks the sanitizeViewport invariant.
+  // If a non-finite value ever leaked in (e.g. a wheel event with NaN deltaY
+  // or an external caller passing bad coords), the setViewport wrapper must
+  // fall back to the previous value per-axis so ctx.setTransform never sees
+  // NaN/±Infinity. Without this, the canvas blanks self-perpetuatingly.
+  describe('setViewport — defense against non-finite values', () => {
+    it('NaN zoom falls back to previous zoom', () => {
+      const { result } = renderHook(() => useCanvasZoomPan({ zoom: 2, panX: 10, panY: 20 }));
+      act(() => { result.current.setViewport({ zoom: NaN, panX: 50, panY: 50 }); });
+      expect(result.current.viewport.zoom).toBe(2);
+      expect(result.current.viewport.panX).toBe(50);
+      expect(result.current.viewport.panY).toBe(50);
+    });
+
+    it('Infinity pan values fall back per-axis', () => {
+      const { result } = renderHook(() => useCanvasZoomPan({ zoom: 2, panX: 10, panY: 20 }));
+      act(() => { result.current.setViewport({ zoom: 3, panX: Infinity, panY: -Infinity }); });
+      expect(result.current.viewport.zoom).toBe(3);
+      expect(result.current.viewport.panX).toBe(10);
+      expect(result.current.viewport.panY).toBe(20);
+    });
+
+    it('sanitizer reapplies zoom clamp even on finite out-of-range input', () => {
+      const { result } = renderHook(() => useCanvasZoomPan());
+      act(() => { result.current.setViewport({ zoom: 999, panX: 0, panY: 0 }); });
+      expect(result.current.viewport.zoom).toBe(20);
+      act(() => { result.current.setViewport({ zoom: -5, panX: 0, panY: 0 }); });
+      expect(result.current.viewport.zoom).toBe(0.05);
+    });
+  });
 });
