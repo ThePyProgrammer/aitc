@@ -20,7 +20,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { computeContentionScore } from '../lib/contention';
 import type { ConflictAlert } from './conflictStore';
 import { usePipelineStore } from './pipelineStore';
-import type { DependencyEdgeDto, EdgeKind } from '../bindings';
+import type {
+  DependencyEdgeDto,
+  EdgeKind,
+  IpcBridgeDto,
+  IpcCallSite,
+} from '../bindings';
+import { GRAPH_HALF_WIDTH } from '../workers/graphSimConfig';
 import {
   cullExpiredTrails,
   MAX_TRAILS_PER_AGENT,
@@ -32,15 +38,30 @@ import {
   THEME_STORAGE_KEY,
 } from '../views/Radar/themes';
 
-// Phase 7 graph state (D-01..D-03, D-11).
+// Phase 7 graph state (D-01..D-03, D-11); Phase 12 extends with bridge kind
+// discriminator + language classification + bridge metadata (D-10, D-16).
 export interface GraphNode {
-  id: string;              // repo-relative path (matches contentionScores keys)
-  dirKey: string;          // repo-relative parent dir path
+  id: string;              // repo-relative path (or `bridge:<commandName>` for bridges)
+  dirKey: string;          // repo-relative parent dir path (synthetic "bridge" for bridge nodes)
   dirDepth: number;        // depth from repo root, for forceCluster (D-11)
   x?: number;
   y?: number;
-  fx?: number | null;      // user-pinned x (D-03)
-  fy?: number | null;      // user-pinned y (D-03)
+  fx?: number | null;      // user-pinned x (D-03) / deterministic alpha x-spread (D-14 for bridges)
+  fy?: number | null;      // user-pinned y (D-03) / 0 for bridges (D-13)
+  // Phase 12 (D-10): kind discriminator; undefined treated as 'file' for BC.
+  kind?: 'file' | 'bridge';
+  // Phase 12 (D-16): language classification for forceBoundary routing; only
+  // populated on file nodes (undefined on bridges + language-agnostic files).
+  language?: 'ts' | 'rust';
+  // Phase 12 bridge-only fields (undefined on file nodes).
+  commandName?: string;
+  rustName?: string;
+  handlerFile?: string;
+  handlerLine?: number;
+  signatureSummary?: string;
+  hasChannelArg?: boolean;
+  callerFiles?: IpcCallSite[];
+  callerCount?: number;
 }
 
 export interface GraphEdge {
@@ -68,6 +89,7 @@ export interface ForceConfig {
   clusterStrength: number;  // 0..1, default 0.08
   linkStrength: number;     // 0..1, default 0.3; 0 = structure-only mode (no edge pull)
   chargeStrength: number;   // -300..0, default -80; repulsion between all nodes
+  boundaryStrength: number; // Phase 12 (D-29/D-30): 0..1, default 0.15; language-axis separation
 }
 
 export const DEFAULT_FORCE_CONFIG: ForceConfig = {
@@ -75,6 +97,7 @@ export const DEFAULT_FORCE_CONFIG: ForceConfig = {
   clusterStrength: 0.08,
   linkStrength: 0.3,
   chargeStrength: -80,
+  boundaryStrength: 0.15,
 };
 
 // 8-color agent dot palette per UI-SPEC.
@@ -104,6 +127,9 @@ interface TreeIndexEntryRaw {
 interface RadarStore {
   viewport: Viewport;
   selectedAgentId: string | null;
+  /** Phase 12 (D-21): currently selected bridge, keyed by commandName.
+   *  null when no bridge is selected. */
+  selectedBridgeId: string | null;
   isManifestOpen: boolean;
   heatMapEnabled: boolean;
   contentionScores: Map<string, number>;
@@ -114,6 +140,11 @@ interface RadarStore {
   pinnedNodeIds: Set<string>;
   activeTrails: ActiveTrail[];
   forceConfig: ForceConfig;
+  /** Phase 12 (D-14): last hashed command-name set used to compute bridge
+   *  fx x-spread. Unchanged sets reuse prior fx values instead of
+   *  recomputing — prevents bridges from jumping around on every
+   *  fetchGraph refresh when the command set hasn't changed. */
+  lastBridgeSetHash: string | null;
   /** Pre-computed from graphNodes on fetchGraph — avoids 20k string ops
    *  per render via useMemo. Maps parent dir → set of child dirs. */
   parentChildMap: Map<string, Set<string>>;
@@ -133,6 +164,8 @@ interface RadarStore {
   setForceConfig: (cfg: Partial<ForceConfig>) => void;
   setViewport: (v: Partial<Viewport>) => void;
   selectAgent: (id: string | null) => void;
+  /** Phase 12 (D-21): select a bridge by commandName, or clear with null. */
+  selectBridge: (id: string | null) => void;
   toggleManifest: () => void;
   toggleHeatMap: () => void;
   /** Switch the active graph theme. Unknown ids fall back to the default
@@ -163,6 +196,7 @@ function readPersistedThemeId(): string {
 export const useRadarStore = create<RadarStore>((set, get) => ({
   viewport: { zoom: 1, panX: 0, panY: 0 },
   selectedAgentId: null,
+  selectedBridgeId: null,
   isManifestOpen: true,
   heatMapEnabled: false,
   contentionScores: new Map(),
@@ -172,6 +206,7 @@ export const useRadarStore = create<RadarStore>((set, get) => ({
   pinnedNodeIds: new Set<string>(),
   activeTrails: [],
   forceConfig: { ...DEFAULT_FORCE_CONFIG },
+  lastBridgeSetHash: null,
   themeId: readPersistedThemeId(),
   parentChildMap: new Map<string, Set<string>>(),
   dirsWithOwnFiles: new Set<string>(),
@@ -187,9 +222,18 @@ export const useRadarStore = create<RadarStore>((set, get) => ({
    */
   fetchGraph: async () => {
     try {
-      const [treeIndex, edges] = await Promise.all([
+      // Phase 12 (V-12-16, D-08): widened to three-leg Promise.all — bridges
+      // are best-effort; a single backend failure leaves the other slots
+      // intact thanks to the per-leg .catch() guards.
+      const [treeIndex, edges, bridges] = await Promise.all([
         invoke<TreeIndexEntryRaw[]>('get_tree_index'),
         invoke<DependencyEdgeDto[]>('get_dependency_graph'),
+        invoke<IpcBridgeDto[]>('get_ipc_bridges').catch((err) => {
+          // Per-leg catch so a bridge-scan failure does not clobber the
+          // tree/edges work that already completed.
+          console.error('get_ipc_bridges failed:', err);
+          return [] as IpcBridgeDto[];
+        }),
       ]);
       const fileEntries = treeIndex.filter((e) => !e.isDir);
       const knownIds = new Set(fileEntries.map((e) => e.path));
@@ -201,7 +245,18 @@ export const useRadarStore = create<RadarStore>((set, get) => ({
       const existingById = new Map(
         get().graphNodes.map((n) => [n.id, n]),
       );
-      const nodes: GraphNode[] = fileEntries.map((e) => {
+
+      // Phase 12 (D-16): language classification for file nodes drives the
+      // forceBoundary targetY selection. Derived on the fly rather than
+      // persisted — cheap and avoids a schema migration.
+      const classifyLanguage = (path: string): 'ts' | 'rust' | undefined => {
+        if (path.startsWith('src-tauri/')) return 'rust';
+        if (path.endsWith('.rs')) return 'rust';
+        if (/\.(ts|tsx|js|jsx|mts|mjs|cts|cjs)$/.test(path)) return 'ts';
+        return undefined;
+      };
+
+      const fileNodes: GraphNode[] = fileEntries.map((e) => {
         const lastSlash = e.path.lastIndexOf('/');
         const dirKey = lastSlash >= 0 ? e.path.slice(0, lastSlash) : '';
         const prev = existingById.get(e.path);
@@ -213,18 +268,117 @@ export const useRadarStore = create<RadarStore>((set, get) => ({
           y: prev?.y,
           fx: prev?.fx,
           fy: prev?.fy,
+          kind: 'file' as const,
+          language: classifyLanguage(e.path),
         };
       });
       const validEdges: GraphEdge[] = edges
         .filter((e) => knownIds.has(e.from) && knownIds.has(e.to))
         .map((e) => ({ source: e.from, target: e.to, kind: e.kind }));
 
+      // Phase 12 (D-10, D-13, D-14): build bridge nodes + (D-27) bridge edges.
+      // Bridge id uses `bridge:<commandName>` prefix to avoid collision with
+      // file paths (RESEARCH §Pitfall 6). fy=0 pins to the boundary line;
+      // fx is assigned below via alphabetic x-spread.
+      const bridgeNodes: GraphNode[] = bridges.map((b) => {
+        const bridgeId = `bridge:${b.commandName}`;
+        const prev = existingById.get(bridgeId);
+        return {
+          id: bridgeId,
+          dirKey: 'bridge',
+          dirDepth: 0,
+          kind: 'bridge' as const,
+          commandName: b.commandName,
+          rustName: b.rustName,
+          handlerFile: b.handlerFile,
+          handlerLine: b.handlerLine,
+          signatureSummary: b.signatureSummary,
+          hasChannelArg: b.hasChannelArg,
+          callerFiles: b.callerFiles,
+          callerCount: b.callerFiles.length,
+          fy: 0,
+          // fx set below via alphabetic x-spread / cache.
+          x: prev?.x,
+          y: 0,
+        };
+      });
+
+      // Phase 12 (D-14): alphabetic x-spread with hash-gated cache.
+      // When the command set is unchanged, reuse prior fx values to prevent
+      // bridges from jumping on every fetchGraph refresh. When changed,
+      // recompute an evenly spread fx across [-GRAPH_HALF_WIDTH, +GRAPH_HALF_WIDTH]
+      // in command-name alphabetic order.
+      const sortedBridges = [...bridgeNodes].sort((a, b) =>
+        (a.commandName ?? '').localeCompare(b.commandName ?? ''),
+      );
+      const bridgeSetHash = sortedBridges
+        .map((n) => n.commandName)
+        .join(',');
+      const prevHash = get().lastBridgeSetHash;
+      const prevBridgeFxById = new Map(
+        get()
+          .graphNodes.filter((n) => n.kind === 'bridge')
+          .map((n) => [n.id, n.fx]),
+      );
+      let nextBridgeSetHash = prevHash;
+      if (bridgeSetHash !== prevHash) {
+        const N = sortedBridges.length;
+        sortedBridges.forEach((n, i) => {
+          if (N === 0) return;
+          n.fx =
+            N === 1
+              ? 0
+              : -GRAPH_HALF_WIDTH + (2 * GRAPH_HALF_WIDTH * i) / (N - 1);
+          // Align x with fx on first-placement so the renderer doesn't see
+          // a transient (0, 0) before the worker settles.
+          n.x = n.fx ?? 0;
+        });
+        nextBridgeSetHash = bridgeSetHash;
+      } else {
+        // Same command set — preserve prior fx values verbatim.
+        sortedBridges.forEach((n) => {
+          const priorFx = prevBridgeFxById.get(n.id);
+          n.fx = priorFx ?? 0;
+          n.x = (priorFx ?? 0);
+        });
+      }
+
+      // Phase 12 (D-27): bridge edges — fan `invokes` edges from each caller
+      // file into the bridge, and a single `handles` edge from the bridge to
+      // the Rust handler file. Dangling bridges (no handler, no callers)
+      // contribute nothing.
+      const bridgeEdges: GraphEdge[] = [];
+      for (const b of bridges) {
+        const bridgeId = `bridge:${b.commandName}`;
+        for (const caller of b.callerFiles) {
+          if (!knownIds.has(caller.file)) continue;
+          bridgeEdges.push({
+            source: caller.file,
+            target: bridgeId,
+            kind: 'invokes' as EdgeKind,
+          });
+        }
+        if (b.handlerFile && knownIds.has(b.handlerFile)) {
+          bridgeEdges.push({
+            source: bridgeId,
+            target: b.handlerFile,
+            kind: 'handles' as EdgeKind,
+          });
+        }
+      }
+
+      // Merge: file nodes first, bridges appended. Canvas z-order (Plan 05)
+      // draws bridges on top; array order here is informational only.
+      const allNodes = [...fileNodes, ...sortedBridges];
+      const allEdges = [...validEdges, ...bridgeEdges];
+
       // Pre-compute parentChildMap + dirsWithOwnFiles once here instead
       // of per-render via useMemo. Eliminates ~20k slice/join string ops
-      // from the React render path for a 5k-node graph.
+      // from the React render path for a 5k-node graph. Bridges are
+      // intentionally excluded — they are not part of the folder tree.
       const pcm = new Map<string, Set<string>>();
       const dwof = new Set<string>();
-      for (const n of nodes) {
+      for (const n of fileNodes) {
         dwof.add(n.dirKey);
         const parts = n.dirKey === '' ? [] : n.dirKey.split('/');
         for (let i = 0; i < parts.length; i++) {
@@ -237,11 +391,12 @@ export const useRadarStore = create<RadarStore>((set, get) => ({
       }
 
       set({
-        graphNodes: nodes,
-        graphEdges: validEdges,
+        graphNodes: allNodes,
+        graphEdges: allEdges,
         settledAt: null,
         parentChildMap: pcm,
         dirsWithOwnFiles: dwof,
+        lastBridgeSetHash: nextBridgeSetHash,
       });
     } catch {
       // Best-effort: leave existing slots as-is on failure.
@@ -356,6 +511,9 @@ export const useRadarStore = create<RadarStore>((set, get) => ({
 
   selectAgent: (id) => set({ selectedAgentId: id }),
 
+  // Phase 12 (D-21): select a bridge by commandName. Null clears selection.
+  selectBridge: (id) => set({ selectedBridgeId: id }),
+
   toggleManifest: () =>
     set((s) => ({ isManifestOpen: !s.isManifestOpen })),
 
@@ -426,6 +584,7 @@ export const useRadarStore = create<RadarStore>((set, get) => ({
     set({
       viewport: { zoom: 1, panX: 0, panY: 0 },
       selectedAgentId: null,
+      selectedBridgeId: null,
       isManifestOpen: true,
       heatMapEnabled: false,
       contentionScores: new Map(),
@@ -434,6 +593,7 @@ export const useRadarStore = create<RadarStore>((set, get) => ({
       settledAt: null,
       pinnedNodeIds: new Set<string>(),
       activeTrails: [],
+      lastBridgeSetHash: null,
     }),
 }));
 
