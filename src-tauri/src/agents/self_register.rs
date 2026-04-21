@@ -1055,6 +1055,7 @@ mod tests {
         let (base, _reg, _waiters, pool, _engine) = spawn_hook_server().await;
         let my_pid = std::process::id();
 
+        // D-06: Read is always pass-through regardless of conflict state.
         let body = serde_json::json!({
             "pid": my_pid,
             "tool_name": "Read",
@@ -1078,12 +1079,97 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(cnt, 0, "pass-through tool must not insert a row");
+
+        // Phase 17 extension: Edit on a file with no other-agent conflict
+        // records must ALSO pass through without a row. This verifies the
+        // old tool-category allowlist (D-19/D-20) is gone — the gate is now
+        // purely conflict-driven.
+        let body_edit = serde_json::json!({
+            "pid": my_pid,
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": "/tmp/fresh_phase17.rs",
+                "old_string": "a",
+                "new_string": "b",
+            },
+        });
+        let resp_edit = tokio::time::timeout(
+            std::time::Duration::from_millis(2000),
+            client.post(format!("{base}/hook")).json(&body_edit).send(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(resp_edit.status(), 200);
+        let decoded_edit: AitcDecisionResponseDe = resp_edit.json().await.unwrap();
+        assert!(
+            matches!(decoded_edit, AitcDecisionResponseDe::Allow),
+            "D-18: Edit with no conflicting agent must instant-allow"
+        );
+
+        let (cnt2,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM approval_requests")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            cnt2, 0,
+            "no-conflict Edit must not insert a row (tool-category gating removed)"
+        );
     }
 
     #[tokio::test]
     async fn hook_gates_edit_and_blocks_until_approved() {
-        let (base, _reg, waiters, pool, _engine) = spawn_hook_server().await;
+        let (base, reg, waiters, pool, engine) = spawn_hook_server().await;
         let my_pid = std::process::id();
+
+        // Phase 17 pivot: under the new conflict-triggered gating an Edit
+        // only gates when another LIVE agent recently wrote the same file.
+        // Seed KAGENT-A with a write to /x.ts 500ms ago and register the
+        // agent in the registry so the D-04 liveness check passes.
+        let other_pid: u32 = 99_001;
+        let adapter = crate::agents::generic::passive_sentinel_adapter();
+        reg.upsert_agent(
+            "KAGENT-A".into(),
+            AgentInfo {
+                id: "KAGENT-A".into(),
+                agent_type: "claude-code".into(),
+                protocol: "cli".into(),
+                state: AgentState::Running,
+                pid: Some(other_pid),
+                cwd: None,
+                intent: None,
+            },
+            adapter,
+            false,
+        )
+        .await
+        .unwrap();
+        {
+            let mut eng = engine.lock().await;
+            eng.update_pid_mapping(other_pid, "KAGENT-A".into());
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            // Use the canonical-for-conflict form so the HashMap key matches
+            // what `could_conflict_with` sees from the hook side.
+            let canon =
+                crate::conflict::canonicalize::canonicalize_for_conflict(std::path::Path::new(
+                    "/x.ts",
+                ));
+            let batch = crate::pipeline::events::FileEventBatch {
+                events: vec![crate::pipeline::events::FileEvent {
+                    path: canon,
+                    kind: crate::pipeline::events::FileEventKind::Modify,
+                    timestamp_ms: now_ms - 500,
+                    attribution: crate::pipeline::events::Attribution::Pid(other_pid),
+                }],
+                batch_id: 1,
+                dropped_batches: 0,
+            };
+            eng.process_batch(&batch);
+        }
 
         let body = serde_json::json!({
             "pid": my_pid,
@@ -1191,6 +1277,29 @@ mod tests {
                 break id;
             }
         };
+
+        // Phase 17 extension: verify the row carries `gate_reason =
+        // 'protected_path'` with `conflict_with_agent_id` IS NULL. Both
+        // columns were added by migration 007 and are populated by the
+        // hook_handler composition match in Plan 05 Task 2.
+        let (gate_reason, conflict_with): (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT gate_reason, conflict_with_agent_id \
+             FROM approval_requests WHERE id = ?",
+        )
+        .bind(row_id)
+        .fetch_one(&pool_clone)
+        .await
+        .unwrap();
+        assert_eq!(
+            gate_reason.as_deref(),
+            Some("protected_path"),
+            "D-20: protected-path gates must carry gate_reason='protected_path'"
+        );
+        assert!(
+            conflict_with.is_none(),
+            "D-21: protected-path gates must leave conflict_with_agent_id NULL"
+        );
+
         waiters_clone
             .signal(row_id, HookDecision::Deny("denied".into()))
             .await;
@@ -1207,52 +1316,39 @@ mod tests {
 
     #[tokio::test]
     async fn hook_creates_passive_stub_when_no_agent_matches() {
-        let (base, reg, waiters, pool, _engine) = spawn_hook_server().await;
+        let (base, reg, _waiters, _pool, _engine) = spawn_hook_server().await;
         let my_pid = std::process::id();
 
+        // Phase 17 pivot: Bash `echo hi` is now safelisted (D-11) and
+        // produces an instant Allow with no row. The PASSIVE stub creation
+        // still happens inside `resolve_or_create_agent` regardless of gate
+        // outcome — that's what this test's name asserts, so drop the
+        // row-polling loop and just verify the stub was created after a
+        // 200 OK. Under the old tool-category allowlist Bash was gated so
+        // a pending row was the convenient wait-point; post-Phase 17 we
+        // verify the resolver directly.
         let body = serde_json::json!({
             "pid": my_pid,
             "tool_name": "Bash",
             "tool_input": {"command": "echo hi"},
         });
 
-        let pool_clone = pool.clone();
-        let waiters_clone = waiters.clone();
-        let post_task = tokio::spawn(async move {
+        let resp = tokio::time::timeout(
+            std::time::Duration::from_millis(2000),
             reqwest::Client::new()
                 .post(format!("{base}/hook"))
                 .json(&body)
-                .timeout(std::time::Duration::from_secs(5))
-                .send()
-                .await
-                .unwrap()
-                .json::<AitcDecisionResponseDe>()
-                .await
-                .unwrap()
-        });
-
-        // Wait for the row to appear, then signal Allow.
-        let row_id: i64 = loop {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            let found: Option<(i64,)> = sqlx::query_as(
-                "SELECT id FROM approval_requests WHERE status='pending' LIMIT 1",
-            )
-            .fetch_optional(&pool_clone)
-            .await
-            .unwrap();
-            if let Some((id,)) = found {
-                break id;
-            }
-        };
-        waiters_clone.signal(row_id, HookDecision::Allow).await;
-
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            post_task,
+                .send(),
         )
         .await
         .unwrap()
         .unwrap();
+        assert_eq!(resp.status(), 200);
+        let decoded: AitcDecisionResponseDe = resp.json().await.unwrap();
+        assert!(
+            matches!(decoded, AitcDecisionResponseDe::Allow),
+            "D-11: safelisted Bash must instant-allow"
+        );
 
         let passive_id = format!("PASSIVE-{my_pid}");
         assert!(
