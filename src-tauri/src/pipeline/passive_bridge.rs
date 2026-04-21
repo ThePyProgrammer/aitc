@@ -453,4 +453,35 @@ mod tests {
         bridge_tick(&reg, &snap, None, None, None).await.unwrap();
         assert!(reg.get_agent("PASSIVE-333").await.is_none());
     }
+
+    // ------------------------------------------------------------------
+    // Phase 18 D-02: parent-PID in-candidate-set filter tests.
+    // ------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn parent_in_candidate_list_drops_subprocess_children() {
+        // Top-level claude (pid=100, no parent) + two subprocess children
+        // whose parent PID points at the top-level. Only PASSIVE-100 must
+        // register; the two children are the Phase 10 amplification shape
+        // (MCP helper + node shim) that the filter exists to drop.
+        let reg = Arc::new(AgentRegistry::new());
+        let snap = seeded_snapshot(vec![
+            cand(100, "claude"),
+            cand_with_parent(101, "claude-mcp", 100),
+            cand_with_parent(102, "node-claude-helper", 100),
+        ]);
+        bridge_tick(&reg, &snap, None, None, None).await.unwrap();
+        assert!(
+            reg.get_agent("PASSIVE-100").await.is_some(),
+            "top-level claude (pid=100) must register"
+        );
+        assert!(
+            reg.get_agent("PASSIVE-101").await.is_none(),
+            "subprocess child pid=101 must be dropped by parent-PID filter"
+        );
+        assert!(
+            reg.get_agent("PASSIVE-102").await.is_none(),
+            "subprocess child pid=102 must be dropped by parent-PID filter"
+        );
+    }
 }
