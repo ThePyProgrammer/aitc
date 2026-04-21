@@ -30,26 +30,40 @@ import {
   type GraphNode,
   type GraphEdge,
 } from '../stores/radarStore';
-
-// d3-force tuning constants. Exported for tests.
-export const LINK_DISTANCE = 40;
-export const LINK_STRENGTH = 0.3;
-export const CHARGE_STRENGTH = -80;
-export const CHARGE_THETA = 0.9;
-export const CHARGE_DISTANCE_MAX = 300;
-export const CENTER_STRENGTH = 0.05;
-export const COLLIDE_RADIUS = 6;
-export const ALPHA_DECAY = 0.04;
-export const VELOCITY_DECAY = 0.5;
-export const MAX_TICKS = 500;
-export const REWARM_NODE_COUNT_THRESHOLD = 5;
-export const REWARM_PERCENT_THRESHOLD = 0.01;
-export const REWARM_ALPHA = 0.3;
-export const REWARM_MAX_TICKS = 100;
-
-// Alpha used when force config sliders change — enough to see movement,
-// not so much that the graph explodes.
-const FORCE_CONFIG_ALPHA = 0.35;
+// Phase 11 (D-29): tuning constants now live in src/workers/graphSimConfig.ts
+// so the worker + graphSimCore can import them without pulling in React or
+// zustand. The hook keeps its existing exports via the `export ... from`
+// re-export below so useGraphLayout.test.ts:15-23 continues to resolve the
+// same symbols from this module without churn.
+import {
+  LINK_DISTANCE,
+  CHARGE_THETA,
+  CHARGE_DISTANCE_MAX,
+  COLLIDE_RADIUS,
+  ALPHA_DECAY,
+  VELOCITY_DECAY,
+  MAX_TICKS,
+  FORCE_CONFIG_ALPHA,
+  REWARM_NODE_COUNT_THRESHOLD,
+  REWARM_PERCENT_THRESHOLD,
+} from '../workers/graphSimConfig';
+export {
+  LINK_DISTANCE,
+  LINK_STRENGTH,
+  CHARGE_STRENGTH,
+  CHARGE_THETA,
+  CHARGE_DISTANCE_MAX,
+  CENTER_STRENGTH,
+  COLLIDE_RADIUS,
+  ALPHA_DECAY,
+  VELOCITY_DECAY,
+  MAX_TICKS,
+  REWARM_NODE_COUNT_THRESHOLD,
+  REWARM_PERCENT_THRESHOLD,
+  REWARM_ALPHA,
+  REWARM_MAX_TICKS,
+  FORCE_CONFIG_ALPHA,
+} from '../workers/graphSimConfig';
 
 export interface SimNode extends ClusterNode {
   id: string;
