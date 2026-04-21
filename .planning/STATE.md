@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
+status: executing
 stopped_at: Phase 12 UI-SPEC approved (--auto)
-last_updated: "2026-04-21T10:22:58.692Z"
-last_activity: 2026-04-21 -- Phase 19 Plan 04 (Wave 2 ToolUseCard enrichment) complete — 3 commits 368958c..090b57e
+last_updated: "2026-04-21T11:19:07.176Z"
+last_activity: 2026-04-21 -- Phase 12 planning complete
 progress:
   total_phases: 21
   completed_phases: 14
-  total_plans: 63
+  total_plans: 74
   completed_plans: 63
-  percent: 100
+  percent: 85
 ---
 
 # Project State
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 
 Phase: 19 (polish-phase-10-chat-transcript-rendering-four-related-gaps-) — AWAITING UAT
 Plan: 4 of 4 (all plans complete)
-Status: Phase 19 Plans 01+02+03+04 all complete. Remaining: combined manual Tauri-smoke UAT (markdown prose body + green/red/grey status dots on tool-use cards) before advancing to next phase.
-Last activity: 2026-04-21 -- Phase 19 Plan 04 (Wave 2 ToolUseCard enrichment) complete — 3 commits 368958c..090b57e
+Status: Ready to execute
+Last activity: 2026-04-21 -- Phase 12 planning complete
 
 Progress: [██████████] 100%
 
