@@ -109,11 +109,11 @@ Wave 1 — "wait, I want more surfaces"
   7    Graph-based Codebase Map            ← 4, 6      ✅ shipped (RIP treemap)
   8    Claude Code PreToolUse Hooks        ← 3, 4      ✅ shipped
   9    Arsenal (skills/agents/config)      ← 2, 4      ✅ shipped
-  10   First-class Chat UI                 ← 3, 8, 9   🟡 6/6 coded — UAT pending on 10-06
+  10   First-class Chat UI                 ← 3, 8, 9   ✅ shipped (2026-04-21)
 
 Wave 2 — "the radar should be sicker"
   11   d3-force in a WebWorker             ← 7         ✅ shipped (2026-04-21)
-  11.1 Fix zoom-scroll lag                 ← 7         ⏳ planning  ← next up
+  11.1 Fix zoom-scroll lag                 ← 7         🟡 code-complete — wheel-zoom smoke pending  ← next up
   12   IPC bridge nodes + boundary viz     ← 7, 11     ⏳ planning
   13   4-level semantic zoom               ← 7, 11     ⏳ planning
   14   Multi-layer offscreen canvas        ← 7, 11     ⏳ planning
@@ -122,15 +122,15 @@ Wave 2 — "the radar should be sicker"
 
 Wave 3 — "things you only find out by actually running this"
   17   Conflict-triggered gate             ← 3, 8      ⏳ drafted (17-CONTEXT.md)
-  18   Fix passive-scan registry flooding  ← 3, 6      ⏳ planning
+  18   Fix passive-scan registry flooding  ← 3, 6      🟡 4/4 code-complete — verification pending
   19   Polish chat transcript rendering    ← 5, 10     ⏳ planning
 ```
 
-**Status (2026-04-21):** Waves 0 and 1 are basically done. All of v1.0 shipped. Phase 7 replaced the original squarified-treemap radar with the force-directed graph (RIP, you served us well). Phase 8 shipped the Claude Code hook plumbing. Phase 9 shipped Arsenal. Phase 10 (Chat UI) has **all 6 plans coded** — blocked only on the Plan 06 Task 3 human-verify UAT checkpoint (see `10-06-CHECKPOINT.md`).
+**Status (2026-04-21):** Waves 0 and 1 are done. **Phase 10** (Chat UI) signed off UAT the same day the checkpoint opened — all 9 event cards, MCP server on the self-register port, long-lived stream-json, the lot. The residual transcript-polish gaps that surfaced during the sign-off got split out to Phase 19 so they wouldn't gate the ship.
 
-Wave 2 is where the scope creep lives and we're in it. **Phase 11** shipped 2026-04-21 — d3-force now runs in a dedicated Worker with transferable `Float32Array` position buffers, prod build passed smoke, force-config sliders are "damn responsive" per the operator. Manual UAT surfaced a zoom-scroll lag on settled graphs, filed as **Phase 11.1** — the hot-path gate short-circuits correctly when the sim is settled, so the render loop is byte-identical to Phase 7 and this is a pre-existing issue that Phase 11's perf surfacing merely exposed. Suspects: wheel events firing at 120–240Hz on trackpads outrunning rAF, `drawFolderHulls` recomputing convex hulls per frame even on static positions, and the Zustand viewport-writeback cascade. Scope is performance-only; no visual change; no new capability.
+Wave 2 is where the scope creep lives and we're in it. **Phase 11** shipped with d3-force in a dedicated Worker and "damn responsive" force-config sliders as the live witness. **Phase 11.1** (the zoom-scroll lag that Phase 11 exposed) is now code-complete — 19/19 D-XX witnesses pass and workers are untouched — but the manual wheel-zoom smoke against the Tauri prod build is still owed (set `localStorage.radarPerfDebug = '1'` for numeric evidence). One notable reversal in `e9d999b`: a wheel-event + viewport-writeback rAF coalescer was tried, found to add 2-rAF pipeline latency, and reverted in favour of a targeted `drawFolderHulls` cache fix (`ebfa8ab`) plus a visibilitychange dirty-trigger so the canvas repaints on window refocus.
 
-Wave 3 collects the reality checks — things that only break once you actually run the app with multiple long-lived agents. None of these three are blocked by Wave 2; all could be picked up in parallel with the radar polish work. **Phase 17** (conflict-triggered gating) only needs Phase 3's conflict engine + Phase 8's hook pipeline (both shipped); it exists because the "every Edit/Write/Bash prompts you" model became unusable in multi-agent sessions — see [`17-CONTEXT.md`](.planning/phases/17-conflict-triggered-pretooluse-gating-replace-tool-category-g/17-CONTEXT.md) for the three unresolved design questions. **Phase 18** only needs Phase 3's registry + Phase 6's passive_bridge (both shipped); it was filed after `AgentRegistry` hit its `MAX_AGENTS=100` cap within seconds of startup, because `passive_bridge.bridge_tick` was registering a `PASSIVE-{pid}` for every `claude`/`codex`/`opencode`-named process on the box — unrelated CLI sessions in other terminals plus the short-lived subprocesses that Phase 10's long-lived stream-json runtime spawns (MCP handlers, `aitc-hook` fires, node helpers). Pre-existing bug from Phase 3/6, amplified by Phase 10. **Phase 19** is Phase 10 chat-UI polish surfaced during the same UAT pass: repeated `assistant_text` chunks that should merge into a single turn row, tool-use cards that don't actually show what the tool did (no hunk count on Edit, no exit code on Bash), markdown fences rendering as literal backticks, and `[HOOK_STARTED] SessionStart:startup` noise at every boot. Four UI/parser gaps, no schema change.
+Wave 3 collects the reality checks — things that only break once you actually run the app with multiple long-lived agents. None of these three are blocked by Wave 2; all could be picked up in parallel. **Phase 18** (registry flooding) is 4/4 code-complete — the hybrid `cwd-in-repo + parent-PID-in-candidate-set` filter shipped in 18-01, `MAX_AGENTS` raised to 1000 with an explanatory doc comment formalising the D-03 rationale, and a new `get_registry_stats` Tauri command plus `capacity_hits_since_start: AtomicU64` counter landed for post-hoc debugging — still waiting on the ship verification pass. **Phase 17** (conflict-triggered gating) remains drafted; see [`17-CONTEXT.md`](.planning/phases/17-conflict-triggered-pretooluse-gating-replace-tool-category-g/17-CONTEXT.md) for the three unresolved design questions. **Phase 19** (chat-transcript polish) is waiting on `/gsd-plan-phase 19` — repeated `assistant_text` chunks, tool-use cards that don't show what the tool did, markdown rendering as literal backticks, SessionStart hook noise, all four UI/parser gaps lined up.
 
 Ground truth: [`.planning/STATE.md`](.planning/STATE.md) + [`.planning/ROADMAP.md`](.planning/ROADMAP.md). GSD updates them automatically. Please do not hand-edit the checkboxes, you will make me sad.
 
