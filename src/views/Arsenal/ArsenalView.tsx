@@ -111,7 +111,7 @@ export function ArsenalView() {
   const counts = useMemo<Record<UiCategory, number>>(() => {
     const uiKeys: UiCategory[] = ['skill', 'agent', 'plugin', 'instructions', 'configuration'];
     const result = Object.fromEntries(uiKeys.map((k) => [k, 0])) as Record<UiCategory, number>;
-    const perCategoryList = Object.fromEntries(uiKeys.map((k) => [k, []])) as Record<UiCategory, Resource[]>;
+    const perCategoryList = Object.fromEntries(uiKeys.map((k) => [k, [] as Resource[]])) as Record<UiCategory, Resource[]>;
     for (const r of Object.values(resources)) {
       for (const ui of uiKeys) {
         if (categoryGroup(ui).includes(r.category)) {
