@@ -259,6 +259,14 @@ export function useGraphLayout(): UseGraphLayoutResult {
       worker.terminate();
       workerRef.current = null;
       isSimulatingRef.current = false;
+      // Reset the topology identity so the next worker instance takes the
+      // `isFirst` branch in the topology handler. Without this, React 18
+      // StrictMode's mount→cleanup→mount sequence leaves lastIdsRef
+      // populated from pass-1; pass-2's fresh worker then fails isFirst
+      // AND rewarm (same ids), the handler early-returns, and the worker
+      // never receives its init payload — loader stuck on BUILDING GRAPH
+      // forever until the hook unmounts for real (pause/resume monitoring).
+      lastIdsRef.current = new Set();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
