@@ -137,6 +137,27 @@ export function ForceConfigPanel() {
             />
           </label>
 
+          {/* Phase 12 (D-29, D-30) — language-axis separation strength. */}
+          <label className="block">
+            <span className="flex justify-between text-on-surface-variant">
+              BOUNDARY
+              <span className="font-mono text-on-surface">
+                {(forceConfig.boundaryStrength ?? 0.15).toFixed(2)}
+              </span>
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={0.5}
+              step={0.01}
+              value={forceConfig.boundaryStrength ?? 0.15}
+              onChange={(e) =>
+                setForceConfig({ boundaryStrength: parseFloat(e.target.value) })
+              }
+              className="w-full mt-1 accent-primary"
+            />
+          </label>
+
           <button
             onClick={() => setForceConfig({ ...DEFAULT_FORCE_CONFIG })}
             className="w-full px-2 py-1 text-on-surface-variant hover:bg-surface-container-high"

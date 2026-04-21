@@ -49,6 +49,14 @@ import {
 import { drawCometTrails, drawAgentDots } from './CometTrail';
 import { ForceConfigPanel } from './ForceConfigPanel';
 import { resolveTheme } from './themes';
+import {
+  drawBoundaryLine,
+  drawBridgeNodes,
+  drawBridgeLabels,
+  drawBoundaryAnchorLabels,
+  BRIDGE_HIT_RADIUS,
+} from './BridgeRenderer';
+import { BridgeTooltip } from './BridgeTooltip';
 
 // UI-SPEC §Performance states thresholds (D-23).
 const DEGRADED_NODE_THRESHOLD = 5_000;
@@ -140,6 +148,11 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const animFrameRef = useRef<number>(0);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  // Phase 12 — hover/selection for bridge diamonds. hoveredBridgeId is local
+  // (mirrors hoveredNodeId) because the render loop and tooltip both read it
+  // but no other component needs it cross-view. selectedBridgeId lives in
+  // the store (D-21) so BridgeDetailPanel + keyboard handlers share state.
+  const [hoveredBridgeId, setHoveredBridgeId] = useState<string | null>(null);
   // Screen-space mouse position relative to the container — used to place the
   // hover popover. Stored as a ref so it doesn't trigger extra re-renders;
   // the popover reads this when hoveredNodeId changes.
@@ -156,6 +169,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     settledAt,
     pinnedNodeIds,
     selectedAgentId,
+    selectedBridgeId,
     heatMapEnabled,
     contentionScores,
     themeId,
@@ -169,6 +183,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       settledAt: s.settledAt,
       pinnedNodeIds: s.pinnedNodeIds,
       selectedAgentId: s.selectedAgentId,
+      selectedBridgeId: s.selectedBridgeId,
       heatMapEnabled: s.heatMapEnabled,
       contentionScores: s.contentionScores,
       themeId: s.themeId,
@@ -406,7 +421,9 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     graphEdges,
     settledAt,
     selectedAgentId,
+    selectedBridgeId,
     hoveredNodeId,
+    hoveredBridgeId,
     pinnedNodeIds,
     heatMapEnabled,
     contentionScores,
@@ -505,6 +522,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     contentionScores,
     heatMapEnabled,
     hoveredNodeId,
+    hoveredBridgeId,
+    selectedBridgeId,
     pinnedNodeIds,
     selectedNode,
     selectedAgentId,
@@ -524,6 +543,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       contentionScores,
       heatMapEnabled,
       hoveredNodeId,
+      hoveredBridgeId,
+      selectedBridgeId,
       pinnedNodeIds,
       selectedNode,
       selectedAgentId,
@@ -542,6 +563,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     contentionScores,
     heatMapEnabled,
     hoveredNodeId,
+    hoveredBridgeId,
+    selectedBridgeId,
     pinnedNodeIds,
     selectedNode,
     selectedAgentId,
@@ -667,6 +690,11 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         }
       }
 
+      // Phase 12 (D-18, D-31 z-order step 3): world-space boundary line at
+      // y=0 — drawn BEFORE folder hulls so file-node hulls read as layered
+      // atop the cross-language spine rather than being bisected.
+      drawBoundaryLine(ctx, vp, w, h, s.theme);
+
       // Steps 2-3: Folder hulls (fill/stroke + label).
       drawFolderHulls(
         ctx,
@@ -696,6 +724,24 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       );
       // Step 6b: File-name labels at high zoom (UI-SPEC §Progressive Detail ≥ 4×).
       drawFileLabels(ctx, liveNodes, vp.zoom, vp, w, h, s.theme);
+
+      // Phase 12 (D-17, D-31 z-order steps 12-13): bridge diamonds + labels.
+      // Drawn AFTER file nodes/labels so diamonds read as layered atop the
+      // file-node scatter, but BEFORE selection halo / agent pulses so user
+      // overlays win the z-fight.
+      const bridgeNodes = liveNodes.filter((n) => n.kind === 'bridge');
+      drawBridgeNodes(
+        ctx,
+        bridgeNodes,
+        s.selectedBridgeId,
+        s.hoveredBridgeId,
+        vp.zoom,
+        vp,
+        w,
+        h,
+        s.theme,
+      );
+      drawBridgeLabels(ctx, bridgeNodes, vp.zoom, vp, w, h, s.theme);
 
       // Step 7: Selected-agent ambient glow + 1px white outer stroke.
       if (s.selectedNode && s.selectedAgentId) {
@@ -732,6 +778,16 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       drawConflictPulses(ctx, s.activeConflictPaths, livePositions, now, vp.zoom);
       drawConflictBadges(ctx, s.activeConflictPaths, livePositions, vp.zoom);
 
+      // Phase 12 (D-31 z-order steps 22-24): screen-space FRONTEND/BACKEND
+      // anchor labels. Must run with identity-scaled transform (dpr, not zoom)
+      // so leftX=12 resolves to actual 12 logical screen pixels. Canvas
+      // dimensions passed in logical (w × h) so boundaryScreenY clamp math
+      // stays in the same coordinate space as viewport.panY.
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawBoundaryAnchorLabels(ctx, vp, w, h, s.theme);
+      ctx.restore();
+
       // Phase 11.1 — perf bracket close + emit (D-12, D-13). No observer API.
       // Runs only when radarPerfDebug === '1'. Emits once per 120-frame ring wrap
       // (~2s at 60fps) with p95/max/avg via the Float32Array(120) ring buffer.
@@ -762,6 +818,27 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     return () => cancelAnimationFrame(animFrameRef.current);
   }, []); // empty deps — one loop for the component lifetime
 
+  // Phase 12 — bridge hit-test is O(N) linear scan across bridge nodes
+  // (typically ~50 commands, negligible vs the quadtree cost). Uses
+  // BRIDGE_HIT_RADIUS (10 world-space @ zoom 1), divided by zoom so the
+  // hit box stays visually constant.
+  const findBridgeAtWorld = useCallback(
+    (worldX: number, worldY: number): GraphNode | null => {
+      const r = BRIDGE_HIT_RADIUS / Math.max(viewport.zoom, 0.1);
+      for (const n of graphNodes) {
+        if (n.kind !== 'bridge') continue;
+        if (n.x === undefined || n.y === undefined) continue;
+        // Rectangular bounding-box containment (RESEARCH §Pattern — diamond
+        // hit-test uses bbox at this scale).
+        if (Math.abs(n.x - worldX) <= r && Math.abs(n.y - worldY) <= r) {
+          return n;
+        }
+      }
+      return null;
+    },
+    [graphNodes, viewport.zoom],
+  );
+
   // Quadtree-powered hit-test on mouse move (RESEARCH §Pattern 4).
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -770,6 +847,20 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
       const world = screenToWorld(sx, sy);
+      mousePosRef.current = { x: sx, y: sy };
+
+      // Phase 12 — try bridge hit first. Bridges sit on the boundary line
+      // and should win over file nodes near y≈0 since they're visually
+      // foremost in the z-order.
+      const bridge = findBridgeAtWorld(world.x, world.y);
+      if (bridge && bridge.commandName) {
+        setHoveredBridgeId(bridge.commandName);
+        setHoveredNodeId(null);
+        onHoveredAgentChange?.(null, sx, sy);
+        return;
+      }
+      setHoveredBridgeId(null);
+
       const found = quadtreeRef.current?.find(
         world.x,
         world.y,
@@ -777,11 +868,45 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       );
       const nextId = found?.id ?? null;
       setHoveredNodeId(nextId);
-      mousePosRef.current = { x: sx, y: sy };
       onHoveredAgentChange?.(null, sx, sy);
     },
-    [screenToWorld, viewport.zoom, onHoveredAgentChange, quadtreeRef],
+    [
+      screenToWorld,
+      viewport.zoom,
+      onHoveredAgentChange,
+      quadtreeRef,
+      findBridgeAtWorld,
+    ],
   );
+
+  // Phase 12 — click handler routes to selectBridge when a bridge is hit.
+  // Else no-op (file-node click is handled by useCanvasZoomPan drag logic,
+  // not a plain click; this handler is additive).
+  const handleClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const world = screenToWorld(sx, sy);
+      const bridge = findBridgeAtWorld(world.x, world.y);
+      if (bridge && bridge.commandName) {
+        useRadarStore.getState().selectBridge(bridge.commandName);
+      }
+    },
+    [screenToWorld, findBridgeAtWorld],
+  );
+
+  // Phase 12 (UI-SPEC §Keyboard) — Escape clears the selected bridge.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        useRadarStore.getState().selectBridge(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // Attach native wheel/mouse handlers for pan/zoom (wheel must be non-passive).
   useEffect(() => {
@@ -823,6 +948,16 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     if (!hoveredNodeId) return null;
     return graphNodes.find((n) => n.id === hoveredNodeId) ?? null;
   }, [hoveredNodeId, graphNodes]);
+
+  // Phase 12 — hovered bridge lookup for BridgeTooltip rendering.
+  const hoveredBridge = useMemo(() => {
+    if (!hoveredBridgeId) return null;
+    return (
+      graphNodes.find(
+        (n) => n.kind === 'bridge' && n.commandName === hoveredBridgeId,
+      ) ?? null
+    );
+  }, [hoveredBridgeId, graphNodes]);
 
   const hoveredContention = hoveredNodeId
     ? contentionScores.get(hoveredNodeId) ?? 0
@@ -900,8 +1035,10 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       <canvas
         ref={canvasRef}
         onMouseMove={handleMouseMove}
+        onClick={handleClick}
         className="block"
         data-hovered-node={hoveredNodeId}
+        data-hovered-bridge={hoveredBridgeId}
         role="img"
         aria-label={`Codebase dependency graph. ${graphNodes.length} files, ${graphEdges.length} edges.`}
       />
@@ -998,6 +1135,17 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
             </div>
           )}
         </div>
+      )}
+
+      {/* Phase 12 — hovered bridge tooltip. */}
+      {hoveredBridge && (
+        <BridgeTooltip
+          bridge={hoveredBridge}
+          mouseX={mousePosRef.current.x}
+          mouseY={mousePosRef.current.y}
+          containerWidth={canvasSize.width}
+          containerHeight={canvasSize.height}
+        />
       )}
     </div>
   );

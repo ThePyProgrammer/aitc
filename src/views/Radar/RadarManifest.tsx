@@ -10,6 +10,7 @@ import { useRadarStore } from '../../stores/radarStore';
 import { useScopedAgents } from '../../hooks/useScopedAgents';
 import { AgentManifestRow } from './AgentManifestRow';
 import { AlertDetail } from './AlertDetail';
+import { BridgeDetailPanel } from './BridgeDetailPanel';
 
 export function RadarManifest() {
   const isManifestOpen = useRadarStore((s) => s.isManifestOpen);
@@ -71,6 +72,9 @@ export function RadarManifest() {
 
               {/* Alert/Detail section */}
               <AlertDetail />
+
+              {/* Phase 12 — bridge detail when selectedBridgeId !== null */}
+              <BridgeDetailPanel />
             </div>
           </motion.div>
         )}
