@@ -4,6 +4,25 @@ import { MemoryRouter } from 'react-router-dom';
 import { ChatTranscript } from '../ChatTranscript';
 import { useChatStore, type AgentEvent } from '../../../stores/chatStore';
 
+// TanStack Virtual doesn't render items in jsdom (zero-sized containers).
+// Mock it to render all items linearly so the transcript contents are
+// testable without mocking ResizeObserver/getBoundingClientRect.
+vi.mock('@tanstack/react-virtual', () => ({
+  useVirtualizer: (opts: { count: number }) => {
+    const items = Array.from({ length: opts.count }, (_, i) => ({
+      index: i,
+      key: i,
+      start: i * 60,
+      size: 60,
+    }));
+    return {
+      getVirtualItems: () => items,
+      getTotalSize: () => opts.count * 60,
+      measureElement: () => {},
+    };
+  },
+}));
+
 // motion/react mock for EventCard child tool-use expansion animations.
 vi.mock('motion/react', () => ({
   motion: {

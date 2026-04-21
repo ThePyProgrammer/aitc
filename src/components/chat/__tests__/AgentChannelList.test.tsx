@@ -3,6 +3,24 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { AgentChannelList } from '../AgentChannelList';
 import { useChatStore, type ChatChannel } from '../../../stores/chatStore';
 
+// TanStack Virtual renders zero items in jsdom (containers have 0 height).
+// Mock to render every item linearly so row content is testable.
+vi.mock('@tanstack/react-virtual', () => ({
+  useVirtualizer: (opts: { count: number }) => {
+    const items = Array.from({ length: opts.count }, (_, i) => ({
+      index: i,
+      key: i,
+      start: i * 64,
+      size: 64,
+    }));
+    return {
+      getVirtualItems: () => items,
+      getTotalSize: () => opts.count * 64,
+      measureElement: () => {},
+    };
+  },
+}));
+
 function mkChannel(overrides: Partial<ChatChannel> = {}): ChatChannel {
   return {
     agentId: 'claude-cc-001',
