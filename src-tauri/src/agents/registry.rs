@@ -31,6 +31,28 @@ pub struct ManagedAgent {
     pub stdout_buffer: Option<VecDeque<String>>,
 }
 
+/// Read-only diagnostic snapshot of the agent registry (Phase 18 D-04).
+///
+/// Counts are derived by ID-prefix convention (`PASSIVE-*`, `KAGENT-*`);
+/// `launched_count` is orthogonal and counts entries with
+/// `launched_by_aitc = true`. `capacity_hits_since_start` is the lifetime
+/// monotonic counter incremented on every `upsert_agent` at-capacity
+/// failure since this `AgentRegistry` was constructed.
+///
+/// Intended for post-hoc debugging of "why did a launch fail with
+/// 'Registry at capacity'?" questions. Safe to call at any cadence —
+/// the backing `snapshot_stats()` method acquires only the read lock +
+/// one atomic load (see Pitfall 7 / T-18-02).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryStats {
+    pub total_agents: u32,
+    pub passive_count: u32,
+    pub kagent_count: u32,
+    pub launched_count: u32,
+    pub capacity_hits_since_start: u64,
+}
+
 /// Central registry of all known agents.
 ///
 /// Thread-safe via `RwLock<HashMap>`. The `adapters` list holds registered
