@@ -94,42 +94,43 @@ wireframes/                Command Horizon design-system source
 
 Built phase-by-phase through [GSD](.planning/). Started as "oh I'll ship six phases, a cute little tower + radar + merge UI app." Now there are eighteen, plus a decimal (11.1) for urgent bug work, and the count keeps going up every time I actually run the thing. Phases 11-17 were added *after* v1.0 shipped because once you have a functional ATC radar you cannot stop asking what if the radar was cooler. Phase 18 was added because running four agents at once filled the registry in about ten seconds. Classic.
 
-Each phase has a `.planning/phases/NN-*/` folder with research · context · plan(s) · verification artefacts. Phases run strictly in numeric order: each one depends on the one before. No cheating.
+Each phase has a `.planning/phases/NN-*/` folder with research · context · plan(s) · verification artefacts. The arrows below are the **real dependency graph**, not execution order — GSD happens to run one phase at a time, but the tree says which ones actually block which. Phases 17 and 18 in particular don't care about the Wave 2 chain; both are unblocked right now.
 
 ```
-Wave 0: "ok let's actually ship v1"
-  ├── 1  Foundation + App Shell              → (none)     ✅ shipped
-  ├── 2  Real-Time Data Pipeline             → 1          ✅ shipped (2026-04-10)
-  ├── 3  Agents + Conflict Detection         → 2          ✅ shipped
-  ├── 4  Core UI Views                       → 3          ✅ shipped
-  ├── 5  Conflict Resolution + History       → 4          ✅ shipped
-  └── 6  Pipeline Activation (gap closure)   → 5          ✅ shipped
+Wave 0 — "ok let's actually ship v1"
+  (truly linear — each one is built on top of the last)
+    1 ──→ 2 ──→ 3 ──→ 4 ──→ 5 ──→ 6                         ✅ all shipped
+    Shell   Pipe  Agents  UI    Merge  Wiring
 
-Wave 1: "wait, I want more surfaces"
-  ├── 7  Graph-based Codebase Map            → 6          ✅ shipped (RIP treemap, 2026)
-  ├── 8  Claude Code PreToolUse Hooks        → 7          ✅ shipped
-  ├── 9  Arsenal (skills / agents / config)  → 8          ✅ shipped
-  └── 10 First-class Chat UI                 → 9          🟡 6/6 coded — UAT sign-off pending on 10-06 checkpoint
+Wave 1 — "wait, I want more surfaces"
+  (three parallel branches off Phase 6; 10 is the convergence point)
+    6 ──┬── 7  Graph-based Codebase Map       (7 ← 4, 6)    ✅ shipped (RIP treemap)
+        ├── 8  Claude Code PreToolUse Hooks   (8 ← 3, 4)    ✅ shipped
+        └── 9  Arsenal (skills/agents/config) (9 ← 2, 4)    ✅ shipped
+                       ↓
+                  10 First-class Chat UI      (10 ← 3,8,9)  🟡 6/6 coded — UAT pending on 10-06
 
-Wave 2: "the radar should be sicker"
-  ├── 11   d3-force in a WebWorker           → 10         ✅ shipped (2026-04-21)
-  ├── 11.1 Fix zoom-scroll lag (INSERTED)    → 11         ⏳ planning  ← we are here
-  ├── 12 IPC bridge nodes + boundary viz     → 11         ⏳ planning
-  ├── 13 4-level semantic zoom               → 12         ⏳ planning
-  ├── 14 Multi-layer offscreen canvas        → 13         ⏳ planning
-  ├── 15 Enhanced ATC agent overlay (TCAS)   → 14         ⏳ planning
-  └── 16 Typed edges + Louvain communities   → 15         ⏳ planning
+Wave 2 — "the radar should be sicker"
+  (everything needs Phase 7's graph; most need Phase 11's worker for perf headroom)
+    7 ──→ 11   d3-force in a WebWorker                      ✅ shipped (2026-04-21)
+    7 ──→ 11.1 Fix zoom-scroll lag (exposed by 11, not caused)  ⏳ planning  ← next up
+    7+11 ─┬── 12 IPC bridge nodes + boundary viz            ⏳ planning
+          ├── 13 4-level semantic zoom                      ⏳ planning
+          └── 14 Multi-layer offscreen canvas               ⏳ planning
+                    ↓                             12 ──→ 16 Typed edges + Louvain
+                   15 Enhanced ATC overlay (TCAS)           ⏳ planning
 
-Wave 3: "things you only find out by actually running this"
-  ├── 17 Conflict-triggered gate             → 16         ⏳ drafted (17-CONTEXT.md)
-  └── 18 Fix passive-scan registry flooding  → 17         ⏳ planning
+Wave 3 — "things you only find out by actually running this"
+  (both phases float free of Wave 2 — could ship right now)
+    3+8 ──→ 17 Conflict-triggered gate                      ⏳ drafted (17-CONTEXT.md)
+    3+6 ──→ 18 Fix passive-scan registry flooding           ⏳ planning
 ```
 
 **Status (2026-04-21):** Waves 0 and 1 are basically done. All of v1.0 shipped. Phase 7 replaced the original squarified-treemap radar with the force-directed graph (RIP, you served us well). Phase 8 shipped the Claude Code hook plumbing. Phase 9 shipped Arsenal. Phase 10 (Chat UI) has **all 6 plans coded** — blocked only on the Plan 06 Task 3 human-verify UAT checkpoint (see `10-06-CHECKPOINT.md`).
 
-Wave 2 is where the scope creep lives and we're in it. **Phase 11** shipped 2026-04-21 — d3-force now runs in a dedicated Worker with transferable `Float32Array` position buffers, prod build passed smoke, force-config sliders are "damn responsive" per the operator. Manual UAT surfaced a zoom-scroll lag on settled graphs, filed as **Phase 11.1** (INSERTED) — the hot-path gate short-circuits correctly when the sim is settled, so the render loop is byte-identical to Phase 7 and this is a pre-existing issue that Phase 11's perf surfacing merely exposed. Suspects: wheel events firing at 120–240Hz on trackpads outrunning rAF, `drawFolderHulls` recomputing convex hulls per frame even on static positions, and the Zustand viewport-writeback cascade. Scope is performance-only; no visual change; no new capability.
+Wave 2 is where the scope creep lives and we're in it. **Phase 11** shipped 2026-04-21 — d3-force now runs in a dedicated Worker with transferable `Float32Array` position buffers, prod build passed smoke, force-config sliders are "damn responsive" per the operator. Manual UAT surfaced a zoom-scroll lag on settled graphs, filed as **Phase 11.1** — the hot-path gate short-circuits correctly when the sim is settled, so the render loop is byte-identical to Phase 7 and this is a pre-existing issue that Phase 11's perf surfacing merely exposed. Suspects: wheel events firing at 120–240Hz on trackpads outrunning rAF, `drawFolderHulls` recomputing convex hulls per frame even on static positions, and the Zustand viewport-writeback cascade. Scope is performance-only; no visual change; no new capability.
 
-Wave 3 collects the reality checks — things that only break once you actually run the app with multiple long-lived agents. **Phase 17** (conflict-triggered gating) exists because the "every Edit/Write/Bash prompts you" model became unusable in a multi-agent session; see [`17-CONTEXT.md`](.planning/phases/17-conflict-triggered-pretooluse-gating-replace-tool-category-g/17-CONTEXT.md) for the three unresolved design questions. **Phase 18** was filed after `AgentRegistry` hit its `MAX_AGENTS=100` cap within seconds of startup — `passive_bridge.bridge_tick` was registering a `PASSIVE-{pid}` for every `claude`/`codex`/`opencode`-named process on the box, including unrelated CLI sessions in other terminals and short-lived subprocesses that Phase 10's long-lived stream-json runtime spawns (MCP handlers, `aitc-hook` fires, node helpers). Pre-existing bug from Phase 3/6, amplified by Phase 10. Fix needs to scope passive registration to self-registered PIDs **or** cwd-in-active-repo with a narrow command-line match, plus raise the ceiling as a safety net.
+Wave 3 collects the reality checks — things that only break once you actually run the app with multiple long-lived agents. Neither phase here is blocked by Wave 2; both could be picked up in parallel with the radar polish work. **Phase 17** (conflict-triggered gating) only needs Phase 3's conflict engine + Phase 8's hook pipeline (both shipped); it exists because the "every Edit/Write/Bash prompts you" model became unusable in multi-agent sessions — see [`17-CONTEXT.md`](.planning/phases/17-conflict-triggered-pretooluse-gating-replace-tool-category-g/17-CONTEXT.md) for the three unresolved design questions. **Phase 18** only needs Phase 3's registry + Phase 6's passive_bridge (both shipped); it was filed after `AgentRegistry` hit its `MAX_AGENTS=100` cap within seconds of startup, because `passive_bridge.bridge_tick` was registering a `PASSIVE-{pid}` for every `claude`/`codex`/`opencode`-named process on the box — unrelated CLI sessions in other terminals plus the short-lived subprocesses that Phase 10's long-lived stream-json runtime spawns (MCP handlers, `aitc-hook` fires, node helpers). Pre-existing bug from Phase 3/6, amplified by Phase 10.
 
 Ground truth: [`.planning/STATE.md`](.planning/STATE.md) + [`.planning/ROADMAP.md`](.planning/ROADMAP.md). GSD updates them automatically. Please do not hand-edit the checkboxes, you will make me sad.
 
