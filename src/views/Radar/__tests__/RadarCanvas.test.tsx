@@ -10,7 +10,7 @@ if (typeof globalThis.Path2D === 'undefined') {
 }
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import type {
   GraphNode,
   GraphEdge,
