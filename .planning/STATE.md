@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 10-05-PLAN.md
-last_updated: "2026-04-21T01:42:23.930Z"
+stopped_at: Completed 10-06-PLAN.md (automation); Task 3 UAT checkpoint pending developer sign-off via 10-06-CHECKPOINT.md
+last_updated: "2026-04-21T02:07:17.916Z"
 last_activity: 2026-04-21
 progress:
   total_phases: 17
-  completed_phases: 9
+  completed_phases: 10
   total_plans: 54
-  completed_plans: 49
-  percent: 91
+  completed_plans: 51
+  percent: 94
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 ## Current Position
 
 Phase: 11 (move-d3-force-simulation-to-a-webworker-with-transferable-fl) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-04-21
 
@@ -65,6 +65,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 10 P03 | 10 min | 2 tasks | 9 files |
 | Phase 10 P04 | 20m | 3 tasks | 14 files |
 | Phase 10 P05 | 13min | 3 tasks | 24 files |
+| Phase 10 P06 | 14 min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -94,6 +95,9 @@ Recent decisions affecting current work:
 - [Phase 10]: Plan 04: LaunchOptions.agent_id minted UP FRONT via uuid::Uuid::new_v4().simple()[:4].to_uppercase() so duplex adapters can write per-session MCP config before spawn. Honors explicit agent_id for D-04 relaunch continuity.
 - [Phase 10]: Plan 04: AdapterCapabilities flags-struct + trait-method-with-default (chat_duplex: false) widens Plan 02's inline adapter_type match into a typed per-adapter API. ClaudeCodeAdapter overrides to true; Codex/OpenCode/Generic inherit default.
 - [Phase 10]: Plan 04: D-21 deletion scope — Phase 4 send_chat_message/list_chat_messages/update_message_delivery_status + ChatMessage type removed from backend. chat_messages DB table kept empty (migration 006) in case rollback needed; Plan 06 catches lingering frontend callers via TS errors.
+- [Phase 10]: Plan 06: Task 3 is a blocking human-verify UAT checkpoint — Plan 06 automation is complete but Phase 10 is NOT closed until developer signs off against 10-UI-SPEC.md via 10-06-CHECKPOINT.md
+- [Phase 10]: Plan 06: ?tab=chat / ?agent=<id> URL schema finalized; CommsTabBar prop shape (unreadChat + onTabChange) confirmed; setSearchParams uses replace mode to avoid history pollution from tab/selection churn
+- [Phase 10]: Plan 06: D-21 Phase 4 frontend chat artifacts DELETED — ChatThread.tsx, MiniChatCard.tsx, Phase-4-era ChatInput.tsx (new Phase 10 version at src/components/chat/ChatInput.tsx); commsStore scrubbed of ChatMessage/messages/sendMessage/fetchMessages; TelemetryPanel AGENT_CHANNELS section gone
 
 ### Roadmap Evolution
 
@@ -129,6 +133,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T01:42:11.433Z
-Stopped at: Completed 10-05-PLAN.md
+Last session: 2026-04-21T02:07:17.911Z
+Stopped at: Completed 10-06-PLAN.md (automation); Task 3 UAT checkpoint pending developer sign-off via 10-06-CHECKPOINT.md
 Resume file: None
