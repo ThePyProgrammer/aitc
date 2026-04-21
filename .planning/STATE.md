@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 18-03 complete; plan 18-04 ready to start
-last_updated: "2026-04-21T05:52:19Z"
-last_activity: 2026-04-21 -- Phase 18-03 completed (get_registry_stats Tauri command + RegistryStats TS binding, 2 commits)
+stopped_at: Phase 18 complete (4/4 plans); ready to close phase or move to Phase 19
+last_updated: "2026-04-21T06:00:21Z"
+last_activity: 2026-04-21 -- Phase 18-04 completed (MAX_AGENTS D-03 rationale formalized in doc comment, 1 commit); Phase 18 now 100% complete
 progress:
   total_phases: 20
   completed_phases: 12
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 
 ## Current Position
 
-Phase: 18 (fix-passive-scan-registry-flooding-agentregistry-hits-its-ma) — EXECUTING
-Plan: 3 of 4 complete (18-01 ✓, 18-02 ✓, 18-03 ✓; 18-04 pending)
-Status: Executing Phase 18 wave 2 complete (get_registry_stats Tauri command + TS binding landed)
-Last activity: 2026-04-21 -- Phase 18-03 completed (get_registry_stats Tauri command + RegistryStats TS binding, 2 commits)
+Phase: 18 (fix-passive-scan-registry-flooding-agentregistry-hits-its-ma) — COMPLETE (4/4 plans)
+Plan: 4 of 4 complete (18-01 ✓, 18-02 ✓, 18-03 ✓, 18-04 ✓)
+Status: Phase 18 complete — passive-scan flooding fix shipped end-to-end (parent-PID filter, capacity counter, Tauri diagnostic command, D-03 rationale formalized in code)
+Last activity: 2026-04-21 -- Phase 18-04 completed (MAX_AGENTS D-03 rationale formalized in doc comment, 1 commit)
 
-Progress: [████████░░] 75%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -69,6 +69,7 @@ Progress: [████████░░] 75%
 | Phase 18 P01 | 8 min | 1 task (7 commits) | 1 file |
 | Phase 18 P02 | 8 min | 1 task (6 commits) | 1 file |
 | Phase 18 P03 | 7 min | 1 task (2 commits) | 3 files |
+| Phase 18 P04 | 3 min | 1 task (1 commit) | 1 file |
 
 ## Accumulated Context
 
@@ -108,6 +109,7 @@ Recent decisions affecting current work:
 - [Phase 18]: Plan 02: RegistryStats fields are u32/u64 (not usize) per the authoritative PLAN.md signature — specta/TS-cross-boundary-friendly, avoids platform-dependent usize width. 10,000x MAX_AGENTS headroom for u32 count fields.
 - [Phase 18]: Plan 03: get_registry_stats uses fully-qualified `crate::agents::registry::RegistryStats` return type (no new `use` import in commands.rs) — single-use, matches existing commands.rs pattern for single-use external types.
 - [Phase 18]: Plan 03: Binding regen via `cargo build --bin aitc && timeout --preserve-status 8 ./target/debug/aitc` — the specta `.export(...)` is gated inside `pub fn run()`, so `cargo test --lib` does NOT regenerate bindings despite both paths having debug_assertions. This is the canonical regen command for future Tauri command additions in this repo.
+- [Phase 18]: Plan 04: MAX_AGENTS = 1000 doc comment formalizes D-03 inline — explains why 1000 (emergency ceiling), why not 100 (Phase 3 value overrun by Phase 10 amplification), why not configurable (emergency-only, wrong surface for settings); cites hotfix 62612b3 + D-01/D-02; forward-references `capacity_hits_since_start` (18-02) and `get_registry_stats` Tauri command (18-03) so the ceiling has first-class observability. Single atomic commit `8571af0`, pure doc edit, zero code-path impact. Phase 18 now 4/4 plans complete.
 
 ### Roadmap Evolution
 
@@ -148,6 +150,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T05:52:19Z
-Stopped at: Phase 18-03 complete; plan 18-04 ready to start
-Resume file: .planning/phases/18-fix-passive-scan-registry-flooding-agentregistry-hits-its-ma/18-04-PLAN.md
+Last session: 2026-04-21T06:00:21Z
+Stopped at: Phase 18 complete (4/4 plans); ready to close phase or move to Phase 19
+Resume file: (Phase 18 closed — next resume is Phase 19 orchestration or `/gsd-verify-work` for Phase 18 sign-off)
