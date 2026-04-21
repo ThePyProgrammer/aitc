@@ -5,12 +5,12 @@
 
 import { useMemo } from 'react';
 import { useRadarStore } from '../../stores/radarStore';
-import { useAgentStore } from '../../stores/agentStore';
+import { useScopedAgents } from '../../hooks/useScopedAgents';
 import { usePipelineStore } from '../../stores/pipelineStore';
 
 export function AlertDetail() {
   const selectedAgentId = useRadarStore((s) => s.selectedAgentId);
-  const agents = useAgentStore((s) => s.agents);
+  const agents = useScopedAgents();
   const events = usePipelineStore((s) => s.events);
 
   const agent = agents.find((a) => a.id === selectedAgentId);

@@ -19,6 +19,14 @@
     "sql:allow-execute",
     "sql:allow-select",
     "sql:allow-close",
-    "notification:default"
+    "notification:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "core:webview:allow-set-webview-zoom",
+    "shell:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [{ "name": "binaries/aitc-hook", "sidecar": true }]
+    }
   ]
 }

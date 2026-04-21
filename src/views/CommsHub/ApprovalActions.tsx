@@ -1,13 +1,34 @@
+/**
+ * ApprovalActions — Phase 4 action row, extended in Phase 8 Plan 05:
+ *  - pretool_use rows get a DontAskAgainCheckbox below the button row
+ *    (D-22); its state flows into `approveRequest` / `approveWithEdits`
+ *    as `{ alwaysAllowForSession }`.
+ *  - DENY ignores the checkbox entirely (T-08-12 repudiation guard).
+ *  - Checkbox resets when the requestId prop changes.
+ */
 import { useState, useRef, useEffect } from 'react';
 import { useCommsStore } from '../../stores/commsStore';
+import { DontAskAgainCheckbox } from './DontAskAgainCheckbox';
 
 interface ApprovalActionsProps {
   requestId: number;
   hasEdits: boolean;
   editedContent: string;
+  // Phase 8 extension:
+  requestType?: string;
+  /** Short badge label (e.g. 'EDIT', 'BASH', 'MCP'); null for write_access. */
+  toolBadgeLabel?: string | null;
+  agentId?: string;
 }
 
-export function ApprovalActions({ requestId, hasEdits, editedContent }: ApprovalActionsProps) {
+export function ApprovalActions({
+  requestId,
+  hasEdits,
+  editedContent,
+  requestType,
+  toolBadgeLabel,
+  agentId,
+}: ApprovalActionsProps) {
   const approveRequest = useCommsStore((s) => s.approveRequest);
   const denyRequest = useCommsStore((s) => s.denyRequest);
   const askMoreInfo = useCommsStore((s) => s.askMoreInfo);
@@ -16,7 +37,13 @@ export function ApprovalActions({ requestId, hasEdits, editedContent }: Approval
   const [confirmDeny, setConfirmDeny] = useState(false);
   const [showAskInput, setShowAskInput] = useState(false);
   const [askQuestion, setAskQuestion] = useState('');
+  const [alwaysAllow, setAlwaysAllow] = useState(false);
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset checkbox when the selected request changes.
+  useEffect(() => {
+    setAlwaysAllow(false);
+  }, [requestId]);
 
   // Auto-revert deny confirmation after 3 seconds
   useEffect(() => {
@@ -34,11 +61,10 @@ export function ApprovalActions({ requestId, hasEdits, editedContent }: Approval
 
   const handleDenyClick = () => {
     if (confirmDeny) {
-      // Second click -- execute deny
+      // Second click — execute deny. T-08-12: never pass alwaysAllowForSession.
       denyRequest(requestId);
       setConfirmDeny(false);
     } else {
-      // First click -- show confirmation
       setConfirmDeny(true);
     }
   };
@@ -51,31 +77,36 @@ export function ApprovalActions({ requestId, hasEdits, editedContent }: Approval
     }
   };
 
+  const isPretool = requestType === 'pretool_use';
+
   return (
     <div className="flex flex-col gap-2">
       {/* Button row */}
       <div className="flex items-center gap-2 h-[44px]">
-        {/* APPROVE - hidden when edits exist */}
         {!hasEdits && (
           <button
-            onClick={() => approveRequest(requestId)}
+            onClick={() =>
+              approveRequest(requestId, { alwaysAllowForSession: alwaysAllow })
+            }
             className="px-4 py-2 bg-primary text-on-surface font-headline text-[10px] font-bold uppercase tracking-widest hover:bg-primary-container transition-colors duration-150"
           >
             APPROVE
           </button>
         )}
 
-        {/* APPROVE_WITH_EDITS - visible only when edits exist */}
         {hasEdits && (
           <button
-            onClick={() => approveWithEdits(requestId, editedContent)}
+            onClick={() =>
+              approveWithEdits(requestId, editedContent, {
+                alwaysAllowForSession: alwaysAllow,
+              })
+            }
             className="px-4 py-2 bg-primary text-on-surface font-headline text-[10px] font-bold uppercase tracking-widest hover:bg-primary-container transition-colors duration-150"
           >
             APPROVE_WITH_EDITS
           </button>
         )}
 
-        {/* DENY - two-step confirmation */}
         <button
           onClick={handleDenyClick}
           className={`px-4 py-2 font-headline text-[10px] font-bold uppercase tracking-widest transition-colors duration-150 ${
@@ -87,7 +118,6 @@ export function ApprovalActions({ requestId, hasEdits, editedContent }: Approval
           {confirmDeny ? 'CONFIRM_DENY' : 'DENY'}
         </button>
 
-        {/* ASK_FOR_MORE_INFO */}
         <button
           onClick={() => setShowAskInput(!showAskInput)}
           className="px-4 py-2 border border-outline/20 text-secondary font-headline text-[10px] font-bold uppercase tracking-widest hover:bg-surface-container-high transition-colors duration-150"
@@ -118,6 +148,16 @@ export function ApprovalActions({ requestId, hasEdits, editedContent }: Approval
             SEND
           </button>
         </div>
+      )}
+
+      {/* Phase 8 Plan 05: don't-ask-again checkbox (pretool_use only) */}
+      {isPretool && toolBadgeLabel && agentId && (
+        <DontAskAgainCheckbox
+          checked={alwaysAllow}
+          onChange={setAlwaysAllow}
+          toolBadgeLabel={toolBadgeLabel}
+          agentId={agentId}
+        />
       )}
     </div>
   );

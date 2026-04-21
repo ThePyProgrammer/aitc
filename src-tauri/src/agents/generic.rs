@@ -4,7 +4,7 @@
 //! launch, state, and intent rules. The `GenericAdapter` parses this config
 //! and implements `AgentAdapter` using the configured patterns.
 
-use crate::agents::adapter::{AgentAdapter, AgentState};
+use crate::agents::adapter::{AgentAdapter, AgentState, LaunchOptions};
 use crate::agents::launcher;
 use async_trait::async_trait;
 use regex::Regex;
@@ -125,7 +125,16 @@ impl AgentAdapter for GenericAdapter {
         self.config.process_names.clone()
     }
 
-    async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
+    fn launch_binary(&self) -> String {
+        self.config.launch_command.clone()
+    }
+
+    async fn launch(
+        &self,
+        cwd: PathBuf,
+        _intent: Option<String>,
+        _options: LaunchOptions,
+    ) -> Result<(u32, tokio::process::Child), String> {
         let args: Vec<&str> = self.config.launch_args.iter().map(|s| s.as_str()).collect();
         launcher::launch_detached(
             &self.config.launch_command,
@@ -222,6 +231,15 @@ protocol = "custom"
     fn adapter_type_matches_config_name() {
         let adapter = GenericAdapter::from_toml(SAMPLE_TOML).unwrap();
         assert_eq!(adapter.adapter_type(), "my-custom-agent");
+    }
+
+    #[test]
+    fn capabilities_inherits_default_read_only() {
+        // D-12: GenericAdapter inherits the default (chat_duplex: false).
+        // TOML-configured adapters stay read-only until a future Plan
+        // extends the TOML schema with a `chat_duplex = true` opt-in.
+        let adapter = GenericAdapter::from_toml(SAMPLE_TOML).unwrap();
+        assert!(!adapter.capabilities().chat_duplex);
     }
 
     #[test]

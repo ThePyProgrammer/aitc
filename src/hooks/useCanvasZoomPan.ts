@@ -3,6 +3,14 @@
 // VIZN-05: Provides viewport state and mouse handlers for Canvas 2D
 // zoom (mouse wheel toward cursor) and pan (click-drag).
 // Zoom clamped to [0.5, 20], factor 0.9/1.1 per scroll delta.
+//
+// Phase 11.1 revision: the rAF wheel coalescer added a full rAF tick of
+// pipeline latency (wheel → rAF → setViewport → commit → next rAF →
+// paint) which made zoom feel laggier than pre-11.1, even though the
+// render itself became cheap after the hull cache (T3) landed. Reverted
+// to direct setViewport per wheel event. Exponential factor
+// Math.pow(ZOOM_OUT_FACTOR, deltaY/100) is preserved from T1 so the
+// curve feels identical between single- and multi-event trackpad ticks.
 
 import { useCallback, useRef, useState } from 'react';
 
@@ -12,27 +20,56 @@ export interface CanvasViewport {
   panY: number;
 }
 
-const MIN_ZOOM = 0.5;
+const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 20;
-const ZOOM_IN_FACTOR = 1.1;
-const ZOOM_OUT_FACTOR = 0.9;
+// Phase 11.1 (D-02 carryover): a negative deltaY yields a factor > 1
+// (zoom in); positive deltaY yields < 1 (zoom out). The reciprocal
+// constant (1.04) is encoded implicitly via Math.pow's sign handling,
+// so we don't need a separate ZOOM_IN_FACTOR. Preserved the deltaY≈100
+// → 1.04× step to match the pre-refactor single-event zoom curve.
+const ZOOM_OUT_FACTOR = 1 / 1.04;
+
+// Phase 11.1 post-ship defense: a single non-finite value (NaN / ±Infinity)
+// anywhere in the viewport corrupts every subsequent frame — NaN+x=NaN,
+// min(a, max(b, NaN))=NaN, ctx.setTransform(NaN, ...) silently no-ops.
+// The result is a self-perpetuating blank canvas with no console error.
+// Fall back to the previous value for any axis whose next value isn't
+// finite, and reapply the zoom clamp as a belt-and-braces check.
+function sanitizeViewport(
+  next: CanvasViewport,
+  prev: CanvasViewport,
+): CanvasViewport {
+  const zoom = Number.isFinite(next.zoom)
+    ? Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next.zoom))
+    : prev.zoom;
+  const panX = Number.isFinite(next.panX) ? next.panX : prev.panX;
+  const panY = Number.isFinite(next.panY) ? next.panY : prev.panY;
+  return { zoom, panX, panY };
+}
 
 export function useCanvasZoomPan(initialViewport?: Partial<CanvasViewport>) {
-  const [viewport, setViewport] = useState<CanvasViewport>({
+  const [viewport, setViewportRaw] = useState<CanvasViewport>({
     zoom: 1,
     panX: 0,
     panY: 0,
     ...initialViewport,
   });
 
+  const setViewport = useCallback(
+    (updater: CanvasViewport | ((prev: CanvasViewport) => CanvasViewport)) => {
+      setViewportRaw((prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        return sanitizeViewport(next, prev);
+      });
+    },
+    [],
+  );
+
   const isDragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
 
   const onWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
-    // Capture event-derived values before setViewport: native event
-    // currentTarget is nulled after dispatch, and React 19 StrictMode
-    // re-invokes state updaters — either would throw on e.currentTarget.
     const target = e.currentTarget as HTMLCanvasElement | null;
     if (!target) return;
     const rect = target.getBoundingClientRect();
@@ -40,13 +77,11 @@ export function useCanvasZoomPan(initialViewport?: Partial<CanvasViewport>) {
     const cursorY = e.clientY - rect.top;
     const deltaY = e.deltaY;
     setViewport((vp) => {
-      const factor = deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
+      const factor = Math.pow(ZOOM_OUT_FACTOR, deltaY / 100);
       const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, vp.zoom * factor));
-
       const scale = newZoom / vp.zoom;
       const newPanX = cursorX - scale * (cursorX - vp.panX);
       const newPanY = cursorY - scale * (cursorY - vp.panY);
-
       return { zoom: newZoom, panX: newPanX, panY: newPanY };
     });
   }, []);

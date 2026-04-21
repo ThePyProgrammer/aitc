@@ -1,14 +1,15 @@
 // Phase 4 Plan 05 -- Agent manifest row for radar panel.
 //
-// Follows AgentRow visual pattern from TowerControl but compact.
-// Click to select agent and center radar viewport on agent position.
+// Click-to-select agent and center radar viewport on their current-position
+// graph node. Phase 7 Plan 04 migrated this row off `useTreemapLayout` (D-04
+// deletion) — it now uses `graphNodes` world positions directly so the
+// viewport can pan to the agent's file without synthesizing treemap rects.
 
 import { useMemo } from 'react';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import type { AgentInfo } from '../../stores/agentStore';
 import { useRadarStore, getAgentColor } from '../../stores/radarStore';
 import { usePipelineStore } from '../../stores/pipelineStore';
-import { useTreemapLayout } from '../../hooks/useTreemapLayout';
 
 interface AgentManifestRowProps {
   agent: AgentInfo;
@@ -18,58 +19,62 @@ export function AgentManifestRow({ agent }: AgentManifestRowProps) {
   const selectedAgentId = useRadarStore((s) => s.selectedAgentId);
   const selectAgent = useRadarStore((s) => s.selectAgent);
   const setViewport = useRadarStore((s) => s.setViewport);
-  const treeData = useRadarStore((s) => s.treeData);
+  const graphNodes = useRadarStore((s) => s.graphNodes);
   const events = usePipelineStore((s) => s.events);
 
   const isSelected = selectedAgentId === agent.id;
   const color = getAgentColor(agent.id);
 
-  // Count files touched by this agent
+  // Count files touched by this agent.
   const fileCount = useMemo(() => {
     const paths = new Set<string>();
     for (const ev of events) {
       if (ev.attribution.kind === 'pid' && ev.attribution.value === agent.pid) {
         paths.add(ev.path);
-      } else if (ev.attribution.kind === 'ambiguous' && agent.pid && ev.attribution.value.includes(agent.pid)) {
+      } else if (
+        ev.attribution.kind === 'ambiguous' &&
+        agent.pid &&
+        ev.attribution.value.includes(agent.pid)
+      ) {
         paths.add(ev.path);
       }
     }
     return paths.size;
   }, [events, agent.pid]);
 
-  // Treemap layout for finding agent position
-  // Use a reasonable default size (will approximate)
-  const layout = useTreemapLayout(treeData, 800, 600);
-
   const handleClick = () => {
     selectAgent(agent.id);
 
-    // Find the agent's most recent file, then center viewport on that treemap rect
+    // Find the agent's most recent FileEvent and pan to the matching graph
+    // node's world position (with zoom 3x for file-level detail).
     if (!agent.pid) return;
 
     const agentEvent = events.find((ev) => {
-      if (ev.attribution.kind === 'pid') return ev.attribution.value === agent.pid;
-      if (ev.attribution.kind === 'ambiguous') return ev.attribution.value.includes(agent.pid!);
+      if (ev.attribution.kind === 'pid')
+        return ev.attribution.value === agent.pid;
+      if (ev.attribution.kind === 'ambiguous')
+        return ev.attribution.value.includes(agent.pid!);
       return false;
     });
     if (!agentEvent) return;
 
     const normalizedPath = agentEvent.path.replace(/\\/g, '/');
-    const rect = layout.find((r) => {
-      const rPath = r.path.replace(/\\/g, '/');
-      return rPath === normalizedPath || normalizedPath.endsWith(rPath) || rPath.endsWith(normalizedPath);
+    const node = graphNodes.find((n) => {
+      const nPath = n.id.replace(/\\/g, '/');
+      return (
+        nPath === normalizedPath ||
+        normalizedPath.endsWith(nPath) ||
+        nPath.endsWith(normalizedPath)
+      );
     });
-    if (!rect) return;
+    if (!node || node.x === undefined || node.y === undefined) return;
 
-    // Center viewport on this rect
-    const cx = (rect.x0 + rect.x1) / 2;
-    const cy = (rect.y0 + rect.y1) / 2;
-    // Set pan so the center of the rect is at the center of a typical viewport
+    // Center the viewport on the node at zoom 3.
     const viewportCenterX = 400; // half of assumed canvas width
     const viewportCenterY = 300;
     setViewport({
-      panX: viewportCenterX - cx * 3,
-      panY: viewportCenterY - cy * 3,
+      panX: viewportCenterX - node.x * 3,
+      panY: viewportCenterY - node.y * 3,
       zoom: 3,
     });
   };

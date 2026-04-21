@@ -4,7 +4,7 @@ import { RadarManifest } from '../RadarManifest';
 import { AgentManifestRow } from '../AgentManifestRow';
 import { RadarMinimap } from '../RadarMinimap';
 import type { AgentInfo } from '../../../stores/agentStore';
-import type { TreeIndexEntry } from '../../../bindings';
+import type { GraphNode } from '../../../stores/radarStore';
 
 // Mock motion/react to avoid animation issues in tests
 vi.mock('motion/react', () => ({
@@ -28,13 +28,20 @@ vi.mock('lucide-react', () => ({
   Square: () => <span data-testid="square-icon" />,
 }));
 
-// Store mock state
+// Store mock state (Phase 7 Plan 03: treeData/fetchTreeIndex → graphNodes/fetchGraph).
 const mockRadarState = {
-  treeData: [] as TreeIndexEntry[],
+  graphNodes: [] as GraphNode[],
+  graphEdges: [] as Array<{ source: string; target: string; kind: string }>,
+  settledAt: null as number | null,
+  pinnedNodeIds: new Set<string>(),
+  activeTrails: [] as Array<{ id: string; agentId: string; fromPath: string; toPath: string; startTs: number }>,
   viewport: { zoom: 1, panX: 0, panY: 0 },
   selectedAgentId: null as string | null,
   isManifestOpen: true,
-  fetchTreeIndex: vi.fn(),
+  fetchGraph: vi.fn(),
+  commitSettledPositions: vi.fn(),
+  pinNode: vi.fn(),
+  unpinNode: vi.fn(),
   setViewport: vi.fn(),
   selectAgent: vi.fn(),
   toggleManifest: vi.fn(),
@@ -82,11 +89,9 @@ vi.mock('../../../stores/pipelineStore', () => ({
   usePipelineStore: (selector: (s: typeof mockPipelineState) => unknown) => selector(mockPipelineState),
 }));
 
-vi.mock('../../../hooks/useTreemapLayout', () => ({
-  useTreemapLayout: () => [],
-  buildFileTree: () => ({ path: '', name: 'root', size: 0, isDir: true, children: [] }),
-  computeTreemapLayout: () => [],
-}));
+// Phase 7 Plan 04: `useTreemapLayout` removed (D-04). RadarMinimap and
+// AgentManifestRow now operate on `graphNodes` positions directly, so no
+// treemap mock is required.
 
 const mockAgent1: AgentInfo = {
   id: 'claude-1',
@@ -172,27 +177,32 @@ describe('AgentManifestRow', () => {
 
 describe('RadarMinimap', () => {
   beforeEach(() => {
-    mockRadarState.treeData = [];
+    mockRadarState.graphNodes = [];
     mockRadarState.viewport = { zoom: 1, panX: 0, panY: 0 };
     vi.clearAllMocks();
   });
 
-  it('renders at 160x120 dimensions when treeData is present', () => {
-    mockRadarState.treeData = [
-      { path: 'src/index.ts', size: 100, isDir: false, depth: 1 },
+  it('renders at 160x120 dimensions when graphNodes is present', () => {
+    mockRadarState.graphNodes = [
+      { id: 'src/index.ts', dirKey: 'src', dirDepth: 1 },
     ];
-    const { getByTestId } = render(<RadarMinimap />);
+    const { getByTestId } = render(
+      <RadarMinimap canvasWidth={800} canvasHeight={600} />,
+    );
     const container = getByTestId('radar-minimap');
     expect(container.style.width).toBe('160px');
     expect(container.style.height).toBe('120px');
   });
 
-  it('shows viewport indicator rectangle when viewport is set', () => {
-    mockRadarState.treeData = [
-      { path: 'src/index.ts', size: 100, isDir: false, depth: 1 },
+  it('renders a canvas element (Plan 06: viewport indicator moved to canvas stroke)', () => {
+    mockRadarState.graphNodes = [
+      { id: 'src/index.ts', dirKey: 'src', dirDepth: 1 },
     ];
     mockRadarState.viewport = { zoom: 2, panX: 100, panY: 50 };
-    const { getByTestId } = render(<RadarMinimap />);
-    expect(getByTestId('minimap-viewport-indicator')).toBeInTheDocument();
+    const { getByTestId } = render(
+      <RadarMinimap canvasWidth={800} canvasHeight={600} />,
+    );
+    const container = getByTestId('radar-minimap');
+    expect(container.querySelector('canvas')).not.toBeNull();
   });
 });

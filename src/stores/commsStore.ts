@@ -2,8 +2,11 @@
 //
 // COMM-01: Approval request queue management with real-time updates.
 // COMM-02: Approve/deny/ask-more-info/approve-with-edits workflow.
-// COMM-03: Chat messaging to agents.
 // COMM-06: Edit-mode freeze prevents incoming updates for the request being edited (Pitfall 3).
+//
+// Phase 10 Plan 06 (D-21): Chat messaging moved to chatStore (Plan 05).
+// The Phase 4 messages map / sendMessage / fetchMessages / ChatMessage type
+// were removed from this store — all chat goes through `src/stores/chatStore.ts`.
 //
 // All mutations go through Tauri invoke for backend validation.
 
@@ -17,43 +20,50 @@ export interface ApprovalRequest {
   requestType: string;
   filePath: string | null;
   diffContent: string | null;
-  status: 'pending' | 'approved' | 'denied' | 'info_requested';
+  status: 'pending' | 'approved' | 'denied' | 'info_requested' | 'abandoned';
   urgency: 'low' | 'medium' | 'high';
   responseNote: string | null;
   editedContent: string | null;
   createdAt: string;
   resolvedAt: string | null;
-}
-
-export interface ChatMessage {
-  id: number;
-  agentId: string;
-  direction: 'inbound' | 'outbound';
-  content: string;
-  deliveryStatus: 'delivered' | 'queued' | 'unsupported';
-  approvalRequestId: number | null;
-  createdAt: string;
+  // Phase 8: PreToolUse hook context. Existing non-hook rows leave these null.
+  toolName: string | null;
+  toolInputJson: unknown | null;
+  sessionId: string | null;
+  // Phase 17 D-21: populated when the row was gated due to a file conflict or
+  // a protected-path glob match. Legacy rows (pre-migration-007) have both
+  // null; non-conflict future gate reasons may also leave conflictWithAgentId
+  // null. The defensive `| string | null` on gateReason tolerates a future
+  // backend value the frontend doesn't recognize without breaking typing.
+  conflictWithAgentId?: string | null;
+  gateReason?: 'file_conflict' | 'protected_path' | 'unknown' | string | null;
 }
 
 interface CommsStore {
   requests: ApprovalRequest[];
   selectedRequestId: number | null;
   editingRequestId: number | null;
-  messages: Record<string, ChatMessage[]>;
   isLoading: boolean;
   error: string | null;
+  // Phase 8: session-scoped always-allow decisions keyed by agent_id -> set of tool_names.
+  // Populated when the user ticks "remember for this session" in the approve modal.
+  // Plan 05 wires this through to the backend; Plan 02 reads it in /hook.
+  sessionAlwaysAllow: Map<string, Set<string>>;
   fetchRequests: () => Promise<void>;
   selectRequest: (id: number | null) => void;
-  approveRequest: (id: number) => Promise<void>;
-  denyRequest: (id: number) => Promise<void>;
+  approveRequest: (id: number, opts?: { alwaysAllowForSession?: boolean }) => Promise<void>;
+  denyRequest: (id: number, opts?: { reason?: string }) => Promise<void>;
   askMoreInfo: (id: number, question: string) => Promise<void>;
-  approveWithEdits: (id: number, editedContent: string) => Promise<void>;
+  approveWithEdits: (
+    id: number,
+    editedContent: string,
+    opts?: { alwaysAllowForSession?: boolean }
+  ) => Promise<void>;
   setEditing: (id: number | null) => void;
-  sendMessage: (agentId: string, content: string) => Promise<void>;
-  fetchMessages: (agentId: string) => Promise<void>;
   subscribeToApprovals: () => Promise<UnlistenFn>;
   pendingCount: () => number;
   selectedRequest: () => ApprovalRequest | undefined;
+  clearAlwaysAllowForAgent: (agentId: string) => void;
   reset: () => void;
 }
 
@@ -61,9 +71,9 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
   requests: [],
   selectedRequestId: null,
   editingRequestId: null,
-  messages: {},
   isLoading: false,
   error: null,
+  sessionAlwaysAllow: new Map<string, Set<string>>(),
 
   fetchRequests: async () => {
     try {
@@ -79,22 +89,40 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
     set({ selectedRequestId: id });
   },
 
-  approveRequest: async (id) => {
+  approveRequest: async (id, opts) => {
+    // Phase 8 Plan 05: wire `alwaysAllowForSession` through to Plan 02 backend
+    // command signature. Backend is source of truth (waiter-registry HashSet);
+    // the frontend sessionAlwaysAllow Map is an optimistic mirror for UX.
     try {
-      await invoke('approve_request', { id });
-      set((s) => ({
-        requests: s.requests.map((r) =>
+      await invoke('approve_request', {
+        id,
+        alwaysAllowForSession: opts?.alwaysAllowForSession ?? false,
+      });
+      set((s) => {
+        const nextRequests = s.requests.map((r) =>
           r.id === id ? { ...r, status: 'approved' as const } : r
-        ),
-      }));
+        );
+        if (opts?.alwaysAllowForSession) {
+          const req = s.requests.find((r) => r.id === id);
+          if (req && req.toolName) {
+            const m = new Map(s.sessionAlwaysAllow);
+            const existing = m.get(req.agentId);
+            const tools = new Set(existing ?? []);
+            tools.add(req.toolName);
+            m.set(req.agentId, tools);
+            return { requests: nextRequests, sessionAlwaysAllow: m };
+          }
+        }
+        return { requests: nextRequests };
+      });
     } catch (e) {
       set({ error: String(e) });
     }
   },
 
-  denyRequest: async (id) => {
+  denyRequest: async (id, opts) => {
     try {
-      await invoke('deny_request', { id });
+      await invoke('deny_request', { id, reason: opts?.reason ?? null });
       set((s) => ({
         requests: s.requests.map((r) =>
           r.id === id ? { ...r, status: 'denied' as const } : r
@@ -118,46 +146,44 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
     }
   },
 
-  approveWithEdits: async (id, editedContent) => {
+  approveWithEdits: async (id, editedContent, opts) => {
     try {
-      await invoke('approve_with_edits', { id, editedContent });
-      set((s) => ({
-        requests: s.requests.map((r) =>
+      await invoke('approve_with_edits', {
+        id,
+        editedContent,
+        alwaysAllowForSession: opts?.alwaysAllowForSession ?? false,
+      });
+      set((s) => {
+        const nextRequests = s.requests.map((r) =>
           r.id === id ? { ...r, status: 'approved' as const, editedContent } : r
-        ),
-      }));
+        );
+        if (opts?.alwaysAllowForSession) {
+          const req = s.requests.find((r) => r.id === id);
+          if (req && req.toolName) {
+            const m = new Map(s.sessionAlwaysAllow);
+            const existing = m.get(req.agentId);
+            const tools = new Set(existing ?? []);
+            tools.add(req.toolName);
+            m.set(req.agentId, tools);
+            return { requests: nextRequests, sessionAlwaysAllow: m };
+          }
+        }
+        return { requests: nextRequests };
+      });
     } catch (e) {
       set({ error: String(e) });
     }
   },
+
+  clearAlwaysAllowForAgent: (agentId) =>
+    set((s) => {
+      const m = new Map(s.sessionAlwaysAllow);
+      m.delete(agentId);
+      return { sessionAlwaysAllow: m };
+    }),
 
   setEditing: (id) => {
     set({ editingRequestId: id });
-  },
-
-  sendMessage: async (agentId, content) => {
-    try {
-      const message = await invoke<ChatMessage>('send_chat_message', { agentId, content });
-      set((s) => ({
-        messages: {
-          ...s.messages,
-          [agentId]: [...(s.messages[agentId] || []), message],
-        },
-      }));
-    } catch (e) {
-      set({ error: String(e) });
-    }
-  },
-
-  fetchMessages: async (agentId) => {
-    try {
-      const messages = await invoke<ChatMessage[]>('list_chat_messages', { agentId });
-      set((s) => ({
-        messages: { ...s.messages, [agentId]: messages },
-      }));
-    } catch (e) {
-      set({ error: String(e) });
-    }
   },
 
   subscribeToApprovals: async () => {
@@ -207,8 +233,8 @@ export const useCommsStore = create<CommsStore>((set, get) => ({
       requests: [],
       selectedRequestId: null,
       editingRequestId: null,
-      messages: {},
       isLoading: false,
       error: null,
+      sessionAlwaysAllow: new Map<string, Set<string>>(),
     }),
 }));

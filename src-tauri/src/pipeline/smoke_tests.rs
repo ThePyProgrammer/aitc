@@ -216,7 +216,7 @@ async fn bridge_populates_registry_and_records_session_file() {
     ])));
 
     // (a) bridge tick → PASSIVE-4242 appears.
-    crate::pipeline::passive_bridge::bridge_tick(&reg, &snap).await.unwrap();
+    crate::pipeline::passive_bridge::bridge_tick(&reg, &snap, None, None, None).await.unwrap();
     assert!(reg.get_agent("PASSIVE-4242").await.is_some());
 
     // (b) forwarder-path persistence for the same PID.

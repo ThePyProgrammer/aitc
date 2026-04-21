@@ -3,7 +3,7 @@
 //! Implements `AgentAdapter` for the OpenCode CLI agent.
 //! Intent extraction parses the `-p` / `--prompt` flag from CLI args per D-08.
 
-use crate::agents::adapter::{AgentAdapter, AgentState};
+use crate::agents::adapter::{AgentAdapter, AgentState, LaunchOptions};
 use crate::agents::launcher;
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -46,7 +46,16 @@ impl AgentAdapter for OpenCodeAdapter {
         vec!["opencode".to_string()]
     }
 
-    async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
+    fn launch_binary(&self) -> String {
+        "opencode".to_string()
+    }
+
+    async fn launch(
+        &self,
+        cwd: PathBuf,
+        _intent: Option<String>,
+        _options: LaunchOptions,
+    ) -> Result<(u32, tokio::process::Child), String> {
         launcher::launch_detached(
             "opencode",
             &[],
@@ -97,6 +106,13 @@ mod tests {
     fn adapter_type_returns_opencode() {
         let adapter = OpenCodeAdapter;
         assert_eq!(adapter.adapter_type(), "opencode");
+    }
+
+    #[test]
+    fn capabilities_inherits_default_read_only() {
+        // D-12: OpenCode inherits the default (chat_duplex: false).
+        let adapter = OpenCodeAdapter;
+        assert!(!adapter.capabilities().chat_duplex);
     }
 
     #[test]

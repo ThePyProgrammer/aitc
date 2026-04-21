@@ -6,11 +6,34 @@
 
 use crate::agents::adapter::{AgentAdapter, AgentInfo, AgentState};
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Maximum number of agents the registry will accept (T-03-03 mitigation).
-const MAX_AGENTS: usize = 100;
+///
+/// **Why 1000 and not configurable:** this is an emergency ceiling, not the
+/// intended operating constraint. Phase 18's D-01/D-02 scoping (cwd-in-repo
+/// + parent-PID-in-list filter inside `passive_bridge::bridge_tick`) is the
+/// real capacity control. Under normal operation a developer with three
+/// concurrent AITC launches plus five externally-detected standalone agents
+/// fills roughly eight entries — two orders of magnitude below the cap.
+///
+/// **Why not 100:** that was the original Phase 3 value (T-03-03) set when
+/// passive detection was young. Phase 10's long-lived stream-json sessions
+/// each fork MCP helpers + node shims + hook sidecar fires; without
+/// subprocess-child filtering the 100 cap filled within seconds (commit
+/// 62612b3 raised it to 1000 as a hotfix pending Phase 18).
+///
+/// **Why not exposed to users:** no use case has emerged; the settings
+/// surface is the wrong place to absorb what should always be an
+/// emergency-only ceiling. If a user ever legitimately hits 1000, revisit
+/// the scoping policy (Phase 18 D-01/D-02), not the constant.
+///
+/// See `capacity_hits_since_start` below for runtime observability of how
+/// often this cap is actually approached (exposed to callers via the
+/// `get_registry_stats` Tauri command, Phase 18 D-04).
+const MAX_AGENTS: usize = 1000;
 
 /// Maximum stdout ring buffer lines per agent.
 const MAX_STDOUT_LINES: usize = 1000;
@@ -23,6 +46,28 @@ pub struct ManagedAgent {
     pub stdout_buffer: Option<VecDeque<String>>,
 }
 
+/// Read-only diagnostic snapshot of the agent registry (Phase 18 D-04).
+///
+/// Counts are derived by ID-prefix convention (`PASSIVE-*`, `KAGENT-*`);
+/// `launched_count` is orthogonal and counts entries with
+/// `launched_by_aitc = true`. `capacity_hits_since_start` is the lifetime
+/// monotonic counter incremented on every `upsert_agent` at-capacity
+/// failure since this `AgentRegistry` was constructed.
+///
+/// Intended for post-hoc debugging of "why did a launch fail with
+/// 'Registry at capacity'?" questions. Safe to call at any cadence —
+/// the backing `snapshot_stats()` method acquires only the read lock +
+/// one atomic load (see Pitfall 7 / T-18-02).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryStats {
+    pub total_agents: u32,
+    pub passive_count: u32,
+    pub kagent_count: u32,
+    pub launched_count: u32,
+    pub capacity_hits_since_start: u64,
+}
+
 /// Central registry of all known agents.
 ///
 /// Thread-safe via `RwLock<HashMap>`. The `adapters` list holds registered
@@ -30,6 +75,12 @@ pub struct ManagedAgent {
 pub struct AgentRegistry {
     agents: RwLock<HashMap<String, ManagedAgent>>,
     adapters: Vec<Arc<dyn AgentAdapter>>,
+    /// Phase 18 D-04: monotonic lifetime counter of `upsert_agent`
+    /// at-capacity failures. Read via `snapshot_stats()`; never resets.
+    /// Outlives `ActiveWatch` lifecycles — counts for the entire AITC
+    /// process. `Ordering::Relaxed` because no happens-before relationship
+    /// with other memory is required (pure diagnostic gauge).
+    capacity_hits_since_start: AtomicU64,
 }
 
 impl AgentRegistry {
@@ -38,6 +89,7 @@ impl AgentRegistry {
         Self {
             agents: RwLock::new(HashMap::new()),
             adapters: Vec::new(),
+            capacity_hits_since_start: AtomicU64::new(0),
         }
     }
 
@@ -67,6 +119,12 @@ impl AgentRegistry {
             Ok(())
         } else {
             if agents.len() >= MAX_AGENTS {
+                // Phase 18 D-04: count every at-capacity failure for lifetime
+                // observability via `snapshot_stats()` / `get_registry_stats`.
+                // Atomic Relaxed increment; no additional lock acquisition
+                // (write-lock on `agents` already held here).
+                self.capacity_hits_since_start
+                    .fetch_add(1, Ordering::Relaxed);
                 return Err(format!(
                     "Registry at capacity ({MAX_AGENTS}). Cannot add agent '{id}'"
                 ));
@@ -141,6 +199,47 @@ impl AgentRegistry {
             .collect()
     }
 
+    /// Phase 18 D-04: read-only diagnostic snapshot of registry state.
+    ///
+    /// Single read-lock acquisition + one atomic load. Does NOT contend
+    /// with `upsert_agent`'s write path (T-18-02). Load the atomic BEFORE
+    /// the read lock so any concurrent upsert failure this call races
+    /// with is reflected in the NEXT call, not this one —
+    /// monotonic-lagging semantics, never "from the future"
+    /// (see 18-RESEARCH.md Pitfall 7).
+    ///
+    /// Counts are derived by ID prefix (`PASSIVE-*`, `KAGENT-*`) and by
+    /// `launched_by_aitc = true`. `launched_count` is orthogonal — a
+    /// launched agent has a `KAGENT-` ID and `launched_by_aitc = true`,
+    /// so it appears in BOTH `kagent_count` and `launched_count`. That
+    /// is intentional; the counts answer different questions.
+    pub async fn snapshot_stats(&self) -> RegistryStats {
+        let capacity_hits_since_start =
+            self.capacity_hits_since_start.load(Ordering::Relaxed);
+        let agents = self.agents.read().await;
+        let total_agents = agents.len() as u32;
+        let mut passive_count = 0u32;
+        let mut kagent_count = 0u32;
+        let mut launched_count = 0u32;
+        for (id, managed) in agents.iter() {
+            if id.starts_with("PASSIVE-") {
+                passive_count += 1;
+            } else if id.starts_with("KAGENT-") {
+                kagent_count += 1;
+            }
+            if managed.launched_by_aitc {
+                launched_count += 1;
+            }
+        }
+        RegistryStats {
+            total_agents,
+            passive_count,
+            kagent_count,
+            launched_count,
+            capacity_hits_since_start,
+        }
+    }
+
     /// Update an agent's state. Logs a warning if the transition is invalid
     /// per the state machine, but applies it anyway.
     pub async fn update_state(&self, id: &str, state: AgentState) {
@@ -189,6 +288,17 @@ impl AgentRegistry {
             .cloned()
     }
 
+    /// Adapter types whose launch binary resolves on the current PATH.
+    /// Used by the UI to hide agent types whose CLI isn't installed so the
+    /// user can't pick a launch that is guaranteed to fail.
+    pub fn available_adapter_types(&self) -> Vec<String> {
+        self.adapters
+            .iter()
+            .filter(|a| binary_on_path(&a.launch_binary()))
+            .map(|a| a.adapter_type().to_string())
+            .collect()
+    }
+
     /// Find the first adapter whose process_patterns match the given process name.
     /// Matching is lowercased substring, consistent with ProcessSnapshot logic.
     /// Used for process-scan detection, NOT for explicit launch-by-type.
@@ -209,6 +319,46 @@ impl Default for AgentRegistry {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Check whether `name` resolves to an executable on the current `PATH`.
+///
+/// Absolute paths are checked directly. On Windows, extensions from `PATHEXT`
+/// (with sensible fallbacks) are tried in addition to the bare name.
+fn binary_on_path(name: &str) -> bool {
+    let path_buf = std::path::Path::new(name);
+    if path_buf.is_absolute() {
+        return path_buf.is_file();
+    }
+
+    let exe_candidates: Vec<String> = if cfg!(windows) {
+        let pathext = std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".to_string());
+        let mut out = vec![name.to_string()];
+        for ext in pathext.split(';').filter(|e| !e.is_empty()) {
+            // Avoid double-extension if user already passed one in
+            if name.to_ascii_lowercase().ends_with(&ext.to_ascii_lowercase()) {
+                continue;
+            }
+            out.push(format!("{name}{ext}"));
+        }
+        out
+    } else {
+        vec![name.to_string()]
+    };
+
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    for dir in std::env::split_paths(&paths) {
+        for candidate in &exe_candidates {
+            let full = dir.join(candidate);
+            if full.is_file() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -241,7 +391,15 @@ mod tests {
         fn process_patterns(&self) -> Vec<String> {
             self.patterns.clone()
         }
-        async fn launch(&self, _cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
+        fn launch_binary(&self) -> String {
+            self.name.clone()
+        }
+        async fn launch(
+            &self,
+            _cwd: PathBuf,
+            _intent: Option<String>,
+            _options: crate::agents::adapter::LaunchOptions,
+        ) -> Result<(u32, tokio::process::Child), String> {
             Err("test adapter".to_string())
         }
         async fn get_state(&self, _pid: u32) -> AgentState {
@@ -447,6 +605,116 @@ mod tests {
             reg.reap_passive_agents(&live).await;
             assert!(reg.get_agent("KAGENT-999").await.is_some());
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 18 D-04: capacity-hit counter + snapshot_stats tests.
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn capacity_hit_increments_counter() {
+        let reg = AgentRegistry::new();
+        let adapter: Arc<dyn AgentAdapter> =
+            Arc::new(TestAdapter::new("test", vec!["test"]));
+
+        assert_eq!(
+            reg.snapshot_stats().await.capacity_hits_since_start,
+            0,
+            "fresh registry should report 0 capacity hits"
+        );
+
+        // Fill to MAX_AGENTS (1000). All inserts share pid=Some(1234); that's
+        // fine — capacity is keyed on HashMap length (unique IDs), not PID.
+        for i in 0..1000 {
+            let id = format!("a{i}");
+            reg.upsert_agent(
+                id.clone(),
+                make_info(&id, "test"),
+                adapter.clone(),
+                false,
+            )
+            .await
+            .expect("insert within capacity should succeed");
+        }
+        assert_eq!(reg.all_agents().await.len(), 1000);
+
+        // 1001st should fail and bump the counter by 1.
+        let err = reg
+            .upsert_agent(
+                "overflow".into(),
+                make_info("overflow", "test"),
+                adapter.clone(),
+                false,
+            )
+            .await
+            .expect_err("at capacity should return Err");
+        assert!(
+            err.contains("at capacity"),
+            "error must mention capacity: {err}"
+        );
+        assert_eq!(
+            reg.snapshot_stats().await.capacity_hits_since_start,
+            1,
+            "first overflow should bump counter to 1"
+        );
+
+        // Second overflow bumps to 2 (counter is monotonic).
+        let _ = reg
+            .upsert_agent(
+                "overflow2".into(),
+                make_info("overflow2", "test"),
+                adapter,
+                false,
+            )
+            .await;
+        assert_eq!(
+            reg.snapshot_stats().await.capacity_hits_since_start,
+            2,
+            "second overflow should bump counter to 2"
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_stats_counts_by_prefix_and_atomic() {
+        let reg = AgentRegistry::new();
+        let adapter: Arc<dyn AgentAdapter> =
+            Arc::new(TestAdapter::new("test", vec!["test"]));
+
+        // 2 KAGENT entries, launched_by_aitc = true.
+        for id in ["KAGENT-1", "KAGENT-2"] {
+            reg.upsert_agent(
+                id.into(),
+                make_info(id, "test"),
+                adapter.clone(),
+                true,
+            )
+            .await
+            .unwrap();
+        }
+        // 3 PASSIVE entries, launched_by_aitc = false.
+        for id in ["PASSIVE-100", "PASSIVE-200", "PASSIVE-300"] {
+            reg.upsert_agent(
+                id.into(),
+                make_info(id, "test"),
+                adapter.clone(),
+                false,
+            )
+            .await
+            .unwrap();
+        }
+
+        let stats = reg.snapshot_stats().await;
+        assert_eq!(stats.total_agents, 5, "total should count all entries");
+        assert_eq!(stats.passive_count, 3, "PASSIVE-* entries");
+        assert_eq!(stats.kagent_count, 2, "KAGENT-* entries");
+        assert_eq!(
+            stats.launched_count, 2,
+            "launched_by_aitc=true entries (the KAGENTs)"
+        );
+        assert_eq!(
+            stats.capacity_hits_since_start, 0,
+            "no capacity hits occurred in this test"
+        );
     }
 }
 

@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 /// An approval request from an agent (enriched with Phase 4 fields).
+///
+/// Phase 8 extension: `tool_name`, `tool_input_json`, `session_id` carry the
+/// Claude Code PreToolUse context for pretool_use rows. These are `Option`
+/// because write_access rows (Phase 4 protected-path trigger) don't have them.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalRequest {
@@ -15,20 +19,26 @@ pub struct ApprovalRequest {
     pub edited_content: Option<String>,
     pub created_at: String,
     pub resolved_at: Option<String>,
+    pub tool_name: Option<String>,
+    pub tool_input_json: Option<String>,
+    pub session_id: Option<String>,
+
+    /// Phase 17 D-21: the OTHER agent whose recent write triggered the
+    /// `file_conflict` gate. `None` on legacy rows, protected_path gates,
+    /// and future non-conflict gate reasons.
+    pub conflict_with_agent_id: Option<String>,
+
+    /// Phase 17 D-20/D-21: one of `'file_conflict' | 'protected_path' |
+    /// 'unknown'` (GateReason enum string, see `conflict::types::GateReason`).
+    /// `None` on legacy rows predating migration 007.
+    pub gate_reason: Option<String>,
 }
 
-/// A chat message between user and agent.
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatMessage {
-    pub id: i64,
-    pub agent_id: String,
-    pub direction: String,
-    pub content: String,
-    pub delivery_status: String,
-    pub approval_request_id: Option<i64>,
-    pub created_at: String,
-}
+// `ChatMessage` was REMOVED in Phase 10 (D-21). The Phase 4 chat surface
+// has been replaced by `chat_runtime::types::AgentEvent` — a unified
+// transcript row that handles assistant_text, tool_use, tool_result,
+// system_note, session_boundary, and user_text. Do not re-add without
+// reverting Phase 10's architecture.
 
 /// A protected path glob pattern that triggers synthetic approval requests.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

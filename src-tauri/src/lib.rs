@@ -1,8 +1,11 @@
 pub mod agents;
-mod comms;
+pub mod chat_runtime;
+pub mod comms;
 mod conflict;
 mod db;
+pub mod mcp;
 pub mod pipeline;
+pub mod claude_resources;
 mod repo_session;
 pub mod system_load;
 mod tray;
@@ -12,6 +15,19 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Install a tracing subscriber so `tracing::info!`/`warn!`/`error!` calls
+    // in this crate actually reach the dev console. Honour RUST_LOG when set
+    // (e.g. RUST_LOG=aitc_lib=debug), defaulting to `info` otherwise. The
+    // try_init() avoids panicking in test/binary contexts that may have
+    // already initialized a subscriber.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_writer(std::io::stderr)
+        .try_init();
+
     repo_session::capture_launch_cwd();
 
     // Build the agent registry with built-in adapters
@@ -28,15 +44,22 @@ pub fn run() {
             pipeline::commands::stop_watch,
             pipeline::commands::list_worktrees,
             pipeline::commands::get_tree_index,
+            pipeline::commands::get_dependency_graph,
+            pipeline::commands::get_ipc_bridges,
             repo_session::get_launch_cwd,
             repo_session::detect_git_root,
             repo_session::persist_last_repo,
             repo_session::get_last_repo,
             agents::commands::list_agents,
+            agents::commands::list_available_agent_types,
             agents::commands::launch_agent,
             agents::commands::terminate_agent,
             agents::commands::update_agent_intent,
             agents::commands::get_agent_logs,
+            agents::commands::accept_passive_hook_consent,
+            agents::commands::decline_passive_hook_consent,
+            agents::commands::resolve_sidecar_path,
+            agents::commands::get_registry_stats,
             agents::notifications::get_notification_prefs,
             agents::notifications::update_notification_prefs,
             conflict::commands::list_conflicts,
@@ -48,9 +71,10 @@ pub fn run() {
             comms::commands::deny_request,
             comms::commands::ask_more_info,
             comms::commands::approve_with_edits,
-            comms::commands::send_chat_message,
-            comms::commands::list_chat_messages,
-            comms::commands::update_message_delivery_status,
+            // Phase 10 D-21: send_chat_message / list_chat_messages /
+            // update_message_delivery_status REMOVED. See
+            // chat_runtime::commands::send_chat_message_to_agent +
+            // list_agent_events + clear_agent_thread for the replacement.
             comms::commands::list_protected_paths,
             comms::commands::add_protected_path,
             comms::commands::remove_protected_path,
@@ -62,6 +86,16 @@ pub fn run() {
             conflict::resolution::record_session_file,
             conflict::resolution::list_sessions,
             conflict::resolution::list_approval_history,
+            claude_resources::commands::start_claude_resources_watch,
+            claude_resources::commands::stop_claude_resources_watch,
+            claude_resources::commands::read_claude_md,
+            claude_resources::commands::write_claude_md,
+            chat_runtime::commands::send_chat_message_to_agent,
+            chat_runtime::commands::list_agent_events,
+            chat_runtime::commands::list_chat_channels,
+            chat_runtime::commands::clear_agent_thread,
+            chat_runtime::commands::mark_agent_events_read,
+            chat_runtime::commands::relaunch_agent_session,
         ])
         .typ::<pipeline::events::FileEvent>()
         .typ::<pipeline::events::FileEventBatch>()
@@ -69,12 +103,21 @@ pub fn run() {
         .typ::<pipeline::events::Attribution>()
         .typ::<pipeline::process_snapshot::ProcessInfo>()
         .typ::<pipeline::worktree::Worktree>()
+        .typ::<pipeline::deps::DependencyEdgeDto>()
+        .typ::<pipeline::deps::EdgeKind>()
+        .typ::<pipeline::ipc_bridges::IpcBridgeDto>()
+        .typ::<pipeline::ipc_bridges::IpcCallSite>()
+        .typ::<pipeline::ipc_bridges::CallShape>()
         .typ::<agents::AgentInfo>()
         .typ::<agents::AgentState>()
+        .typ::<agents::adapter::LaunchOptions>()
         .typ::<agents::notifications::NotificationPrefs>()
+        .typ::<agents::registry::RegistryStats>()
         .typ::<conflict::ConflictAlert>()
+        .typ::<conflict::GateReason>()
         .typ::<comms::types::ApprovalRequest>()
-        .typ::<comms::types::ChatMessage>()
+        // Phase 10 D-21: the Phase 4 chat type was removed; the
+        // replacement AgentEvent type is registered below.
         .typ::<comms::types::ProtectedPath>()
         .typ::<comms::types::TreeIndexEntry>()
         .typ::<system_load::SystemLoadInfo>()
@@ -83,12 +126,26 @@ pub fn run() {
         .typ::<conflict::resolution::ResolutionRecord>()
         .typ::<conflict::resolution::SessionRecord>()
         .typ::<conflict::resolution::SessionFileRecord>()
-        .typ::<conflict::resolution::ApprovalHistoryRecord>();
+        .typ::<conflict::resolution::ApprovalHistoryRecord>()
+        .typ::<claude_resources::events::ResourceEvent>()
+        .typ::<claude_resources::events::ResourceEventBatch>()
+        .typ::<claude_resources::events::Resource>()
+        .typ::<claude_resources::events::ResourceId>()
+        .typ::<claude_resources::events::Category>()
+        .typ::<claude_resources::events::Scope>()
+        .typ::<claude_resources::events::ResourceMetadata>()
+        .typ::<claude_resources::commands::ReadClaudeMdResult>()
+        .typ::<chat_runtime::types::AgentEvent>()
+        .typ::<chat_runtime::types::ChatChannel>()
+        .typ::<chat_runtime::types::DeliveryUpdate>()
+        .typ::<chat_runtime::types::SessionStartedPayload>()
+        .typ::<chat_runtime::types::SessionEndedPayload>();
 
     #[cfg(debug_assertions)]
     specta_builder
         .export(
             specta_typescript::Typescript::default()
+                .header("// @ts-nocheck\n// specta emits unused TAURI_CHANNEL placeholder + __makeEvents__ helper that\n// its own Channel<T> import then shadows; disable TS checks on this generated file.\n")
                 .bigint(specta_typescript::BigIntExportBehavior::Number),
             "../src/bindings.ts",
         )
@@ -99,15 +156,56 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        // Phase 8: required so `ShellExt::sidecar("aitc-hook")` can resolve
+        // the bundled binary's absolute path — both at startup (to set
+        // AITC_SIDECAR_PATH for claude_code::launch) and on-demand
+        // (resolve_sidecar_path Tauri command for the accept flow).
+        .plugin(tauri_plugin_shell::init())
         .manage(pipeline::PipelineState::new())
         .manage(agent_registry.clone())
         .manage(agents::notifications::NotificationState::new())
         .manage(conflict::ConflictState::new(5000))
         .manage(system_load::SystemLoadState::new())
+        .manage(claude_resources::pipeline_state::ClaudeResourcesState::new())
+        .manage(chat_runtime::LiveSessionRegistry::new_arc())
+        .manage(mcp::McpState::new_arc())
+        // Phase 10: AITC self_register port. Seeded at the preferred port
+        // so launch_agent has a valid default even if a duplex launch fires
+        // before `start_registration_server` finishes binding; the server
+        // task below replaces the entry with the actual bound port on
+        // success. Tauri's .manage() replaces same-type entries, so the
+        // later `app_for_port.manage(AitcPort(port))` wins without a race.
+        .manage(agents::AitcPort(9417))
         .invoke_handler(specta_builder.invoke_handler())
         .setup(move |app| {
             // System tray (D-13)
             tray::setup_tray(app)?;
+
+            // Phase 8 D-01: resolve the aitc-hook sidecar absolute path ONCE
+            // at startup and stash it on env so claude_code::launch can read
+            // it without threading an AppHandle through the adapter trait.
+            // An empty/missing sidecar disables PreToolUse gating for this
+            // session rather than crashing startup.
+            let sidecar_abs: String = {
+                use tauri_plugin_shell::ShellExt;
+                match app.shell().sidecar("aitc-hook") {
+                    Ok(cmd) => {
+                        let std_cmd: std::process::Command = cmd.into();
+                        std_cmd.get_program().to_string_lossy().to_string()
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "sidecar resolution failed; AITC PreToolUse gating disabled this session"
+                        );
+                        String::new()
+                    }
+                }
+            };
+            if !sidecar_abs.is_empty() {
+                std::env::set_var("AITC_SIDECAR_PATH", &sidecar_abs);
+                tracing::info!(sidecar = %sidecar_abs, "AITC_SIDECAR_PATH set");
+            }
 
             // SQLite database -- initialized synchronously via block_on so the pool
             // is registered as managed state before any Tauri command can fire.
@@ -123,12 +221,98 @@ pub fn run() {
                 });
             app.manage(pool.clone());
 
-            // Start the self-registration server (HIST-01: needs pool for ensure_open_session)
+            // Phase 8: WaiterRegistry is shared between the axum /hook
+            // handler (Extension) and the Tauri comms commands (State).
+            let waiters: Arc<agents::hook_waiters::WaiterRegistry> =
+                agents::hook_waiters::WaiterRegistry::new_arc();
+            app.manage(waiters.clone());
+
+            // Phase 17 D-15/D-16: ConflictEngine shared between /hook (query
+            // via could_conflict_with) and pipeline/commands.rs conflict_task
+            // (mutate via process_batch). tokio::sync::Mutex because both
+            // sides are async; tight lock scoping enforced at each callsite
+            // (Pitfall 1). Default 5000ms matches ConflictState::new(5000)
+            // above — the user-configurable window (D-03) is read fresh per
+            // hook request via ConflictState::get_window_ms, so the engine's
+            // internal `window` field is essentially only used by
+            // process_batch's eviction policy.
+            let conflict_engine: Arc<tokio::sync::Mutex<conflict::engine::ConflictEngine>> =
+                Arc::new(tokio::sync::Mutex::new(
+                    conflict::engine::ConflictEngine::new(std::time::Duration::from_millis(5000)),
+                ));
+            app.manage(conflict_engine.clone());
+
+            // Phase 8 Pitfall 6: auto-heal `settings.local.json` AITC entries
+            // in every previously-accepted repo so a sidecar-path upgrade
+            // (e.g., user updated AITC) doesn't leave stale absolute paths
+            // pointing at old install locations. Fire-and-forget; never
+            // blocks startup.
+            if !sidecar_abs.is_empty() {
+                let pool_bg = pool.clone();
+                let sidecar_bg = sidecar_abs.clone();
+                tauri::async_runtime::spawn(async move {
+                    let healed = agents::hook_install::reinstall_accepted_repos_on_startup(
+                        &pool_bg,
+                        &sidecar_bg,
+                    )
+                    .await;
+                    if !healed.is_empty() {
+                        tracing::info!(
+                            repos = ?healed,
+                            "healed AITC hook entries in previously-accepted repos"
+                        );
+                    }
+                });
+            }
+
+            // Start the self-registration + /hook + /mcp server (HIST-01:
+            // needs pool for ensure_open_session; Phase 8: needs waiters +
+            // app handle for hook_handler; Phase 10: needs
+            // LiveSessionRegistry + McpState for the MCP JSON-RPC handlers).
+            //
+            // Retrieve the two Arc<_> values that were registered on the
+            // Tauri builder via `.manage(...)` so the axum Extension layer
+            // shares the SAME instances the chat_runtime commands see via
+            // `State<Arc<_>>`.
+            let chat_sessions_for_server: Arc<chat_runtime::LiveSessionRegistry> =
+                app.state::<Arc<chat_runtime::LiveSessionRegistry>>().inner().clone();
+            let mcp_state_for_server: Arc<mcp::McpState> =
+                app.state::<Arc<mcp::McpState>>().inner().clone();
             let registry_clone = agent_registry.clone();
             let pool_for_server = pool.clone();
+            let waiters_for_server = waiters.clone();
+            let app_for_server = app.handle().clone();
+            let app_for_port = app.handle().clone();
+            let engine_for_server = conflict_engine.clone();
             tauri::async_runtime::spawn(async move {
-                match agents::self_register::start_registration_server(registry_clone, pool_for_server, 9417).await {
-                    Ok(port) => tracing::info!(port, "AITC registration server started"),
+                match agents::self_register::start_registration_server(
+                    registry_clone,
+                    pool_for_server,
+                    waiters_for_server,
+                    app_for_server,
+                    9417,
+                    chat_sessions_for_server,
+                    mcp_state_for_server,
+                    engine_for_server,
+                )
+                .await
+                {
+                    Ok(port) => {
+                        tracing::info!(port, "AITC registration server started");
+                        // Phase 10 D-11: stash the actual bound port on Tauri
+                        // managed state so launch_agent + relaunch_agent_session
+                        // can splice it into the per-session MCP config URL.
+                        app_for_port.manage(agents::AitcPort(port));
+                        // Phase 8 D-06: write ~/.aitc/port so the sidecar
+                        // can discover us without AITC_PORT env. PortFileGuard
+                        // is stashed on managed state so Drop fires on exit.
+                        match pipeline::port_file::write_port(port) {
+                            Ok(guard) => {
+                                app_for_port.manage(std::sync::Mutex::new(Some(guard)));
+                            }
+                            Err(e) => tracing::warn!(error = %e, "port_file write failed"),
+                        }
+                    }
                     Err(e) => tracing::warn!(error = %e, "Failed to start registration server"),
                 }
             });
@@ -173,8 +357,119 @@ pub fn run() {
                 }
             });
 
+            // Prevent ALL webview zoom on Linux.
+            //
+            // WebKitGTK processes Ctrl+scroll and trackpad pinch-to-zoom
+            // at the native GTK layer before JavaScript fires, so JS
+            // preventDefault() cannot stop it. We attack at two levels:
+            //
+            //   (a) Intercept the GTK `scroll-event` signal on the
+            //       WebView widget — when Ctrl is held, stop propagation
+            //       so WebKitGTK's zoom handler never runs.
+            //
+            //   (b) As a safety net, monitor the `zoom-level` property
+            //       and snap it back to 1.0 if anything else manages to
+            //       change it (e.g. touchscreen gestures, accessibility).
+            #[cfg(target_os = "linux")]
+            {
+                use webkit2gtk::WebViewExt;
+                use webkit2gtk::glib;
+                use gtk::prelude::WidgetExt;
+                match window.with_webview(|webview| {
+                    let wv: webkit2gtk::WebView = webview.inner().clone();
+                    tracing::info!("zoom-lock: with_webview succeeded, wiring handlers");
+
+                    // (a) Block Ctrl+scroll at the GTK widget level.
+                    wv.connect_scroll_event(|_wv, event| {
+                        if event
+                            .state()
+                            .intersects(gdk::ModifierType::CONTROL_MASK)
+                        {
+                            tracing::info!("zoom-lock: blocked Ctrl+scroll");
+                            return glib::Propagation::Stop;
+                        }
+                        glib::Propagation::Proceed
+                    });
+
+                    // (b) Revert zoom-level changes from any source.
+                    wv.connect_zoom_level_notify(move |wv| {
+                        let level = wv.zoom_level();
+                        if (level - 1.0).abs() > 0.001 {
+                            tracing::info!(level, "zoom-lock: reverting zoom-level to 1.0");
+                            wv.set_zoom_level(1.0);
+                        }
+                    });
+                }) {
+                    Ok(_) => tracing::info!("zoom-lock: handlers installed"),
+                    Err(e) => tracing::warn!(error = ?e, "zoom-lock: with_webview failed"),
+                };
+            }
+
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Terminate every AITC-launched agent before the process exits.
+            // Self-registered / passively-scanned agents (launched_by_aitc=false)
+            // are left alone -- those belong to the user, not to us.
+            //
+            // RunEvent::Exit fires after the main loop has stopped and all
+            // windows are down, so we're safe to block the thread briefly.
+            // RunEvent::ExitRequested fires before that (e.g. on Cmd+Q) but
+            // we already prevent close-to-tray via the window handler above,
+            // so the only paths that reach Exit are actual quits (menu Quit,
+            // app.exit(), SIGTERM from the dev-server hot reload).
+            if matches!(event, tauri::RunEvent::Exit) {
+                terminate_launched_agents_on_exit(app_handle);
+            }
+        });
+}
+
+/// Walk the registry and terminate every agent we launched. Called from the
+/// RunEvent::Exit handler so spawned claude/codex/opencode processes don't
+/// get orphaned to init when AITC quits (a particular problem during dev
+/// hot-reload on Linux).
+fn terminate_launched_agents_on_exit(app_handle: &tauri::AppHandle) {
+    let Some(registry_state) = app_handle.try_state::<Arc<agents::AgentRegistry>>() else {
+        return;
+    };
+    let registry = registry_state.inner().clone();
+
+    tauri::async_runtime::block_on(async move {
+        // Snapshot the launched-by-aitc subset under the read lock, then drop
+        // it before calling terminate_process so the terminate path can
+        // re-enter the registry freely if it ever needs to.
+        let launched: Vec<(String, u32)> = {
+            let agents = registry.agents_read().await;
+            agents
+                .iter()
+                .filter_map(|(id, managed)| {
+                    if managed.launched_by_aitc {
+                        managed.info.pid.map(|pid| (id.clone(), pid))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+
+        if launched.is_empty() {
+            return;
+        }
+        tracing::info!(
+            count = launched.len(),
+            "terminating AITC-launched agents on shutdown"
+        );
+        for (id, pid) in launched {
+            if let Err(e) = agents::launcher::terminate_process(pid).await {
+                tracing::warn!(
+                    agent_id = %id,
+                    pid,
+                    error = %e,
+                    "shutdown terminate failed"
+                );
+            }
+        }
+    });
 }

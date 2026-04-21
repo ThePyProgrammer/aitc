@@ -64,7 +64,11 @@ describe('agentStore', () => {
   });
 
   it('launchAgent calls invoke launch_agent and appends to agents', async () => {
-    mockInvoke.mockResolvedValueOnce(mockAgent);
+    // launchAgent's backend call, then the Phase-10 fix's chatStore.fetchChannels()
+    // call. Both must be mocked.
+    mockInvoke
+      .mockResolvedValueOnce(mockAgent) // launch_agent
+      .mockResolvedValueOnce([]); // list_chat_channels (fired by chatStore.fetchChannels)
 
     const result = await useAgentStore.getState().launchAgent('claude-code', '/tmp/project', 'test intent');
 
@@ -72,6 +76,7 @@ describe('agentStore', () => {
       agentType: 'claude-code',
       cwd: '/tmp/project',
       intent: 'test intent',
+      options: null,
     });
     expect(result.id).toBe('agent-001');
     expect(useAgentStore.getState().agents).toHaveLength(1);

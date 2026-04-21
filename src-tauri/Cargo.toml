@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "aitc-hook"]
+
 [package]
 name = "aitc"
 version = "0.1.0"
@@ -22,7 +25,7 @@ serde_json = "1"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 tokio = { version = "1", features = ["time", "sync", "rt-multi-thread", "macros", "process"] }
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
-specta = { version = "=2.0.0-rc.22", features = ["derive"] }
+specta = { version = "=2.0.0-rc.22", features = ["derive", "serde_json"] }
 specta-typescript = "=0.0.9"
 
 # Phase 2: Real-Time Data Pipeline dependencies
@@ -33,6 +36,7 @@ notify-debouncer-full = "0.7"
 sysinfo = "0.38"
 ignore = "0.4"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # Phase 3: Agent Management & Conflict Detection dependencies
@@ -45,6 +49,64 @@ regex = "1"
 # Phase 4: Core UI Views dependencies
 glob = "0.3"
 
+# Phase 7: Graph-Based Codebase Map dependencies
+tree-sitter = "=0.26.8"
+tree-sitter-typescript = "=0.23.2"
+tree-sitter-javascript = "=0.25.0"
+tree-sitter-rust = "=0.24.2"
+tree-sitter-python = "=0.25.0"
+rayon = "=1.12.0"
+
+# Phase 9: ARSENAL (Claude resources manager) dependencies
+gray_matter = "0.2"
+# Phase 8 bumped `dirs` from 5 to 6 (unified with sidecar crate aitc-hook).
+dirs = "6"
+tempfile = "3"
+walkdir = "2"
+
+# Phase 10 Plan 03: UUIDv4 for MCP Mcp-Session-Id header (MCP spec 2025-03-26
+# V3 Session Management). Already pulled in transitively by tauri-utils — we
+# just want direct-import access with the v4 feature.
+uuid = { version = "1", features = ["v4"] }
+
+# Phase 8: PreToolUse hook integration dependencies
+tauri-plugin-shell = "2"
+
+# Phase 17 (Plan 01 Task 0): promote shlex from transitive to direct dep.
+# shlex 1.3.0 is already in Cargo.lock via `cc` — direct addition is
+# zero-byte. Owned by Plan 01 (not Plan 03) so this plan's `cargo check`
+# in Task 1 succeeds regardless of Wave 1 sibling plan ordering. Plan 02
+# owns the parallel `path-clean` addition at a different alphabetical
+# position, so simultaneous Cargo.toml edits land on distinct lines.
+shlex = "1.3.0"
+
+# Phase 17 (Plan 02 Task 0): lexical path normalization for D-02
+# "file does not exist yet" fallback in conflict/canonicalize.rs.
+# 0-dep crate, ~1 KB compiled, implements Plan 9 cleanname / Go path.Clean.
+# Owned by Plan 02 (not Plan 03) so this plan's `cargo check` in Task 1
+# succeeds regardless of Wave 1 sibling plan ordering. Plan 01 owns the
+# parallel `shlex = "1.3.0"` addition at a different alphabetical
+# position, so simultaneous Cargo.toml edits land on distinct lines.
+path-clean = "1.0"
+
+# Linux-only: intercept Ctrl+scroll at the GTK widget level before
+# WebKitGTK processes it into a zoom change. All three crates are
+# already transitive deps of tauri (via wry / tray-icon) — pinning
+# here just gives us direct import access without pulling new C libs.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "2.0"
+gtk = "0.18"
+gdk = "0.18"
+
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"
+# Phase 10: tokio::time::advance + Builder::start_paused for parser idle-flush tests.
+tokio = { version = "1", features = ["time", "sync", "rt-multi-thread", "macros", "process", "test-util", "io-util"] }
+# Phase 8: integration smokes POST to a locally-bound /hook server.
+# default-features = false strips OpenSSL + native-tls (not needed for
+# 127.0.0.1 HTTP); json feature lets us call .json()/.json(&body).
+reqwest = { version = "0.12", features = ["json"], default-features = false }
+# Phase 8: tauri::test::mock_app() for an AppHandle usable from
+# create_approval_request_internal without spinning up the Tauri runtime.
+tauri = { version = "2", features = ["tray-icon", "test"] }

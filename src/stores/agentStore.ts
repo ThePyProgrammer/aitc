@@ -6,6 +6,8 @@
 
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import type { LaunchOptions } from '../bindings';
+import { useChatStore } from './chatStore';
 
 export interface AgentInfo {
   id: string;
@@ -22,7 +24,12 @@ interface AgentStore {
   isLoading: boolean;
   error: string | null;
   fetchAgents: () => Promise<void>;
-  launchAgent: (agentType: string, cwd: string, intent?: string) => Promise<AgentInfo>;
+  launchAgent: (
+    agentType: string,
+    cwd: string,
+    intent?: string,
+    options?: LaunchOptions,
+  ) => Promise<AgentInfo>;
   terminateAgent: (agentId: string) => Promise<void>;
   updateIntent: (agentId: string, intent: string) => Promise<void>;
   /** Start polling agent list every 2s. Returns cleanup function. */
@@ -45,9 +52,20 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     }
   },
 
-  launchAgent: async (agentType, cwd, intent) => {
-    const agent = await invoke<AgentInfo>('launch_agent', { agentType, cwd, intent });
+  launchAgent: async (agentType, cwd, intent, options) => {
+    const agent = await invoke<AgentInfo>('launch_agent', {
+      agentType,
+      cwd,
+      intent,
+      options: options ?? null,
+    });
     set((s) => ({ agents: [...s.agents, agent] }));
+    // chatStore's channel list is populated reactively from stream-json events
+    // (agent-session-started etc.), which don't fire until Claude produces
+    // its first envelope — seconds after launch, or never if the subprocess
+    // hangs. Kick a fetch now so the CHAT tab's master list surfaces the
+    // new agent immediately, in parity with Tower.
+    void useChatStore.getState().fetchChannels();
     return agent;
   },
 

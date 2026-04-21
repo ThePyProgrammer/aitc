@@ -3,7 +3,7 @@
 //! Implements `AgentAdapter` for the OpenAI Codex CLI agent.
 //! Intent extraction parses the positional prompt argument from CLI args per D-08.
 
-use crate::agents::adapter::{AgentAdapter, AgentState};
+use crate::agents::adapter::{AgentAdapter, AgentState, LaunchOptions};
 use crate::agents::launcher;
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -54,7 +54,16 @@ impl AgentAdapter for CodexAdapter {
         vec!["codex".to_string()]
     }
 
-    async fn launch(&self, cwd: PathBuf, _intent: Option<String>) -> Result<(u32, tokio::process::Child), String> {
+    fn launch_binary(&self) -> String {
+        "codex".to_string()
+    }
+
+    async fn launch(
+        &self,
+        cwd: PathBuf,
+        _intent: Option<String>,
+        _options: LaunchOptions,
+    ) -> Result<(u32, tokio::process::Child), String> {
         launcher::launch_detached(
             "codex",
             &[],
@@ -105,6 +114,14 @@ mod tests {
     fn adapter_type_returns_codex() {
         let adapter = CodexAdapter;
         assert_eq!(adapter.adapter_type(), "codex");
+    }
+
+    #[test]
+    fn capabilities_inherits_default_read_only() {
+        // D-12: Codex inherits the default (chat_duplex: false). Outbound
+        // chat messages surface as `delivery_status = "unsupported"` rows.
+        let adapter = CodexAdapter;
+        assert!(!adapter.capabilities().chat_duplex);
     }
 
     #[test]

@@ -1,3 +1,4 @@
+pub mod events;
 pub mod session;
 
 use sqlx::sqlite::SqlitePoolOptions;

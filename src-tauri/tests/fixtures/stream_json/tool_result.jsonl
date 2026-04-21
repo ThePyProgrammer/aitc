@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"OK","is_error":false}]},"session_id":"0d836c4f-8546-4aeb-a994-6fb94ba800b7"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":42,"num_turns":1,"result":"OK","stop_reason":"end_turn","session_id":"0d836c4f-8546-4aeb-a994-6fb94ba800b7","total_cost_usd":0.001,"terminal_reason":"completed"}

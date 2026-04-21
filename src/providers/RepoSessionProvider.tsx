@@ -34,7 +34,8 @@ export function RepoSessionProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // D-08: Install pipelineStore.events → radarStore.fetchTreeIndex bridge.
+  // D-08: Install pipelineStore.events → radarStore.fetchGraph bridge
+  // (Phase 7 Plan 03 replaced fetchTreeIndex with fetchGraph).
   // Unsubscribe on unmount to prevent debounce leaks (T-06-05-01).
   useEffect(() => {
     const unsub = installRadarPipelineBridge();

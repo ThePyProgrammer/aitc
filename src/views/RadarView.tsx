@@ -12,17 +12,22 @@ import { AgentTooltip } from './Radar/AgentTooltip';
 import { RadarMinimap } from './Radar/RadarMinimap';
 import { useRadarStore } from '../stores/radarStore';
 import { useAgentStore } from '../stores/agentStore';
+import { useScopedAgents } from '../hooks/useScopedAgents';
 import { usePipelineStore } from '../stores/pipelineStore';
 import { useConflictStore } from '../stores/conflictStore';
 
 export function RadarView() {
-  const treeData = useRadarStore((s) => s.treeData);
-  const fetchTreeIndex = useRadarStore((s) => s.fetchTreeIndex);
+  // Phase 7 (Plan 03): treeData + fetchTreeIndex were replaced by
+  // graphNodes + fetchGraph. We still read `graphNodes.length` to drive
+  // the AWAITING_SIGNAL empty state until Plan 04 lands the graph-only
+  // RadarCanvas and this component is rewritten.
+  const graphNodes = useRadarStore((s) => s.graphNodes);
+  const fetchGraph = useRadarStore((s) => s.fetchGraph);
   const fetchAgents = useAgentStore((s) => s.fetchAgents);
   const startPolling = useAgentStore((s) => s.startPolling);
   const isWatching = usePipelineStore((s) => s.isWatching);
   const events = usePipelineStore((s) => s.events);
-  const agents = useAgentStore((s) => s.agents);
+  const agents = useScopedAgents();
   const alerts = useConflictStore((s) => s.alerts);
   const updateContentionScores = useRadarStore((s) => s.updateContentionScores);
 
@@ -32,11 +37,11 @@ export function RadarView() {
   const [containerRect, setContainerRect] = useState<DOMRect | null>(null);
 
   useEffect(() => {
-    fetchTreeIndex();
+    fetchGraph();
     fetchAgents();
     const cleanup = startPolling();
     return cleanup;
-  }, [fetchTreeIndex, fetchAgents, startPolling]);
+  }, [fetchGraph, fetchAgents, startPolling]);
 
   // Periodic contention score updates (every 5s per T-05-14 mitigation)
   useEffect(() => {
@@ -86,7 +91,7 @@ export function RadarView() {
     ? agents.find((a) => a.id === hoveredAgentId) ?? null
     : null;
 
-  const showEmptyState = treeData.length === 0 && !isWatching;
+  const showEmptyState = graphNodes.length === 0 && !isWatching;
 
   if (showEmptyState) {
     return (
@@ -149,7 +154,10 @@ export function RadarView() {
     <div ref={containerRef} className="flex h-[calc(100vh-56px)] bg-surface relative">
       <RadarCanvas onHoveredAgentChange={handleHoveredAgentChange} />
       <RadarManifest />
-      <RadarMinimap />
+      <RadarMinimap
+        canvasWidth={containerRect?.width ?? 800}
+        canvasHeight={containerRect?.height ?? 600}
+      />
 
       {/* Agent tooltip overlay */}
       {hoveredAgent && (

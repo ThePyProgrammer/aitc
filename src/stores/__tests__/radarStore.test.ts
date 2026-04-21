@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { useRadarStore, getAgentColor, AGENT_DOT_PALETTE, installRadarPipelineBridge } from '../radarStore';
-import type { TreeIndexEntry } from '../radarStore';
+import {
+  useRadarStore,
+  getAgentColor,
+  AGENT_DOT_PALETTE,
+  installRadarPipelineBridge,
+  DEFAULT_FORCE_CONFIG,
+} from '../radarStore';
+import { GRAPH_HALF_WIDTH } from '../../workers/graphSimConfig';
 import { usePipelineStore } from '../pipelineStore';
-import { buildFileTree, computeTreemapLayout } from '../../hooks/useTreemapLayout';
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -11,7 +16,17 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 const mockInvoke = vi.mocked(invoke);
 
-const sampleTree: TreeIndexEntry[] = [
+// Phase 7 Plan 04 removed the `useTreemapLayout` tree-shape tests — the
+// treemap hook and `squarify` dependency are gone (D-04). The graph store
+// exercises live below; Plan 06 will reintroduce graph-specific minimap
+// tests against the new renderer.
+interface TreeFixtureEntry {
+  path: string;
+  size: number;
+  isDir: boolean;
+  depth: number;
+}
+const sampleTree: TreeFixtureEntry[] = [
   { path: 'src', size: 0, isDir: true, depth: 1 },
   { path: 'src/main.ts', size: 100, isDir: false, depth: 2 },
   { path: 'src/app.ts', size: 200, isDir: false, depth: 2 },
@@ -25,13 +40,167 @@ describe('radarStore', () => {
     vi.clearAllMocks();
   });
 
-  it('fetchTreeIndex calls invoke get_tree_index and sets treeData', async () => {
-    mockInvoke.mockResolvedValueOnce(sampleTree);
+  it('fetchGraph invokes get_tree_index + get_dependency_graph and populates graphNodes/graphEdges', async () => {
+    // Plan 03 Task 1 Test 4: both commands called; file entries become
+    // GraphNodes (dirs filtered); edges mapped to {source,target,kind}.
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_tree_index') return Promise.resolve(sampleTree);
+      if (cmd === 'get_dependency_graph') {
+        return Promise.resolve([
+          { from: 'src/main.ts', to: 'src/app.ts', kind: 'import' },
+          { from: 'src/app.ts', to: 'lib/utils.ts', kind: 'import' },
+        ]);
+      }
+      return Promise.reject(new Error('unexpected invoke ' + cmd));
+    });
 
-    await useRadarStore.getState().fetchTreeIndex();
+    await useRadarStore.getState().fetchGraph();
 
     expect(mockInvoke).toHaveBeenCalledWith('get_tree_index');
-    expect(useRadarStore.getState().treeData).toEqual(sampleTree);
+    expect(mockInvoke).toHaveBeenCalledWith('get_dependency_graph');
+    const s = useRadarStore.getState();
+    expect(s.graphNodes).toHaveLength(3);
+    const byId = new Map(s.graphNodes.map((n) => [n.id, n]));
+    expect(byId.get('src/main.ts')).toMatchObject({
+      id: 'src/main.ts',
+      dirKey: 'src',
+      dirDepth: 1,
+    });
+    expect(byId.get('lib/utils.ts')).toMatchObject({
+      dirKey: 'lib',
+      dirDepth: 1,
+    });
+    expect(s.graphEdges).toHaveLength(2);
+    expect(s.graphEdges[0]).toMatchObject({
+      source: 'src/main.ts',
+      target: 'src/app.ts',
+      kind: 'import',
+    });
+    // fetchGraph resets settledAt so useGraphLayout re-settles.
+    expect(s.settledAt).toBeNull();
+  });
+
+  it('fetchGraph filters out directory entries — graph nodes are file-only', async () => {
+    // Plan 03 Task 1 Test 5.
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_tree_index') return Promise.resolve(sampleTree);
+      if (cmd === 'get_dependency_graph') return Promise.resolve([]);
+      return Promise.reject(new Error('unexpected invoke ' + cmd));
+    });
+    await useRadarStore.getState().fetchGraph();
+    const nodes = useRadarStore.getState().graphNodes;
+    // sampleTree has 2 dirs + 3 files → 3 nodes.
+    expect(nodes).toHaveLength(3);
+    expect(nodes.every((n) => !n.id.endsWith('/'))).toBe(true);
+    // No node id matches a dir entry.
+    expect(nodes.find((n) => n.id === 'src')).toBeUndefined();
+    expect(nodes.find((n) => n.id === 'lib')).toBeUndefined();
+  });
+
+  it('fetchGraph drops edges referencing unknown nodes', async () => {
+    // Edges pointing at files that don't exist in tree_index are
+    // silently dropped — Pitfall 8 (path drift) regression guard.
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_tree_index') return Promise.resolve(sampleTree);
+      if (cmd === 'get_dependency_graph') {
+        return Promise.resolve([
+          { from: 'src/main.ts', to: 'src/app.ts', kind: 'import' },
+          { from: 'src/main.ts', to: 'ghost.ts', kind: 'import' }, // dropped
+          { from: 'ghost.ts', to: 'src/app.ts', kind: 'import' }, // dropped
+        ]);
+      }
+      return Promise.reject(new Error('unexpected invoke ' + cmd));
+    });
+    await useRadarStore.getState().fetchGraph();
+    const edges = useRadarStore.getState().graphEdges;
+    expect(edges).toHaveLength(1);
+    expect(edges[0]).toMatchObject({ source: 'src/main.ts', target: 'src/app.ts' });
+  });
+
+  it('fetchGraph is best-effort: invoke rejection leaves slots unchanged', async () => {
+    mockInvoke.mockRejectedValue(new Error('nope'));
+    await useRadarStore.getState().fetchGraph();
+    const s = useRadarStore.getState();
+    expect(s.graphNodes).toEqual([]);
+    expect(s.graphEdges).toEqual([]);
+  });
+
+  it('pinNode sets fx/fy and adds to pinnedNodeIds', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_tree_index') return Promise.resolve(sampleTree);
+      if (cmd === 'get_dependency_graph') return Promise.resolve([]);
+      return Promise.reject(new Error('unexpected invoke ' + cmd));
+    });
+    await useRadarStore.getState().fetchGraph();
+    useRadarStore.getState().pinNode('src/main.ts', 100, 200);
+
+    const s = useRadarStore.getState();
+    const pinned = s.graphNodes.find((n) => n.id === 'src/main.ts');
+    expect(pinned?.fx).toBe(100);
+    expect(pinned?.fy).toBe(200);
+    expect(s.pinnedNodeIds.has('src/main.ts')).toBe(true);
+  });
+
+  it('unpinNode clears fx/fy and removes from pinnedNodeIds', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_tree_index') return Promise.resolve(sampleTree);
+      if (cmd === 'get_dependency_graph') return Promise.resolve([]);
+      return Promise.reject(new Error('unexpected invoke ' + cmd));
+    });
+    await useRadarStore.getState().fetchGraph();
+    useRadarStore.getState().pinNode('src/main.ts', 100, 200);
+    useRadarStore.getState().unpinNode('src/main.ts');
+
+    const s = useRadarStore.getState();
+    const node = s.graphNodes.find((n) => n.id === 'src/main.ts');
+    expect(node?.fx).toBeNull();
+    expect(node?.fy).toBeNull();
+    expect(s.pinnedNodeIds.has('src/main.ts')).toBe(false);
+  });
+
+  it('commitSettledPositions writes x/y back to graphNodes and sets settledAt', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_tree_index') return Promise.resolve(sampleTree);
+      if (cmd === 'get_dependency_graph') return Promise.resolve([]);
+      return Promise.reject(new Error('unexpected invoke ' + cmd));
+    });
+    await useRadarStore.getState().fetchGraph();
+    expect(useRadarStore.getState().settledAt).toBeNull();
+
+    const positions = new Map([
+      ['src/main.ts', { x: 50, y: 60 }],
+      ['lib/utils.ts', { x: -10, y: 0 }],
+    ]);
+    const t0 = Date.now();
+    useRadarStore.getState().commitSettledPositions(positions);
+    const s = useRadarStore.getState();
+    const main = s.graphNodes.find((n) => n.id === 'src/main.ts');
+    const utils = s.graphNodes.find((n) => n.id === 'lib/utils.ts');
+    expect(main?.x).toBe(50);
+    expect(main?.y).toBe(60);
+    expect(utils?.x).toBe(-10);
+    expect(utils?.y).toBe(0);
+    expect(s.settledAt).not.toBeNull();
+    expect(s.settledAt ?? 0).toBeGreaterThanOrEqual(t0);
+  });
+
+  it('reset clears graph slots and nulls settledAt', () => {
+    useRadarStore.setState({
+      graphNodes: [{ id: 'x', dirKey: '', dirDepth: 0 }],
+      graphEdges: [{ source: 'x', target: 'y', kind: 'import' }],
+      settledAt: 123,
+      pinnedNodeIds: new Set(['x']),
+      activeTrails: [
+        { id: 'a|x|y|1', agentId: 'a', fromPath: 'x', toPath: 'y', startTs: 1 },
+      ],
+    });
+    useRadarStore.getState().reset();
+    const s = useRadarStore.getState();
+    expect(s.graphNodes).toEqual([]);
+    expect(s.graphEdges).toEqual([]);
+    expect(s.settledAt).toBeNull();
+    expect(s.pinnedNodeIds.size).toBe(0);
+    expect(s.activeTrails).toEqual([]);
   });
 
   it('setViewport updates zoom, panX, panY', () => {
@@ -60,6 +229,86 @@ describe('radarStore', () => {
     expect(useRadarStore.getState().selectedAgentId).toBeNull();
   });
 
+  it('pushTrail appends an ActiveTrail to activeTrails (Plan 05)', () => {
+    const trail = {
+      id: 'a|x|y|1000',
+      agentId: 'a',
+      fromPath: 'x',
+      toPath: 'y',
+      startTs: 1000,
+    };
+    useRadarStore.getState().pushTrail(trail);
+    const s = useRadarStore.getState();
+    expect(s.activeTrails).toHaveLength(1);
+    expect(s.activeTrails[0]).toMatchObject({ id: 'a|x|y|1000', agentId: 'a' });
+  });
+
+  it('pushTrail evicts oldest trail for same agent when at cap of 10 (D-18)', () => {
+    // Seed 10 trails for agent "a" with increasing startTs.
+    const seeded = Array.from({ length: 10 }, (_, i) => ({
+      id: `a|x|y|${1000 + i}`,
+      agentId: 'a',
+      fromPath: 'x',
+      toPath: 'y',
+      startTs: 1000 + i,
+    }));
+    for (const t of seeded) useRadarStore.getState().pushTrail(t);
+    expect(useRadarStore.getState().activeTrails).toHaveLength(10);
+
+    // Push an 11th for agent "a" — oldest (startTs=1000) should be evicted.
+    useRadarStore.getState().pushTrail({
+      id: 'a|x|z|2000',
+      agentId: 'a',
+      fromPath: 'x',
+      toPath: 'z',
+      startTs: 2000,
+    });
+    const s = useRadarStore.getState();
+    expect(s.activeTrails).toHaveLength(10);
+    expect(s.activeTrails.find((t) => t.startTs === 1000)).toBeUndefined();
+    expect(s.activeTrails.find((t) => t.startTs === 2000)).toBeDefined();
+  });
+
+  it('pushTrail cap is per-agent (agent B trails untouched when A evicts)', () => {
+    // Fill agent "a" to cap.
+    for (let i = 0; i < 10; i++) {
+      useRadarStore.getState().pushTrail({
+        id: `a|x|y|${i}`,
+        agentId: 'a',
+        fromPath: 'x',
+        toPath: 'y',
+        startTs: 1000 + i,
+      });
+    }
+    // Push trails for agent "b" — should coexist with all of "a".
+    for (let i = 0; i < 3; i++) {
+      useRadarStore.getState().pushTrail({
+        id: `b|x|y|${i}`,
+        agentId: 'b',
+        fromPath: 'x',
+        toPath: 'y',
+        startTs: 2000 + i,
+      });
+    }
+    const s = useRadarStore.getState();
+    expect(s.activeTrails.filter((t) => t.agentId === 'a')).toHaveLength(10);
+    expect(s.activeTrails.filter((t) => t.agentId === 'b')).toHaveLength(3);
+  });
+
+  it('pruneTrails drops trails older than 10s', () => {
+    const now = 20_000;
+    useRadarStore.setState({
+      activeTrails: [
+        { id: 'a|x|y|old', agentId: 'a', fromPath: 'x', toPath: 'y', startTs: now - 12_000 },
+        { id: 'a|x|y|new', agentId: 'a', fromPath: 'x', toPath: 'y', startTs: now - 1_000 },
+      ],
+    });
+    useRadarStore.getState().pruneTrails(now);
+    const s = useRadarStore.getState();
+    expect(s.activeTrails).toHaveLength(1);
+    expect(s.activeTrails[0].id).toBe('a|x|y|new');
+  });
+
   it('getAgentColor returns consistent color from 8-color palette based on hash of agent ID', () => {
     const color1 = getAgentColor('agent-001');
     const color2 = getAgentColor('agent-001');
@@ -73,43 +322,42 @@ describe('radarStore', () => {
   });
 });
 
-describe('buildFileTree', () => {
-  it('converts flat TreeIndexEntry[] into nested tree structure with cumulative sizes', () => {
-    const tree = buildFileTree(sampleTree);
+// Phase 7 Plan 04: buildFileTree / computeTreemapLayout suites removed with
+// the `useTreemapLayout` deletion (D-04). Graph-based layout is tested in
+// `src/hooks/__tests__/useGraphLayout.test.ts` and the force+layout
+// property tests landed in Plan 03.
 
-    expect(tree.name).toBe('root');
-    expect(tree.isDir).toBe(true);
-    expect(tree.children.length).toBeGreaterThan(0);
-
-    // Find src dir
-    const srcDir = tree.children.find((c) => c.name === 'src');
-    expect(srcDir).toBeDefined();
-    expect(srcDir!.isDir).toBe(true);
-    expect(srcDir!.children).toHaveLength(2);
-    // Cumulative size = 100 + 200
-    expect(srcDir!.size).toBe(300);
-
-    // Find lib dir
-    const libDir = tree.children.find((c) => c.name === 'lib');
-    expect(libDir).toBeDefined();
-    expect(libDir!.size).toBe(50);
+// Phase 11.1 post-ship defense — silent-blank-canvas regression. A single
+// non-finite value in viewport state propagates through ctx.setTransform as
+// a silent no-op, blanking the canvas with no console error and no recovery
+// path (NaN+x=NaN; panning, zoom-out, force-edit all stay NaN). These tests
+// lock the store-level guard so a future refactor cannot strip it.
+describe('setViewport — defense against non-finite values', () => {
+  beforeEach(() => {
+    useRadarStore.getState().reset();
   });
 
-  it('handles empty input', () => {
-    const tree = buildFileTree([]);
-    expect(tree.name).toBe('root');
-    expect(tree.children).toHaveLength(0);
-    expect(tree.size).toBe(0);
+  it('drops NaN zoom and keeps the previous value', () => {
+    useRadarStore.setState({ viewport: { zoom: 2, panX: 10, panY: 20 } });
+    useRadarStore.getState().setViewport({ zoom: NaN });
+    expect(useRadarStore.getState().viewport).toEqual({ zoom: 2, panX: 10, panY: 20 });
   });
 
-  it('handles single file', () => {
-    const tree = buildFileTree([
-      { path: 'readme.md', size: 42, isDir: false, depth: 1 },
-    ]);
-    expect(tree.children).toHaveLength(1);
-    expect(tree.children[0].name).toBe('readme.md');
-    expect(tree.children[0].size).toBe(42);
-    expect(tree.size).toBe(42);
+  it('drops Infinity panX/panY independently', () => {
+    useRadarStore.setState({ viewport: { zoom: 2, panX: 10, panY: 20 } });
+    useRadarStore.getState().setViewport({ panX: Infinity, panY: -Infinity });
+    expect(useRadarStore.getState().viewport).toEqual({ zoom: 2, panX: 10, panY: 20 });
+  });
+
+  it('accepts legitimate zeros and negative pans', () => {
+    useRadarStore.getState().setViewport({ zoom: 0.5, panX: -100, panY: 0 });
+    expect(useRadarStore.getState().viewport).toEqual({ zoom: 0.5, panX: -100, panY: 0 });
+  });
+
+  it('partial valid + partial non-finite applies only the valid fields', () => {
+    useRadarStore.setState({ viewport: { zoom: 2, panX: 10, panY: 20 } });
+    useRadarStore.getState().setViewport({ zoom: 3, panX: NaN });
+    expect(useRadarStore.getState().viewport).toEqual({ zoom: 3, panX: 10, panY: 20 });
   });
 });
 
@@ -124,8 +372,8 @@ describe('installRadarPipelineBridge', () => {
     vi.restoreAllMocks();
   });
 
-  it('calls fetchTreeIndex after debounce window when events change', () => {
-    const spy = vi.spyOn(useRadarStore.getState(), 'fetchTreeIndex').mockResolvedValue(undefined);
+  it('calls fetchGraph after debounce window when events change', () => {
+    const spy = vi.spyOn(useRadarStore.getState(), 'fetchGraph').mockResolvedValue(undefined);
     const unsub = installRadarPipelineBridge();
     usePipelineStore.setState({ events: [{ path: 'a.rs' } as any] });
     expect(spy).not.toHaveBeenCalled(); // debounced
@@ -135,7 +383,7 @@ describe('installRadarPipelineBridge', () => {
   });
 
   it('debounces rapid event updates into one fetch', () => {
-    const spy = vi.spyOn(useRadarStore.getState(), 'fetchTreeIndex').mockResolvedValue(undefined);
+    const spy = vi.spyOn(useRadarStore.getState(), 'fetchGraph').mockResolvedValue(undefined);
     const unsub = installRadarPipelineBridge();
     for (let i = 0; i < 5; i++) {
       usePipelineStore.setState({ events: [{ path: `${i}.rs` } as any] });
@@ -147,7 +395,7 @@ describe('installRadarPipelineBridge', () => {
   });
 
   it('unsubscribe stops further fetches', () => {
-    const spy = vi.spyOn(useRadarStore.getState(), 'fetchTreeIndex').mockResolvedValue(undefined);
+    const spy = vi.spyOn(useRadarStore.getState(), 'fetchGraph').mockResolvedValue(undefined);
     const unsub = installRadarPipelineBridge();
     unsub();
     usePipelineStore.setState({ events: [{ path: 'x.rs' } as any] });
@@ -156,40 +404,251 @@ describe('installRadarPipelineBridge', () => {
   });
 });
 
-describe('computeTreemapLayout', () => {
-  it('produces rectangles with x0,y0,x1,y1 from flat file list', () => {
-    const tree = buildFileTree(sampleTree);
-    const rects = computeTreemapLayout(tree, 800, 600);
+// Phase 7 Plan 04: `computeTreemapLayout` tests removed — the function is
+// gone along with `useTreemapLayout`. Reference `sampleTree` retained for
+// the `fetchGraph` fixtures above.
 
-    expect(rects.length).toBeGreaterThan(0);
-    for (const r of rects) {
-      expect(r).toHaveProperty('x0');
-      expect(r).toHaveProperty('y0');
-      expect(r).toHaveProperty('x1');
-      expect(r).toHaveProperty('y1');
-      expect(r).toHaveProperty('path');
-      expect(r).toHaveProperty('name');
-      expect(r).toHaveProperty('depth');
-      expect(r).toHaveProperty('isFile');
-      expect(r.x1).toBeGreaterThanOrEqual(r.x0);
-      expect(r.y1).toBeGreaterThanOrEqual(r.y0);
-    }
+// ───── Graph color theme persistence (2026-04-16 spec §4, §9) ─────
+describe('radarStore theme persistence', () => {
+  beforeEach(() => {
+    // Wipe localStorage so each test starts from a clean slate — otherwise
+    // the initial-read path would be contaminated by the previous test.
+    localStorage.clear();
+    // Reset the store to its natural defaults (reset() intentionally does
+    // NOT touch themeId so user preference survives resets; we assert this).
+    useRadarStore.setState({ themeId: 'phosphor-classic' });
   });
 
-  it('handles empty input', () => {
-    const tree = buildFileTree([]);
-    const rects = computeTreemapLayout(tree, 800, 600);
-    expect(rects).toHaveLength(0);
+  it('defaults to phosphor-classic when localStorage is empty', () => {
+    expect(useRadarStore.getState().themeId).toBe('phosphor-classic');
   });
 
-  it('handles single file', () => {
-    const tree = buildFileTree([
-      { path: 'readme.md', size: 42, isDir: false, depth: 1 },
-    ]);
-    const rects = computeTreemapLayout(tree, 800, 600);
-    expect(rects.length).toBeGreaterThanOrEqual(1);
-    const fileRect = rects.find((r) => r.name === 'readme.md');
-    expect(fileRect).toBeDefined();
-    expect(fileRect!.isFile).toBe(true);
+  it('setThemeId writes to localStorage and updates state', () => {
+    useRadarStore.getState().setThemeId('plasma');
+    expect(useRadarStore.getState().themeId).toBe('plasma');
+    expect(localStorage.getItem('aitc:graphTheme')).toBe('plasma');
+  });
+
+  it('setThemeId coerces unknown ids to the default + still persists', () => {
+    useRadarStore.getState().setThemeId('does-not-exist');
+    expect(useRadarStore.getState().themeId).toBe('phosphor-classic');
+    expect(localStorage.getItem('aitc:graphTheme')).toBe('phosphor-classic');
+  });
+
+  it('reset() leaves themeId intact so the user preference survives', () => {
+    useRadarStore.getState().setThemeId('synthwave-nebula');
+    useRadarStore.getState().reset();
+    expect(useRadarStore.getState().themeId).toBe('synthwave-nebula');
+  });
+});
+void sampleTree;
+
+// Phase 12 Wave 3 — real `it(...)` bodies flipped from Wave 0 `.todo` stubs.
+// Witnesses V-12-15 / V-12-16 + D-10 / D-14 / D-21 / D-30 structural invariants.
+describe('Phase 12 bridge integration', () => {
+  beforeEach(() => {
+    useRadarStore.getState().reset();
+    vi.clearAllMocks();
+  });
+
+  it('V-12-15: GraphNode.kind discriminator round-trips through fetchGraph (bridges have kind=bridge, files have kind=file)', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_tree_index') {
+        return Promise.resolve([
+          { path: 'src/app.ts', size: 10, isDir: false, depth: 1 },
+          { path: 'src-tauri/src/lib.rs', size: 10, isDir: false, depth: 2 },
+        ] satisfies TreeFixtureEntry[]);
+      }
+      if (cmd === 'get_dependency_graph') return Promise.resolve([]);
+      if (cmd === 'get_ipc_bridges') {
+        return Promise.resolve([
+          {
+            commandName: 'ping',
+            rustName: 'ping',
+            handlerFile: 'src-tauri/src/lib.rs',
+            handlerLine: 5,
+            callerFiles: [
+              { file: 'src/app.ts', line: 10, shape: 'literal' },
+            ],
+            signatureSummary: '() → Promise<null>',
+            hasChannelArg: false,
+          },
+        ]);
+      }
+      return Promise.reject(new Error('unexpected invoke ' + cmd));
+    });
+    await useRadarStore.getState().fetchGraph();
+    const nodes = useRadarStore.getState().graphNodes;
+    const bridge = nodes.find((n) => n.kind === 'bridge');
+    const fileNode = nodes.find((n) => n.id === 'src/app.ts');
+    expect(bridge).toBeDefined();
+    expect(bridge!.id).toBe('bridge:ping');
+    expect(fileNode?.kind).toBe('file');
+  });
+
+  it('V-12-15: bridge GraphNodes carry commandName/handlerFile/hasChannelArg/callerFiles fields', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_tree_index') return Promise.resolve([]);
+      if (cmd === 'get_dependency_graph') return Promise.resolve([]);
+      if (cmd === 'get_ipc_bridges') {
+        return Promise.resolve([
+          {
+            commandName: 'startWatch',
+            rustName: 'start_watch',
+            handlerFile: 'src-tauri/src/lib.rs',
+            handlerLine: 42,
+            callerFiles: [
+              { file: 'src/app.ts', line: 7, shape: 'literal' },
+              { file: 'src/hooks/use.ts', line: 12, shape: 'typed' },
+            ],
+            signatureSummary: '(repoRoot: string, channel: TAURI_CHANNEL<FileEventBatch>) → Promise<null>',
+            hasChannelArg: true,
+          },
+        ]);
+      }
+      return Promise.reject(new Error('unexpected invoke ' + cmd));
+    });
+    await useRadarStore.getState().fetchGraph();
+    const bridge = useRadarStore
+      .getState()
+      .graphNodes.find((n) => n.kind === 'bridge');
+    expect(bridge).toBeDefined();
+    expect(bridge!.commandName).toBe('startWatch');
+    expect(bridge!.rustName).toBe('start_watch');
+    expect(bridge!.handlerFile).toBe('src-tauri/src/lib.rs');
+    expect(bridge!.handlerLine).toBe(42);
+    expect(bridge!.hasChannelArg).toBe(true);
+    expect(bridge!.callerFiles).toHaveLength(2);
+    expect(bridge!.callerCount).toBe(2);
+    expect(bridge!.signatureSummary).toContain('TAURI_CHANNEL');
+    // D-13: bridges pin to y=0 boundary line.
+    expect(bridge!.fy).toBe(0);
+  });
+
+  it('V-12-16: fetchGraph runs three invoke calls via Promise.all', async () => {
+    mockInvoke.mockResolvedValue([]);
+    await useRadarStore.getState().fetchGraph();
+    const commandsInvoked = mockInvoke.mock.calls.map((c) => c[0]);
+    expect(commandsInvoked).toContain('get_tree_index');
+    expect(commandsInvoked).toContain('get_dependency_graph');
+    expect(commandsInvoked).toContain('get_ipc_bridges');
+  });
+
+  it('V-12-16: get_ipc_bridges failure leaves tree+edges intact (best-effort merge)', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_tree_index') return Promise.resolve(sampleTree);
+      if (cmd === 'get_dependency_graph') {
+        return Promise.resolve([
+          { from: 'src/main.ts', to: 'src/app.ts', kind: 'import' },
+        ]);
+      }
+      if (cmd === 'get_ipc_bridges') {
+        return Promise.reject(new Error('bridges scan failed'));
+      }
+      return Promise.reject(new Error('unexpected ' + cmd));
+    });
+    // fetchGraph swallows errors internally via the per-leg .catch() — it
+    // must NOT throw even though the bridges leg rejected.
+    await expect(useRadarStore.getState().fetchGraph()).resolves.toBeUndefined();
+    const s = useRadarStore.getState();
+    // Bridge slot is empty, but file nodes + dep edges are intact.
+    expect(s.graphNodes.filter((n) => n.kind === 'bridge')).toHaveLength(0);
+    expect(s.graphNodes.filter((n) => n.kind === 'file').length).toBeGreaterThan(0);
+    expect(s.graphEdges.length).toBe(1);
+  });
+
+  it('D-10: legacy nodes with undefined kind coexist with new kind=file/bridge nodes', () => {
+    // Directly plant a legacy-shape node (kind undefined) and assert the
+    // downstream contract: consumers read `node.kind ?? "file"`. This
+    // guards the BC invariant on GraphNode.
+    useRadarStore.setState({
+      graphNodes: [{ id: 'src/legacy.ts', dirKey: 'src', dirDepth: 1 }],
+    });
+    const n = useRadarStore.getState().graphNodes[0];
+    expect(n.kind).toBeUndefined();
+    // BC contract check — the typical read-site pattern.
+    const effectiveKind = n.kind ?? 'file';
+    expect(effectiveKind).toBe('file');
+  });
+
+  it('D-21: selectedBridgeId slot + selectBridge action work (null round-trip)', () => {
+    expect(useRadarStore.getState().selectedBridgeId).toBeNull();
+    useRadarStore.getState().selectBridge('launchAgent');
+    expect(useRadarStore.getState().selectedBridgeId).toBe('launchAgent');
+    useRadarStore.getState().selectBridge(null);
+    expect(useRadarStore.getState().selectedBridgeId).toBeNull();
+  });
+
+  it('D-14: alphabetic x-spread assigns fx deterministically across [-GRAPH_HALF_WIDTH, +GRAPH_HALF_WIDTH]', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_tree_index') return Promise.resolve([]);
+      if (cmd === 'get_dependency_graph') return Promise.resolve([]);
+      if (cmd === 'get_ipc_bridges') {
+        // Intentionally out-of-order to prove sort happens at merge time.
+        return Promise.resolve([
+          { commandName: 'zebra', rustName: 'zebra', handlerFile: '', handlerLine: 0, callerFiles: [], signatureSummary: '', hasChannelArg: false },
+          { commandName: 'alpha', rustName: 'alpha', handlerFile: '', handlerLine: 0, callerFiles: [], signatureSummary: '', hasChannelArg: false },
+          { commandName: 'mike', rustName: 'mike', handlerFile: '', handlerLine: 0, callerFiles: [], signatureSummary: '', hasChannelArg: false },
+        ]);
+      }
+      return Promise.reject(new Error('unexpected ' + cmd));
+    });
+    await useRadarStore.getState().fetchGraph();
+    const bridges = useRadarStore
+      .getState()
+      .graphNodes.filter((n) => n.kind === 'bridge');
+    expect(bridges).toHaveLength(3);
+    // Alphabetic order: alpha, mike, zebra → fx = -GRAPH_HALF_WIDTH, 0, +GRAPH_HALF_WIDTH.
+    const byName = new Map(bridges.map((n) => [n.commandName, n.fx]));
+    expect(byName.get('alpha')).toBe(-GRAPH_HALF_WIDTH);
+    expect(byName.get('mike')).toBe(0);
+    expect(byName.get('zebra')).toBe(GRAPH_HALF_WIDTH);
+  });
+
+  it('D-14: x-spread cache keyed on lastBridgeSetHash — unchanged command set → stable fx values', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_tree_index') return Promise.resolve([]);
+      if (cmd === 'get_dependency_graph') return Promise.resolve([]);
+      if (cmd === 'get_ipc_bridges') {
+        return Promise.resolve([
+          { commandName: 'a', rustName: 'a', handlerFile: '', handlerLine: 0, callerFiles: [], signatureSummary: '', hasChannelArg: false },
+          { commandName: 'b', rustName: 'b', handlerFile: '', handlerLine: 0, callerFiles: [], signatureSummary: '', hasChannelArg: false },
+        ]);
+      }
+      return Promise.reject(new Error('unexpected ' + cmd));
+    });
+    await useRadarStore.getState().fetchGraph();
+    const hash1 = useRadarStore.getState().lastBridgeSetHash;
+    const fxByNameFirst = new Map(
+      useRadarStore
+        .getState()
+        .graphNodes.filter((n) => n.kind === 'bridge')
+        .map((n) => [n.commandName, n.fx]),
+    );
+    expect(hash1).toBe('a,b');
+
+    // Re-fetch with identical command set — fx values must be preserved.
+    await useRadarStore.getState().fetchGraph();
+    const hash2 = useRadarStore.getState().lastBridgeSetHash;
+    expect(hash2).toBe(hash1);
+    const fxByNameSecond = new Map(
+      useRadarStore
+        .getState()
+        .graphNodes.filter((n) => n.kind === 'bridge')
+        .map((n) => [n.commandName, n.fx]),
+    );
+    expect(fxByNameSecond.get('a')).toBe(fxByNameFirst.get('a'));
+    expect(fxByNameSecond.get('b')).toBe(fxByNameFirst.get('b'));
+  });
+
+  it('D-30: ForceConfig.boundaryStrength defaults to 0.15; setForceConfig round-trips', () => {
+    expect(DEFAULT_FORCE_CONFIG.boundaryStrength).toBe(0.15);
+    expect(useRadarStore.getState().forceConfig.boundaryStrength).toBe(0.15);
+    useRadarStore.getState().setForceConfig({ boundaryStrength: 0.3 });
+    expect(useRadarStore.getState().forceConfig.boundaryStrength).toBe(0.3);
+    // Other fields untouched by the partial merge.
+    expect(useRadarStore.getState().forceConfig.clusterStrength).toBe(
+      DEFAULT_FORCE_CONFIG.clusterStrength,
+    );
   });
 });

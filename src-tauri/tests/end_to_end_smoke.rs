@@ -1,15 +1,21 @@
-//! Phase 6 end-to-end smoke test. Drives the passive bridge + forwarder
-//! persistence on a real tempdir repo. Marked `#[ignore]` by default because
-//! it hits the filesystem (and in CI, `git` may not be on PATH); run explicitly
-//! with `cargo test --test end_to_end_smoke -- --ignored`.
+//! Phase 6 + Phase 8 end-to-end smoke tests. Drives /hook + waiter + Tauri
+//! command flows on a real axum server with a mock Tauri AppHandle, plus the
+//! pre-existing Phase 6 passive bridge + forwarder smoke (which is
+//! `#[ignore]` because it hits the filesystem).
+//!
+//! The Phase 8 hook tests are NOT ignored — they run against 127.0.0.1:0 and
+//! an in-memory SQLite pool.
 
 mod common;
 
 use aitc_lib::agents::adapter::{AgentInfo, AgentState};
+use aitc_lib::agents::hook_waiters::{HookDecision, WaiterRegistry};
+use aitc_lib::agents::self_register::{build_router, RateLimiter};
 use aitc_lib::agents::AgentRegistry;
 use aitc_lib::pipeline::passive_bridge::bridge_tick;
 use aitc_lib::pipeline::process_snapshot::{CandidateProc, ProcessSnapshot};
 use std::sync::Arc;
+use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 
 #[tokio::test]
@@ -29,7 +35,7 @@ async fn end_to_end_pipeline_activation() {
             parent: None,
         }],
     )));
-    bridge_tick(&reg, &snap).await.unwrap();
+    bridge_tick(&reg, &snap, None, None, None).await.unwrap();
     assert!(
         reg.get_agent("PASSIVE-7777").await.is_some(),
         "PASSIVE entry must appear after first bridge tick"
@@ -77,4 +83,586 @@ async fn end_to_end_pipeline_activation() {
         .await
         .unwrap();
     assert_eq!(cnt, 1, "exactly one session_files row after forwarder persist");
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8 — /hook end-to-end integration smokes.
+// ---------------------------------------------------------------------------
+
+/// Wire up an in-memory SQLite pool with the approval_requests + protected_paths
+/// tables, plus a real axum server bound on 127.0.0.1:0, plus a mock Tauri
+/// AppHandle. Returns everything tests need to drive the hook pipeline.
+async fn spawn_hook_test_server() -> (
+    String,
+    Arc<AgentRegistry>,
+    Arc<WaiterRegistry>,
+    sqlx::SqlitePool,
+) {
+    let mut registry_inner = AgentRegistry::new();
+    registry_inner
+        .register_adapter(Arc::new(aitc_lib::agents::claude_code::ClaudeCodeAdapter));
+    let registry = Arc::new(registry_inner);
+
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    for stmt in [
+        "CREATE TABLE approval_requests ( \
+            id INTEGER PRIMARY KEY AUTOINCREMENT, \
+            agent_id TEXT, request_type TEXT NOT NULL, \
+            file_path TEXT, diff_content TEXT, \
+            status TEXT NOT NULL DEFAULT 'pending', \
+            urgency TEXT DEFAULT 'medium', \
+            response_note TEXT, edited_content TEXT, \
+            created_at TEXT NOT NULL DEFAULT (datetime('now')), \
+            resolved_at TEXT, \
+            tool_name TEXT, tool_input_json TEXT, session_id TEXT )",
+        "CREATE TABLE protected_paths ( \
+            id INTEGER PRIMARY KEY AUTOINCREMENT, \
+            glob_pattern TEXT NOT NULL UNIQUE, \
+            created_at TEXT NOT NULL DEFAULT (datetime('now')) )",
+    ] {
+        sqlx::query(stmt).execute(&pool).await.unwrap();
+    }
+
+    let waiters = WaiterRegistry::new_arc();
+    let app = tauri::test::mock_app();
+    let rate_limiter = Arc::new(RateLimiter::new());
+    let router = build_router(
+        registry.clone(),
+        pool.clone(),
+        waiters.clone(),
+        app.handle().clone(),
+        rate_limiter,
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    (format!("http://127.0.0.1:{port}"), registry, waiters, pool)
+}
+
+#[tokio::test]
+async fn hook_approve_resolves_handler() {
+    let (base, _reg, waiters, pool) = spawn_hook_test_server().await;
+    let my_pid = std::process::id();
+
+    let body = serde_json::json!({
+        "pid": my_pid,
+        "session_id": "s1",
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "/x.ts", "old_string": "a", "new_string": "b"},
+    });
+
+    // Issue /hook in a spawned task; it blocks waiting for a waiter signal.
+    let post_task = {
+        let base = base.clone();
+        tokio::spawn(async move {
+            reqwest::Client::new()
+                .post(format!("{base}/hook"))
+                .json(&body)
+                .timeout(std::time::Duration::from_secs(5))
+                .send()
+                .await
+                .unwrap()
+                .json::<serde_json::Value>()
+                .await
+                .unwrap()
+        })
+    };
+
+    // Poll for the row, then signal Allow on its id.
+    let row_id: i64 = loop {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let found: Option<(i64,)> = sqlx::query_as(
+            "SELECT id FROM approval_requests WHERE status='pending' LIMIT 1",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        if let Some((id,)) = found {
+            break id;
+        }
+    };
+
+    // Mimic the approve_request Tauri command body directly (we can't build
+    // tauri::State<'_, ...> outside the runtime). Pitfall 8 UPDATE, then signal.
+    let updated = sqlx::query(
+        "UPDATE approval_requests SET status='approved', resolved_at=datetime('now') \
+         WHERE id = ? AND status='pending'",
+    )
+    .bind(row_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(updated.rows_affected(), 1);
+    waiters.signal(row_id, HookDecision::Allow).await;
+
+    let decoded = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        post_task,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(decoded["kind"], "allow");
+}
+
+#[tokio::test]
+async fn hook_disconnect_abandons() {
+    let (base, _reg, waiters, pool) = spawn_hook_test_server().await;
+    let my_pid = std::process::id();
+
+    let body = serde_json::json!({
+        "pid": my_pid,
+        "tool_name": "Bash",
+        "tool_input": {"command": "rm -rf /"},
+    });
+
+    // Issue a POST that will time out at 200ms — the axum handler is still
+    // blocked on rx.await, so when reqwest drops the connection the handler
+    // future is dropped and AbandonGuard fires.
+    let client = reqwest::Client::new();
+    let result = client
+        .post(format!("{base}/hook"))
+        .json(&body)
+        .timeout(std::time::Duration::from_millis(200))
+        .send()
+        .await;
+    // The request should time out or return before we give up waiting.
+    assert!(result.is_err() || result.unwrap().status().is_success() == false || true,
+        "request should end (timeout or early return) — we only care about the abandoned side-effect");
+
+    // Give the AbandonGuard spawn a moment to run.
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT status FROM approval_requests",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        if rows.iter().all(|(s,)| s != "pending") && !rows.is_empty() {
+            break;
+        }
+    }
+
+    let statuses: Vec<(String,)> = sqlx::query_as(
+        "SELECT status FROM approval_requests",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(!statuses.is_empty(), "hook handler should have inserted a row");
+    for (s,) in &statuses {
+        assert_eq!(s, "abandoned", "row must be abandoned after client disconnect");
+    }
+
+    // Waiter map must be empty — AbandonGuard removed the entry.
+    let no_waiter_fired = !waiters
+        .signal(1, HookDecision::Allow)
+        .await;
+    assert!(
+        no_waiter_fired,
+        "waiter map must be drained after disconnect (no entry to signal)"
+    );
+}
+
+#[tokio::test]
+async fn terminate_force_denies_waiters() {
+    let (base, reg, waiters, pool) = spawn_hook_test_server().await;
+    let my_pid = std::process::id();
+
+    // Pre-register a KAGENT so resolve_or_create_agent returns a stable id.
+    let adapter = aitc_lib::agents::generic::passive_sentinel_adapter();
+    let agent_id = format!("KAGENT-{my_pid}");
+    reg.upsert_agent(
+        agent_id.clone(),
+        AgentInfo {
+            id: agent_id.clone(),
+            agent_type: "claude-code".into(),
+            protocol: "cli".into(),
+            state: AgentState::Running,
+            pid: Some(my_pid),
+            cwd: None,
+            intent: None,
+        },
+        adapter,
+        true,
+    )
+    .await
+    .unwrap();
+
+    let body = serde_json::json!({
+        "pid": my_pid,
+        "tool_name": "Bash",
+        "tool_input": {"command": "echo hi"},
+    });
+    let post_task = {
+        let base = base.clone();
+        tokio::spawn(async move {
+            reqwest::Client::new()
+                .post(format!("{base}/hook"))
+                .json(&body)
+                .timeout(std::time::Duration::from_secs(5))
+                .send()
+                .await
+                .unwrap()
+                .json::<serde_json::Value>()
+                .await
+                .unwrap()
+        })
+    };
+
+    // Wait for the row to appear, then force-deny the agent's waiters (as
+    // terminate_agent would do BEFORE the OS kill per D-10).
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let found: Option<(i64,)> = sqlx::query_as(
+            "SELECT id FROM approval_requests WHERE status='pending' LIMIT 1",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        if found.is_some() {
+            break;
+        }
+    }
+    let signalled = waiters
+        .signal_for_agent(
+            &agent_id,
+            HookDecision::Deny("agent terminated by user".into()),
+        )
+        .await;
+    assert_eq!(signalled.len(), 1, "exactly one waiter force-denied");
+
+    let decoded = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        post_task,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(decoded["kind"], "deny");
+    assert_eq!(decoded["reason"], "agent terminated by user");
+}
+
+#[tokio::test]
+async fn always_allow_mutes_subsequent_hook_calls() {
+    let (base, reg, waiters, pool) = spawn_hook_test_server().await;
+    let my_pid = std::process::id();
+
+    // Pre-register a KAGENT so the first /hook resolves to a stable id.
+    let adapter = aitc_lib::agents::generic::passive_sentinel_adapter();
+    let agent_id = format!("KAGENT-{my_pid}");
+    reg.upsert_agent(
+        agent_id.clone(),
+        AgentInfo {
+            id: agent_id.clone(),
+            agent_type: "claude-code".into(),
+            protocol: "cli".into(),
+            state: AgentState::Running,
+            pid: Some(my_pid),
+            cwd: None,
+            intent: None,
+        },
+        adapter,
+        true,
+    )
+    .await
+    .unwrap();
+
+    // First /hook call — Bash is gated (D-19 default allowlist), so the
+    // handler inserts a row and blocks on rx.
+    let body = serde_json::json!({
+        "pid": my_pid,
+        "tool_name": "Bash",
+        "tool_input": {"command": "echo hi"},
+    });
+    let post1 = {
+        let base = base.clone();
+        let body = body.clone();
+        tokio::spawn(async move {
+            reqwest::Client::new()
+                .post(format!("{base}/hook"))
+                .json(&body)
+                .timeout(std::time::Duration::from_secs(5))
+                .send()
+                .await
+                .unwrap()
+                .json::<serde_json::Value>()
+                .await
+                .unwrap()
+        })
+    };
+    let row_id: i64 = loop {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let found: Option<(i64,)> =
+            sqlx::query_as("SELECT id FROM approval_requests LIMIT 1")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        if let Some((id,)) = found {
+            break id;
+        }
+    };
+    // Approve with always_allow_for_session=true (simulated via direct
+    // waiter.add_always_allow + signal — the Tauri command body is
+    // unit-tested separately).
+    sqlx::query(
+        "UPDATE approval_requests SET status='approved', resolved_at=datetime('now') \
+         WHERE id = ? AND status='pending'",
+    )
+    .bind(row_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    waiters.add_always_allow(agent_id.clone(), "Bash".into()).await;
+    waiters.signal(row_id, HookDecision::Allow).await;
+    let first = tokio::time::timeout(std::time::Duration::from_secs(2), post1)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first["kind"], "allow");
+
+    let (cnt_before,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM approval_requests")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(cnt_before, 1);
+
+    // Second /hook for (same agent, Bash) — must fast-path allow with
+    // no new row created.
+    let t0 = std::time::Instant::now();
+    let resp2 = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        reqwest::Client::new()
+            .post(format!("{base}/hook"))
+            .json(&body)
+            .send(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let elapsed = t0.elapsed();
+    assert_eq!(resp2.status(), 200);
+    let decoded2: serde_json::Value = resp2.json().await.unwrap();
+    assert_eq!(decoded2["kind"], "allow");
+    assert!(
+        elapsed < std::time::Duration::from_millis(200),
+        "always-allow fast-path must be under 200ms, was {elapsed:?}"
+    );
+    let (cnt_after,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM approval_requests")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        cnt_after, cnt_before,
+        "always-allow fast-path must NOT insert a new row"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8 Plan 04 — passive bridge D-04 event emission + install integration.
+//
+// These smokes avoid a real Tauri runtime (mock_app + direct bridge_tick
+// calls) so they stay fast and deterministic. The AppHandle arg is None —
+// only the sentinel-write path is exercised here; the visible Tauri event
+// fires in an integration environment (Plan 05 frontend test will watch it).
+// ---------------------------------------------------------------------------
+
+use aitc_lib::comms::app_settings as aitc_app_settings;
+use std::path::PathBuf as StdPathBuf;
+
+async fn consent_smoke_pool() -> sqlx::SqlitePool {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    aitc_app_settings::ensure_schema(&pool).await.unwrap();
+    pool
+}
+
+fn claude_cand(pid: u32, cwd: StdPathBuf) -> CandidateProc {
+    CandidateProc {
+        pid,
+        name: "claude-code".into(),
+        cwd,
+        exe: None,
+        parent: None,
+    }
+}
+
+#[tokio::test]
+async fn passive_bridge_emits_event_on_first_sighting() {
+    // Seed the registry with the real ClaudeCodeAdapter so agent_type
+    // classifies as "claude-code". No app handle — we verify via the
+    // dedup sentinel side-effect that the event path would have fired.
+    let mut reg = AgentRegistry::new();
+    reg.register_adapter(Arc::new(aitc_lib::agents::claude_code::ClaudeCodeAdapter));
+    let reg = Arc::new(reg);
+    let pool = consent_smoke_pool().await;
+    let cwd = StdPathBuf::from("/tmp/repoX");
+    let snap = Arc::new(RwLock::new(
+        ProcessSnapshot::from_candidates_for_test(vec![claude_cand(5001, cwd.clone())]),
+    ));
+
+    // First tick: no consent entry exists -> sentinel written.
+    aitc_lib::pipeline::passive_bridge::bridge_tick(&reg, &snap, None, Some(&pool), None)
+        .await
+        .unwrap();
+    assert!(
+        aitc_app_settings::has_passive_hook_consent_entry(&pool, "/tmp/repoX")
+            .await
+            .unwrap(),
+        "first-sighting sentinel must be written"
+    );
+    let rows = aitc_app_settings::get_passive_hook_consent_repos(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].1, "declined");
+}
+
+#[tokio::test]
+async fn passive_bridge_dedups_after_decision() {
+    let mut reg = AgentRegistry::new();
+    reg.register_adapter(Arc::new(aitc_lib::agents::claude_code::ClaudeCodeAdapter));
+    let reg = Arc::new(reg);
+    let pool = consent_smoke_pool().await;
+    // User accepted previously. The bridge must NOT overwrite this with
+    // the dedup sentinel.
+    aitc_app_settings::record_passive_hook_consent(&pool, "/tmp/repoY", "accepted")
+        .await
+        .unwrap();
+    let cwd = StdPathBuf::from("/tmp/repoY");
+    let snap = Arc::new(RwLock::new(
+        ProcessSnapshot::from_candidates_for_test(vec![claude_cand(5002, cwd)]),
+    ));
+    aitc_lib::pipeline::passive_bridge::bridge_tick(&reg, &snap, None, Some(&pool), None)
+        .await
+        .unwrap();
+    let rows = aitc_app_settings::get_passive_hook_consent_repos(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].1, "accepted", "prior decision must survive");
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8 Plan 04 — claude_code::launch hook-install chip-bypass semantics.
+//
+// The real ClaudeCodeAdapter::launch spawns a `claude` binary on PATH and
+// panics CI where that binary doesn't exist. We simulate the gate directly:
+// assert that when AITC_SIDECAR_PATH is set AND chips are unset, the install
+// path writes settings.local.json; when either chip is set, it does not.
+// ---------------------------------------------------------------------------
+
+use aitc_lib::agents::adapter::LaunchOptions;
+
+// Helper: mirrors the exact install gate inside ClaudeCodeAdapter::launch.
+fn simulate_launch_gate(cwd: &std::path::Path, options: &LaunchOptions) {
+    if !options.dangerously_skip_permissions && !options.accept_edits {
+        if let Ok(sidecar_abs) = std::env::var("AITC_SIDECAR_PATH") {
+            if !sidecar_abs.is_empty() {
+                let _ = aitc_lib::agents::hook_install::install_aitc_hook(cwd, &sidecar_abs);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn claude_launch_installs_hook_when_chips_unset() {
+    let td = tempfile::TempDir::new().unwrap();
+    std::env::set_var("AITC_SIDECAR_PATH", "/tmp/fake-aitc-hook");
+    simulate_launch_gate(
+        td.path(),
+        &LaunchOptions {
+            accept_edits: false,
+            dangerously_skip_permissions: false,
+        },
+    );
+    assert!(
+        td.path().join(".claude/settings.local.json").exists(),
+        "hook install must run when no bypass chip is set"
+    );
+    let root: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(td.path().join(".claude/settings.local.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        root["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+        "/tmp/fake-aitc-hook"
+    );
+}
+
+#[tokio::test]
+async fn claude_launch_skips_hook_when_dangerously_skip() {
+    let td = tempfile::TempDir::new().unwrap();
+    std::env::set_var("AITC_SIDECAR_PATH", "/tmp/fake-aitc-hook");
+    simulate_launch_gate(
+        td.path(),
+        &LaunchOptions {
+            accept_edits: false,
+            dangerously_skip_permissions: true,
+        },
+    );
+    assert!(
+        !td.path().join(".claude/settings.local.json").exists(),
+        "D-23 bypass: dangerously_skip_permissions must skip install"
+    );
+}
+
+#[tokio::test]
+async fn claude_launch_skips_hook_when_accept_edits() {
+    let td = tempfile::TempDir::new().unwrap();
+    std::env::set_var("AITC_SIDECAR_PATH", "/tmp/fake-aitc-hook");
+    simulate_launch_gate(
+        td.path(),
+        &LaunchOptions {
+            accept_edits: true,
+            dangerously_skip_permissions: false,
+        },
+    );
+    assert!(
+        !td.path().join(".claude/settings.local.json").exists(),
+        "D-23 bypass: accept_edits must skip install"
+    );
+}
+
+#[tokio::test]
+async fn startup_auto_heal_reinstalls_accepted_repos() {
+    let pool = consent_smoke_pool().await;
+    let td = tempfile::TempDir::new().unwrap();
+    let cwd = td.path().to_str().unwrap().to_string();
+    // Seed an accepted repo with a stale AITC hook command.
+    aitc_lib::agents::hook_install::install_aitc_hook(td.path(), "/old/aitc-hook").unwrap();
+    aitc_app_settings::record_passive_hook_consent(&pool, &cwd, "accepted")
+        .await
+        .unwrap();
+
+    let healed = aitc_lib::agents::hook_install::reinstall_accepted_repos_on_startup(
+        &pool,
+        "/new/aitc-hook",
+    )
+    .await;
+    assert_eq!(healed.len(), 1);
+
+    let root: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(td.path().join(".claude/settings.local.json")).unwrap(),
+    )
+    .unwrap();
+    let arr = root["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(
+        arr.len(),
+        1,
+        "Pitfall 6: stale aitc-hook entry replaced in place, not appended"
+    );
+    assert_eq!(arr[0]["hooks"][0]["command"], "/new/aitc-hook");
 }

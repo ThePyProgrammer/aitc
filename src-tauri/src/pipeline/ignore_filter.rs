@@ -1,7 +1,9 @@
 //! Gitignore-respecting walker with hardcoded excludes per D-10 and Pitfall 6.
 //!
 //! Hardcoded excludes (layered on .gitignore): .git, node_modules, target,
-//! build, dist, .next, out
+//! build, dist, .next, out. Also strips binary file extensions that AI agents
+//! cannot meaningfully edit (see HARDCODED_BINARY_EXTENSIONS) and dependency
+//! lockfiles across ecosystems (see HARDCODED_LOCKFILES).
 
 use ignore::{overrides::OverrideBuilder, WalkBuilder};
 use std::path::Path;
@@ -19,9 +21,116 @@ pub const HARDCODED_EXCLUDES: &[&str] = &[
     "out",
 ];
 
+/// Binary file extensions excluded from the walker. AI agents cannot edit
+/// these formats, so surfacing them in the radar, heat map, or session_files
+/// is noise at best and misleading at worst (a large PNG would dominate the
+/// treemap purely on byte size). SVG is intentionally NOT in this list — it's
+/// XML and frequently edited.
+pub const HARDCODED_BINARY_EXTENSIONS: &[&str] = &[
+    // Images
+    "png", "jpg", "jpeg", "gif", "webp", "ico", "bmp", "tiff", "tif", "avif", "heic", "heif",
+    // Video
+    "mp4", "webm", "mov", "avi", "mkv", "m4v", "mpg", "mpeg", "wmv", "flv", "ogv",
+    // Audio
+    "mp3", "wav", "flac", "ogg", "m4a", "aac", "opus",
+    // Fonts
+    "ttf", "otf", "woff", "woff2", "eot",
+    // Archives
+    "zip", "tar", "gz", "tgz", "bz2", "7z", "rar", "xz", "zst",
+    // Binary documents
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+    // Compiled / executable
+    "exe", "dll", "so", "dylib", "class", "jar", "war", "wasm", "pyc", "pyo", "bin", "obj",
+    // Databases
+    "db", "sqlite", "sqlite3",
+    // Disk images
+    "iso", "dmg", "img",
+    // 3D / design binaries
+    "blend", "fbx", "glb", "gltf", "stl", "psd", "ai",
+];
+
+/// Dependency-manager lockfiles excluded from the walker. These are
+/// auto-generated ledgers — agents regenerate them by running a package
+/// manager, not by direct editing, and they're typically massive (thousands
+/// of lines), so they'd dominate the treemap and heat map for no value.
+///
+/// Listed as filename or glob; matched case-insensitively via character-class
+/// expansion in build_walker. `Manifest.toml` (Julia) is deliberately omitted
+/// — the name is too generic and collides with many unrelated manifests.
+pub const HARDCODED_LOCKFILES: &[&str] = &[
+    // JavaScript / TypeScript
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "bun.lock",
+    "bun.lockb",
+    "npm-shrinkwrap.json",
+    "deno.lock",
+    // Python
+    "uv.lock",
+    "pixi.lock",
+    "poetry.lock",
+    "Pipfile.lock",
+    "pdm.lock",
+    "conda-lock.yml",
+    // Rust
+    "Cargo.lock",
+    // Ruby
+    "Gemfile.lock",
+    // PHP
+    "composer.lock",
+    // Go
+    "go.sum",
+    // Elixir
+    "mix.lock",
+    // Erlang
+    "rebar.lock",
+    // Dart / Flutter
+    "pubspec.lock",
+    // Swift / Apple
+    "Package.resolved",
+    "Podfile.lock",
+    "Cartfile.resolved",
+    // .NET
+    "packages.lock.json",
+    "paket.lock",
+    // Haskell
+    "stack.yaml.lock",
+    "cabal.project.freeze",
+    // Nix
+    "flake.lock",
+    // Terraform
+    ".terraform.lock.hcl",
+    // R
+    "renv.lock",
+    // Perl
+    "cpanfile.snapshot",
+    // JVM / Gradle
+    "gradle.lockfile",
+    "gradle/dependency-locks/*.lockfile",
+];
+
+/// Expand an ASCII alphabetic pattern into a case-insensitive gitignore glob
+/// by converting each letter into a `[aA]` character class. The `ignore`
+/// crate's override matcher has no (?i) flag, so we desugar manually.
+fn case_insensitive(pattern: &str) -> String {
+    pattern
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphabetic() {
+                format!("[{}{}]", c.to_ascii_lowercase(), c.to_ascii_uppercase())
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
+}
+
 /// Construct a WalkBuilder that:
 /// - respects `.gitignore`, `.ignore`, `.git/info/exclude`, and global gitignore
 /// - additionally excludes HARDCODED_EXCLUDES directories
+/// - additionally excludes HARDCODED_BINARY_EXTENSIONS file types
+/// - additionally excludes HARDCODED_LOCKFILES across ecosystems
 /// - skips hidden files by default (matches D-10 intent of repo-relevant files only)
 /// - follows a single-threaded walk (parallel has overhead for <10k files — escalate later if benchmarks need it)
 pub fn build_walker(root: &Path) -> WalkBuilder {
@@ -33,6 +142,22 @@ pub fn build_walker(root: &Path) -> WalkBuilder {
         // to catch both the entry and its descendants.
         let _ = overrides.add(&format!("!**/{}", excluded));
         let _ = overrides.add(&format!("!**/{}/**", excluded));
+    }
+    for ext in HARDCODED_BINARY_EXTENSIONS {
+        let _ = overrides.add(&format!("!**/*.{}", case_insensitive(ext)));
+    }
+    for name in HARDCODED_LOCKFILES {
+        // Lockfile entries may be a bare filename or a path glob (e.g.
+        // "gradle/dependency-locks/*.lockfile"). If it already contains a
+        // path separator, treat it as an in-tree pattern; otherwise match
+        // at any depth.
+        let pattern = case_insensitive(name);
+        if name.contains('/') {
+            let _ = overrides.add(&format!("!{}", pattern));
+            let _ = overrides.add(&format!("!**/{}", pattern));
+        } else {
+            let _ = overrides.add(&format!("!**/{}", pattern));
+        }
     }
     let overrides = overrides.build().expect("override builder failed");
 
@@ -114,6 +239,127 @@ mod tests {
             !paths.iter().any(|p| p.ends_with("app.log")),
             "found app.log: {paths:?}"
         );
+    }
+
+    #[test]
+    fn skips_binary_extensions() {
+        let tmp = make_temp_repo();
+        // Representative extensions across the categories agents can't edit.
+        let binary_files = [
+            "logo.png",
+            "hero.JPG", // case-insensitive match
+            "demo.mp4",
+            "theme.woff2",
+            "archive.zip",
+            "spec.pdf",
+            "native.dll",
+            "cache.sqlite",
+            "asset.blend",
+        ];
+        for name in &binary_files {
+            fs::write(tmp.path().join(name), b"x").unwrap();
+        }
+        // A sibling source file that MUST still appear.
+        fs::write(tmp.path().join("main.rs"), "fn x() {}").unwrap();
+        // SVG is intentionally text-editable and should NOT be filtered.
+        fs::write(tmp.path().join("icon.svg"), "<svg/>").unwrap();
+
+        let paths = collect_paths(tmp.path());
+        for name in &binary_files {
+            assert!(
+                !paths.iter().any(|p| p.ends_with(&name.to_string())),
+                "binary file {} leaked into walk: {:?}",
+                name,
+                paths
+            );
+        }
+        assert!(paths.iter().any(|p| p.ends_with("main.rs")), "source file stripped: {paths:?}");
+        assert!(paths.iter().any(|p| p.ends_with("icon.svg")), "svg should not be filtered: {paths:?}");
+    }
+
+    #[test]
+    fn skips_lockfiles_across_ecosystems() {
+        let tmp = make_temp_repo();
+        // One representative lockfile per ecosystem the list targets. Both
+        // canonical and case-shifted variants to confirm case-insensitive
+        // matching holds on case-sensitive filesystems.
+        let lockfiles = [
+            "package-lock.json",
+            "yarn.lock",
+            "pnpm-lock.yaml",
+            "bun.lock",
+            "bun.lockb",
+            "npm-shrinkwrap.json",
+            "deno.lock",
+            "uv.lock",
+            "pixi.lock",
+            "poetry.lock",
+            "Pipfile.lock",
+            "pdm.lock",
+            "conda-lock.yml",
+            "Cargo.lock",
+            "cargo.lock", // case-insensitive sanity
+            "Gemfile.lock",
+            "composer.lock",
+            "go.sum",
+            "mix.lock",
+            "rebar.lock",
+            "pubspec.lock",
+            "Package.resolved",
+            "Podfile.lock",
+            "Cartfile.resolved",
+            "packages.lock.json",
+            "paket.lock",
+            "stack.yaml.lock",
+            "cabal.project.freeze",
+            "flake.lock",
+            ".terraform.lock.hcl",
+            "renv.lock",
+            "cpanfile.snapshot",
+            "gradle.lockfile",
+        ];
+        for name in &lockfiles {
+            fs::write(tmp.path().join(name), b"x").unwrap();
+        }
+        // Gradle nested lock path.
+        fs::create_dir_all(tmp.path().join("gradle").join("dependency-locks")).unwrap();
+        fs::write(
+            tmp.path()
+                .join("gradle")
+                .join("dependency-locks")
+                .join("compileClasspath.lockfile"),
+            b"x",
+        )
+        .unwrap();
+        // Regression guard: these LOOK lockfile-ish but must stay visible
+        // because agents actually edit them (manifests, not lockfiles).
+        fs::write(tmp.path().join("package.json"), "{}").unwrap();
+        fs::write(tmp.path().join("Cargo.toml"), "[package]\nname=\"x\"").unwrap();
+        fs::write(tmp.path().join("pyproject.toml"), "[project]").unwrap();
+
+        let paths = collect_paths(tmp.path());
+        for name in &lockfiles {
+            assert!(
+                !paths.iter().any(|p| p.ends_with(&name.to_string())),
+                "lockfile {} leaked into walk: {:?}",
+                name,
+                paths
+            );
+        }
+        assert!(
+            !paths
+                .iter()
+                .any(|p| p.ends_with("compileClasspath.lockfile")),
+            "gradle dependency-lock leaked: {paths:?}"
+        );
+        for manifest in ["package.json", "Cargo.toml", "pyproject.toml"] {
+            assert!(
+                paths.iter().any(|p| p.ends_with(manifest)),
+                "manifest {} was incorrectly stripped: {:?}",
+                manifest,
+                paths
+            );
+        }
     }
 
     #[test]

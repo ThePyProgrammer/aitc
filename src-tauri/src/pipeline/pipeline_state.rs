@@ -32,11 +32,15 @@ pub struct ActiveWatch {
     /// Channel to the frontend -- cloned into the forwarder. Held here so the
     /// watcher can be stopped without losing the reference to the consumer.
     pub channel: tauri::ipc::Channel<FileEventBatch>,
-    /// In-memory file tree index for Phase 4 radar spatial map.
+    /// In-memory file tree index for Phase 4 radar spatial map. Keys are
+    /// absolute canonical paths (needed for filesystem-event reconciliation);
+    /// the `get_tree_index` command strips `repo_root` before handing them
+    /// to the frontend so the treemap sees repo-relative paths.
     pub tree_index: HashMap<PathBuf, FileNode>,
-    /// Canonical (UNC-stripped) repo root. Paired with `tree_index` whose keys
-    /// are absolute paths; used to strip the prefix when serializing to the
-    /// frontend so the radar treemap renders a repo-rooted tree.
+    /// Canonical, UNC-stripped root of the watched repo. Used to convert
+    /// tree_index keys into repo-relative paths for the radar spatial map
+    /// and to keep the frontend tree from growing an O(depth) chain of
+    /// single-child wrappers representing the filesystem prefix.
     pub repo_root: PathBuf,
 }
 

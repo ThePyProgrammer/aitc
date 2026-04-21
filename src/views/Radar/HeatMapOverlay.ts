@@ -1,42 +1,39 @@
-// Phase 5 heat map overlay -- Canvas 2D render function.
+// D-19, FMON-05.
+// Heat-map overlay refactored for graph-mode radar: tints node fills directly
+// (no separate Canvas layer). The primary render path lives in
+// GraphRenderer.drawNodes which calls heatColor() per node. This file remains
+// for callers that want the tint color in isolation (RadarMinimap, future
+// overlays) and so any legacy `HeatMapOverlay` imports keep resolving.
 //
-// FMON-05, VIZN-03: Draws contention heat map over treemap file cells.
-// Called from RadarCanvas render loop when heatMapEnabled is true.
-// Colors follow Command Horizon green/amber/red gradient via contentionToColor.
+// Legacy `drawHeatMap(treemapRects)` code path DELETED — Plan 04 removed the
+// squarified treemap, so rect-based tinting is no longer meaningful.
 
-import { contentionToColor } from '../../lib/contention';
-import type { TreemapRect } from '../../hooks/useTreemapLayout';
+import { heatColor } from './GraphRenderer';
 
 /**
- * Draw heat map overlay on treemap file cells based on contention scores.
- *
- * Only draws over file cells (not directories). Skips cells with zero score
- * or sub-pixel size. Uses contentionToColor for the Command Horizon
- * green (0-0.3) -> amber (0.3-0.7) -> red (0.7-1.0) gradient.
+ * Default node fill (UI-SPEC §Color surface-container). Exported so callers
+ * can branch to the baseline without re-hardcoding the hex.
  */
-export function drawHeatMap(
-  ctx: CanvasRenderingContext2D,
-  rects: TreemapRect[],
-  scores: Map<string, number>,
-  zoom: number,
-): void {
-  for (const rect of rects) {
-    if (!rect.isFile) continue;
+export const HEAT_BASELINE = '#1a1919';
 
-    const score = scores.get(rect.path);
-    if (!score || score <= 0) continue;
+/**
+ * Returns the heat-blended fill color for a contention score in [0, 1].
+ * Delegates to GraphRenderer.heatColor so the ramp stays consistent across
+ * the main canvas and any overlay surfaces (e.g. the minimap).
+ *
+ * Score 0 → surface-container (#1a1919)
+ * Score 1 → error (#ff7351)
+ */
+export function heatTintForNode(score: number): string {
+  return heatColor(score);
+}
 
-    const screenW = (rect.x1 - rect.x0) * zoom;
-    const screenH = (rect.y1 - rect.y0) * zoom;
-
-    // Sub-pixel culling
-    if (screenW < 1 || screenH < 1) continue;
-
-    const w = rect.x1 - rect.x0;
-    const h = rect.y1 - rect.y0;
-    const color = contentionToColor(score);
-
-    ctx.fillStyle = color;
-    ctx.fillRect(rect.x0, rect.y0, w, h);
-  }
+/**
+ * Convenience gate: returns the heat tint when the toggle is enabled AND the
+ * score is non-zero; returns the baseline surface-container otherwise.
+ * Matches the inline branching in GraphRenderer.drawNodes so the minimap
+ * renders a visually-consistent reduction of the main canvas.
+ */
+export function heatTintIfActive(score: number, enabled: boolean): string {
+  return enabled && score > 0 ? heatColor(score) : HEAT_BASELINE;
 }

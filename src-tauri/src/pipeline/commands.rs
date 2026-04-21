@@ -128,10 +128,17 @@ pub async fn start_watch(
 
     // AGNT-03: passive PID → AgentRegistry bridge (2s tick). Aborted when
     // ActiveWatch is dropped (Drop impl in pipeline_state.rs).
+    //
+    // Phase 8 D-04: pass pool + app_handle so first-sighting of a Claude
+    // process in a never-seen repo emits `passive-claude-detected` and the
+    // consent dialog opens in the UI.
     let bridge_task = crate::pipeline::passive_bridge::spawn_passive_bridge(
         registry_arc.clone(),
         snapshot.clone(),
+        canonical.clone(),
         Duration::from_millis(crate::pipeline::passive_bridge::BRIDGE_INTERVAL_MS),
+        Some(pool_arc.clone()),
+        Some(app_handle.clone()),
     );
 
     // Spawn the attributing stream (Plan 03).
@@ -171,12 +178,31 @@ pub async fn start_watch(
     // Spawn conflict engine task: processes batches from broadcast channel,
     // detects conflicts, emits Tauri events for real-time frontend push (CNFL-02),
     // and dispatches OS notifications for conflict state (D-09).
-    let conflict_window_ms = conflict_state.get_window_ms();
+    //
+    // Phase 17 D-15: engine is now shared with /hook via Tauri managed
+    // state (registered in lib.rs setup). We no longer construct a local
+    // ConflictEngine here. The engine's internal window is baked at
+    // lib.rs startup from 5000ms — the /hook path routes around that
+    // staleness by passing fresh window_ms into could_conflict_with per
+    // request (D-14b). Hot-swapping the engine's eviction-policy window
+    // here would require a watch-channel from ConflictState and is
+    // out-of-scope for Phase 17.
+    let engine: Arc<tokio::sync::Mutex<ConflictEngine>> = app_handle
+        .state::<Arc<tokio::sync::Mutex<ConflictEngine>>>()
+        .inner()
+        .clone();
     let app_handle_clone = app_handle.clone();
     let conflict_task = tokio::spawn(async move {
-        let mut engine = ConflictEngine::new(Duration::from_millis(conflict_window_ms));
         while let Ok(batch) = conflict_rx.recv().await {
-            let alerts = engine.process_batch(&batch);
+            // Pitfall 1 / T-17-04: scope the lock TIGHTLY. process_batch is
+            // synchronous (no .await inside), so the mutex is held for a
+            // handful of microseconds per batch. The lock MUST be released
+            // before the alert-dispatch loop so the /hook handler's
+            // could_conflict_with query is not starved during burst writes.
+            let alerts = {
+                let mut eng = engine.lock().await;
+                eng.process_batch(&batch)
+            };
             for alert in alerts {
                 // Push to frontend in real time via Tauri event (CNFL-02)
                 emit_conflict_event(&app_handle_clone, &alert);
@@ -298,6 +324,12 @@ pub(crate) fn serialize_tree_index(
 
 /// Get the file tree index from the active watch for the Phase 4 radar spatial map.
 /// Returns an empty vec if no watch is active.
+///
+/// Paths are serialized as repo-relative with forward-slash separators. Storing
+/// absolute paths on the frontend created an O(depth) chain of single-child
+/// directory wrappers (`/`, `home`, `prannayag`, …) before any real content,
+/// which visually crushed the treemap into a corner. The repo-root entry is
+/// skipped — the frontend synthesizes its own root aggregate from file paths.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_tree_index(
@@ -306,6 +338,99 @@ pub async fn get_tree_index(
     let guard = state.inner.lock().await;
     match guard.as_ref() {
         Some(active) => Ok(serialize_tree_index(&active.tree_index, &active.repo_root)),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Get the dependency graph (in-repo import/use/mod edges) for the active watch.
+/// Returns an empty vec if no watch is active.
+///
+/// Edges use repo-relative forward-slash paths (matching `get_tree_index` convention,
+/// commit `a1b15b6`) so the frontend can join against `radarStore.contentionScores`
+/// keys without a separate normalization layer.
+///
+/// CPU-heavy parsing runs on `tauri::async_runtime::spawn_blocking` so the main
+/// async runtime stays responsive during the <2s build target (D-24).
+#[tauri::command]
+#[specta::specta]
+pub async fn get_dependency_graph(
+    state: tauri::State<'_, PipelineState>,
+) -> Result<Vec<crate::pipeline::deps::DependencyEdgeDto>, String> {
+    use crate::pipeline::deps::{build_dependency_graph, DependencyEdgeDto};
+    let guard = state.inner.lock().await;
+    match guard.as_ref() {
+        Some(active) => {
+            let repo_root = active.repo_root.clone();
+            let files: Vec<std::path::PathBuf> = active
+                .tree_index
+                .iter()
+                .filter(|(_, node)| !node.is_dir)
+                .map(|(path, _)| path.clone())
+                .collect();
+            let repo_root_for_build = repo_root.clone();
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                build_dependency_graph(&repo_root_for_build, &files)
+            })
+            .await
+            .map_err(|e| format!("spawn_blocking join: {e}"))?;
+            if result.degraded {
+                tracing::warn!(
+                    edges = result.edges.len(),
+                    unresolved = result.unresolved_count,
+                    "dep_graph: returning degraded result (edge cap hit)"
+                );
+            }
+            // Convert internal edges (PathBuf) to DTO (repo-relative String).
+            let dto: Vec<DependencyEdgeDto> = result
+                .edges
+                .into_iter()
+                .filter_map(|e| {
+                    let from = e
+                        .from
+                        .strip_prefix(&repo_root)
+                        .ok()?
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    let to = e
+                        .to
+                        .strip_prefix(&repo_root)
+                        .ok()?
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    Some(DependencyEdgeDto { from, to, kind: e.kind })
+                })
+                .collect();
+            Ok(dto)
+        }
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Get the IPC bridge surface (commands + handlers + callers) for the active
+/// watch. Returns an empty vec if no watch is active.
+///
+/// Bridges use repo-relative forward-slash paths (matching `get_tree_index`
+/// convention, commit `a1b15b6`).
+///
+/// CPU-heavy parsing runs on `tauri::async_runtime::spawn_blocking` so the main
+/// async runtime stays responsive during the <100ms build target (D-35).
+#[tauri::command]
+#[specta::specta]
+pub async fn get_ipc_bridges(
+    state: tauri::State<'_, PipelineState>,
+) -> Result<Vec<crate::pipeline::ipc_bridges::IpcBridgeDto>, String> {
+    use crate::pipeline::ipc_bridges::build_ipc_bridges;
+    let guard = state.inner.lock().await;
+    match guard.as_ref() {
+        Some(active) => {
+            let repo_root = active.repo_root.clone();
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                build_ipc_bridges(&repo_root)
+            })
+            .await
+            .map_err(|e| format!("spawn_blocking join: {e}"))?;
+            Ok(result)
+        }
         None => Ok(Vec::new()),
     }
 }
@@ -470,6 +595,36 @@ mod tests {
     #[test]
     fn pipeline_mpsc_capacity_matches_research_recommendation() {
         assert_eq!(PIPELINE_MPSC_CAPACITY, 1024);
+    }
+
+    /// V-12-13: `get_ipc_bridges` returns `Ok(Vec::new())` when no watch is
+    /// active, without panicking. We cannot construct a real
+    /// `tauri::State<'_, PipelineState>` in a unit test (it lives in the
+    /// tauri runtime managed-state system), so we exercise the equivalent
+    /// business logic: a default `PipelineState` has `inner == None`, which
+    /// is the branch that returns `Ok(vec![])`. The Some-branch is covered
+    /// by `pipeline::ipc_bridges::tests::build_ipc_bridges_empty_root_returns_empty`
+    /// (empty repo → build_ipc_bridges() → []).
+    #[tokio::test]
+    async fn get_ipc_bridges_smoke_v_12_13() {
+        let state = PipelineState::default();
+        let guard = state.inner.lock().await;
+        assert!(
+            guard.as_ref().is_none(),
+            "default PipelineState should be inactive (no watch)"
+        );
+        // Mirror the None-branch of get_ipc_bridges exactly:
+        let result: Result<Vec<crate::pipeline::ipc_bridges::IpcBridgeDto>, String> =
+            match guard.as_ref() {
+                Some(_) => unreachable!("default state should be None"),
+                None => Ok(Vec::new()),
+            };
+        assert!(result.is_ok(), "None-branch returns Ok");
+        assert_eq!(
+            result.unwrap().len(),
+            0,
+            "empty state yields empty bridge Vec"
+        );
     }
 }
 

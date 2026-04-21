@@ -4,22 +4,49 @@ import {
   ChevronRight,
   Clock,
   MessageSquare,
+  Package,
   Radar,
   Building2,
   Rocket,
 } from 'lucide-react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useSidebarStore } from '../../stores/sidebarStore';
 import { ConflictNavBadge } from '../ui/ConflictNavBadge';
 import { PendingCountBadge } from '../ui/PendingCountBadge';
+import { useChatStore } from '../../stores/chatStore';
 
 const navItems = [
   { to: '/radar', label: 'RADAR', icon: Radar },
   { to: '/tower', label: 'TOWER', icon: Building2 },
+  { to: '/arsenal', label: 'ARSENAL', icon: Package },
   { to: '/comms', label: 'COMMS', icon: MessageSquare },
   { to: '/conflicts', label: 'CONFLICTS', icon: AlertTriangle },
   { to: '/history', label: 'HISTORY', icon: Clock },
 ] as const;
+
+/**
+ * Phase 10 Plan 06 (D-22) — tiny primary dot next to the COMMS nav label
+ * when there is chat-unread signal AND the user is not on the CHAT tab
+ * already. The pending-request count badge lives separately via
+ * <PendingCountBadge />. This dot is the unified "something is new" signal
+ * per 10-UI-SPEC.md § Sidebar.
+ */
+function ChatUnreadDot() {
+  const totalUnread = useChatStore((s) => s.totalUnread());
+  const location = useLocation();
+  const onChatTab =
+    location.pathname === '/comms' &&
+    new URLSearchParams(location.search).get('tab') === 'chat';
+  if (totalUnread === 0 || onChatTab) return null;
+  return (
+    <span
+      aria-label={`${totalUnread} unread chat events`}
+      title={`${totalUnread} unread chat events`}
+      data-testid="chat-unread-dot"
+      className="inline-block h-1.5 w-1.5 bg-primary"
+    />
+  );
+}
 
 export function Sidebar() {
   const expanded = useSidebarStore((s) => s.expanded);
@@ -76,7 +103,12 @@ export function Sidebar() {
               <span className="ml-3 font-headline text-[14px] font-bold uppercase tracking-widest flex items-center gap-2">
                 {label}
                 {label === 'CONFLICTS' && <ConflictNavBadge />}
-                {label === 'COMMS' && <PendingCountBadge />}
+                {label === 'COMMS' && (
+                  <>
+                    <PendingCountBadge />
+                    <ChatUnreadDot />
+                  </>
+                )}
               </span>
             )}
           </NavLink>

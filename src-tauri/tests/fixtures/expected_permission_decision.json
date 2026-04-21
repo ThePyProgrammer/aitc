@@ -1,0 +1,11 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "allow",
+    "updatedInput": {
+      "file_path": "/home/dev/proj/src/app.ts",
+      "old_string": "const x = 1;",
+      "new_string": "const x = 3;"
+    }
+  }
+}

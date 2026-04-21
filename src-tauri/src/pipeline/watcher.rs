@@ -11,6 +11,19 @@
 //! - Pitfall 5 (rename as Remove+Create): `new_debouncer` uses RecommendedCache
 //!   (FileIdCache) which coalesces renames into ModifyKind::Name(Both) events
 
+use crate::claude_resources::events::{
+    Category as ResourceCategory, Resource, ResourceEvent, ResourceEventBatch, Scope,
+};
+use crate::claude_resources::parse::{
+    parse_agent, parse_claude_md, parse_command, parse_hook_metadata,
+    parse_installed_plugins, parse_settings, parse_skill,
+};
+use crate::claude_resources::routing::{
+    category_for_path, classify_event, RoutedPath, ScopeKind,
+    EXTRA_ROOT_ALLOWLIST_SUBDIRS,
+};
+use crate::claude_resources::scan::scan_scope;
+use crate::claude_resources::write_fence::WriteFence;
 use crate::pipeline::events::{Attribution, FileEvent, FileEventBatch, FileEventKind};
 use crate::pipeline::ignore_filter::HARDCODED_EXCLUDES;
 use crate::pipeline::tree_index::{build_tree_index, FileNode};
@@ -141,6 +154,398 @@ pub fn spawn_watcher(
         },
         initial_tree,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Plan 09-03: multi-root watcher supporting ~/.claude/ + <cwd>/.claude/.
+//
+// Per D-05 (user-locked): exactly ONE Debouncer watches repo_root PLUS each
+// extra root's allowlisted subdirs. Events are fanned out by classify_event
+// (D-06) into either the existing pipeline mpsc or a new resources mpsc.
+// ---------------------------------------------------------------------------
+
+/// Per-scope configuration for an extra watch root.
+pub struct ExtraRoot {
+    /// Canonicalized path to the scope root (e.g. `~/.claude/` or
+    /// `<cwd>/.claude/`).
+    pub root: PathBuf,
+    pub kind: ScopeKind,
+    /// For `ScopeKind::Project` only: the project root (the parent of
+    /// `.claude/`). Used so the initial scan can discover `<cwd>/CLAUDE.md`
+    /// (one level above `.claude/`).
+    pub project_root: Option<PathBuf>,
+}
+
+pub struct MultiWatcherOutput {
+    pub handle: WatcherHandle,
+    pub initial_tree: HashMap<PathBuf, FileNode>,
+    /// Merged initial scan across every extra root (Global first, then
+    /// Project). Empty when `extra_roots` is empty.
+    pub initial_resources: Vec<Resource>,
+}
+
+/// Spawn the single-Debouncer multi-root watcher.
+///
+/// Honors D-05: exactly ONE `Debouncer<RecommendedWatcher, RecommendedCache>`
+/// is created. The Debouncer watches:
+///   - `repo_root` recursively (existing pipeline behavior)
+///   - For each `ExtraRoot`: each allowlisted subdir
+///     (`skills/`, `agents/`, `commands/`, `hooks/`, `plugins/`) recursively,
+///     PLUS file-level NonRecursive watches for `settings.json` and
+///     `CLAUDE.md` at the scope root. For `ScopeKind::Project`, also
+///     watches `<project_root>/CLAUDE.md` (one level above `.claude/`).
+///
+/// Fan-out (D-06): every debounced event is routed via `classify_event`.
+/// Pipeline events flow to `pipeline_tx` unchanged; Resource events are
+/// re-parsed and flow to `resources_tx` as `ResourceEventBatch`. The
+/// `fence.was_ours(path)` check suppresses self-emitted Changed events
+/// for AITC-originated CLAUDE.md writes (Pitfall 3).
+pub fn spawn_watcher_multi(
+    repo_root: &Path,
+    extra_roots: Vec<ExtraRoot>,
+    pipeline_tx: tokio::sync::mpsc::Sender<FileEventBatch>,
+    resources_tx: tokio::sync::mpsc::Sender<ResourceEventBatch>,
+    fence: WriteFence,
+) -> Result<MultiWatcherOutput, String> {
+    let repo_root = repo_root
+        .canonicalize()
+        .map_err(|e| format!("canonicalize repo root: {e}"))?;
+
+    // Build the initial pipeline tree index synchronously.
+    let initial_tree = build_tree_index(&repo_root);
+
+    // Build the initial resources list (Pitfall 7: missing dirs yield []).
+    let mut initial_resources: Vec<Resource> = Vec::new();
+    for ex in &extra_roots {
+        if ex.root.exists() {
+            match scan_scope(&ex.root, ex.kind.into()) {
+                Ok(rs) => initial_resources.extend(rs),
+                Err(e) => tracing::warn!(root = %ex.root.display(), error = %e, "scan_scope failed"),
+            }
+        }
+    }
+
+    // sync<->async bridge (Pitfall 2).
+    let (sync_tx, sync_rx) = std::sync::mpsc::channel::<DebounceEventResult>();
+
+    let tick_rate = Duration::from_millis(DEBOUNCE_TICK_MS);
+    let mut debouncer = new_debouncer(
+        Duration::from_millis(DEBOUNCE_TICK_MS),
+        Some(tick_rate),
+        move |res: DebounceEventResult| {
+            let _ = sync_tx.send(res);
+        },
+    )
+    .map_err(|e| format!("new_debouncer: {e}"))?;
+
+    // Watch the pipeline repo root recursively.
+    debouncer
+        .watch(&repo_root, RecursiveMode::Recursive)
+        .map_err(|e| format!("watch: {e}"))?;
+
+    // Watch each extra root's allowlisted subdirs + file-level entries.
+    // Pitfall 1: we intentionally do NOT call `.watch(&root, Recursive)` on
+    // the scope root — that would include `cache/`, `session-env/`, etc.
+    for ex in &extra_roots {
+        if !ex.root.exists() {
+            tracing::info!(root = %ex.root.display(), "extra root missing, skipping");
+            continue;
+        }
+        for name in EXTRA_ROOT_ALLOWLIST_SUBDIRS {
+            let p = ex.root.join(name);
+            if p.exists() {
+                if let Err(e) = debouncer.watch(&p, RecursiveMode::Recursive) {
+                    tracing::warn!(root = %p.display(), error = %e, "extra subdir watch failed");
+                }
+            }
+        }
+        // File-level: settings.json and CLAUDE.md at the scope root.
+        for file_name in ["settings.json", "CLAUDE.md"] {
+            let p = ex.root.join(file_name);
+            if p.exists() {
+                if let Err(e) = debouncer.watch(&p, RecursiveMode::NonRecursive) {
+                    tracing::warn!(path = %p.display(), error = %e, "scope-root file watch failed");
+                }
+            }
+        }
+        // Project scope: watch <project_root>/CLAUDE.md (one level above).
+        if matches!(ex.kind, ScopeKind::Project) {
+            if let Some(pr) = &ex.project_root {
+                let p = pr.join("CLAUDE.md");
+                if p.exists() {
+                    if let Err(e) = debouncer.watch(&p, RecursiveMode::NonRecursive) {
+                        tracing::warn!(path = %p.display(), error = %e, "project CLAUDE.md watch failed");
+                    }
+                }
+            }
+        }
+    }
+
+    // Project-root paths used by the fan-out for `parse_claude_md` editable flag.
+    let project_root_for_editable: Option<PathBuf> = extra_roots
+        .iter()
+        .find(|e| matches!(e.kind, ScopeKind::Project))
+        .and_then(|e| e.project_root.clone());
+
+    // Build the immutable (PathBuf, ScopeKind) tuple list needed by classify_event.
+    let extra_roots_tuples: Vec<(PathBuf, ScopeKind)> = extra_roots
+        .iter()
+        .map(|e| (e.root.clone(), e.kind))
+        .collect();
+
+    let pipeline_batch_id = Arc::new(AtomicU64::new(0));
+    let resources_batch_id = Arc::new(AtomicU64::new(0));
+    let pipeline_dropped = Arc::new(AtomicU32::new(0));
+    let resources_dropped = Arc::new(AtomicU32::new(0));
+
+    let pipeline_batch_id_c = pipeline_batch_id.clone();
+    let resources_batch_id_c = resources_batch_id.clone();
+    let pipeline_dropped_c = pipeline_dropped.clone();
+    let resources_dropped_c = resources_dropped.clone();
+    let repo_root_c = repo_root.clone();
+    let fence_c = fence.clone();
+
+    let task = tokio::task::spawn_blocking(move || {
+        while let Ok(res) = sync_rx.recv() {
+            let (mut pipe_batch, mut res_batch) = process_debounce_result_multi(
+                res,
+                &repo_root_c,
+                &extra_roots_tuples,
+                &extra_roots,
+                project_root_for_editable.as_deref(),
+                &fence_c,
+                &pipeline_batch_id_c,
+                &resources_batch_id_c,
+            );
+
+            if !pipe_batch.events.is_empty() {
+                pipe_batch.dropped_batches =
+                    pipeline_dropped_c.swap(0, Ordering::Relaxed);
+                match pipeline_tx.try_send(pipe_batch) {
+                    Ok(()) => {}
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        pipeline_dropped_c.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
+                }
+            }
+            if !res_batch.events.is_empty() {
+                res_batch.dropped_batches =
+                    resources_dropped_c.swap(0, Ordering::Relaxed);
+                match resources_tx.try_send(res_batch) {
+                    Ok(()) => {}
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        resources_dropped_c.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                        // Resources receiver closed — keep pipeline going.
+                    }
+                }
+            }
+            // GC the fence periodically.
+            fence_c.gc();
+        }
+    });
+
+    Ok(MultiWatcherOutput {
+        handle: WatcherHandle {
+            _debouncer: debouncer,
+            _task: task,
+        },
+        initial_tree,
+        initial_resources,
+    })
+}
+
+/// Fan-out aware version of `process_debounce_result`. Routes each event
+/// via `classify_event` and builds two batches — one pipeline, one resources.
+#[allow(clippy::too_many_arguments)]
+fn process_debounce_result_multi(
+    res: DebounceEventResult,
+    repo_root: &Path,
+    extra_roots_tuples: &[(PathBuf, ScopeKind)],
+    extra_roots: &[ExtraRoot],
+    project_root_for_editable: Option<&Path>,
+    fence: &WriteFence,
+    pipeline_counter: &AtomicU64,
+    resources_counter: &AtomicU64,
+) -> (FileEventBatch, ResourceEventBatch) {
+    let pipeline_batch_id = pipeline_counter.fetch_add(1, Ordering::Relaxed);
+    let resources_batch_id = resources_counter.fetch_add(1, Ordering::Relaxed);
+
+    let mut pipeline_events: Vec<FileEvent> = Vec::new();
+    let mut resource_events: Vec<ResourceEvent> = Vec::new();
+
+    let debounced_events = match res {
+        Ok(ev) => ev,
+        Err(errors) => {
+            tracing::warn!(?errors, "debouncer errors");
+            return (
+                FileEventBatch {
+                    events: pipeline_events,
+                    batch_id: pipeline_batch_id,
+                    dropped_batches: 0,
+                },
+                ResourceEventBatch {
+                    events: resource_events,
+                    batch_id: resources_batch_id,
+                    dropped_batches: 0,
+                },
+            );
+        }
+    };
+
+    for debounced in debounced_events {
+        let ev = &debounced.event;
+        let kind = match map_event_kind(&ev.kind, &ev.paths) {
+            Some(k) => k,
+            None => continue,
+        };
+        let path = match &kind {
+            FileEventKind::Rename { to, .. } => to.clone(),
+            _ => match ev.paths.first() {
+                Some(p) => p.clone(),
+                None => continue,
+            },
+        };
+
+        match classify_event(&path, repo_root, extra_roots_tuples) {
+            None => continue,
+            Some(RoutedPath::Pipeline) => {
+                // Same filters as process_debounce_result.
+                if !path_is_under_root(&path, repo_root) {
+                    continue;
+                }
+                if path_contains_excluded_component(&path) {
+                    continue;
+                }
+                pipeline_events.push(FileEvent::new(
+                    path,
+                    kind,
+                    Attribution::Unattributed,
+                ));
+            }
+            Some(RoutedPath::Resource(scope)) => {
+                // Self-write suppression (Pitfall 3).
+                if fence.was_ours(&path) {
+                    continue;
+                }
+                // Find the matching ExtraRoot so we know which scope_root to
+                // pass to category_for_path.
+                let matched = extra_roots.iter().find(|e| {
+                    path.starts_with(&e.root) && <ScopeKind as Into<Scope>>::into(e.kind) == scope
+                });
+                let scope_root = match matched {
+                    Some(m) => m.root.as_path(),
+                    None => continue,
+                };
+
+                if matches!(kind, FileEventKind::Remove) {
+                    // For removes we can't re-parse, so emit by path with a
+                    // best-effort reconstructed ResourceId if classifiable.
+                    if category_for_path(&path, scope_root).is_some() {
+                        // We don't have enough info to reconstruct the name
+                        // reliably (e.g. SKILL frontmatter name overrides the
+                        // directory name). Emit ExternalEdit instead — the
+                        // store layer in Plan 04 will reconcile via the next
+                        // initial scan. This is a conservative choice that
+                        // preserves the Remove signal without fabricating
+                        // stale IDs.
+                        resource_events.push(ResourceEvent::ExternalEdit {
+                            path: path.clone(),
+                            mtime_ms: 0,
+                        });
+                    }
+                    continue;
+                }
+
+                // Create/Modify/Rename: re-parse.
+                let Some(cat) = category_for_path(&path, scope_root) else {
+                    continue;
+                };
+                let parsed: Vec<Resource> = match cat {
+                    ResourceCategory::Skill => match parse_skill(&path, scope) {
+                        Ok(r) => vec![r],
+                        Err(e) => {
+                            tracing::warn!(path = %path.display(), error = %e, "parse_skill failed");
+                            continue;
+                        }
+                    },
+                    ResourceCategory::Agent => match parse_agent(&path, scope) {
+                        Ok(r) => vec![r],
+                        Err(e) => {
+                            tracing::warn!(path = %path.display(), error = %e, "parse_agent failed");
+                            continue;
+                        }
+                    },
+                    ResourceCategory::Command => match parse_command(&path, scope) {
+                        Ok(r) => vec![r],
+                        Err(e) => {
+                            tracing::warn!(path = %path.display(), error = %e, "parse_command failed");
+                            continue;
+                        }
+                    },
+                    ResourceCategory::Plugin => match parse_installed_plugins(&path, scope) {
+                        Ok(rs) => rs,
+                        Err(e) => {
+                            tracing::warn!(path = %path.display(), error = %e, "parse_installed_plugins failed");
+                            continue;
+                        }
+                    },
+                    ResourceCategory::Hook => vec![parse_hook_metadata(&path, scope)],
+                    ResourceCategory::Settings | ResourceCategory::Mcp => {
+                        match parse_settings(&path, scope) {
+                            Ok(rs) => rs,
+                            Err(e) => {
+                                tracing::warn!(path = %path.display(), error = %e, "parse_settings failed");
+                                continue;
+                            }
+                        }
+                    }
+                    ResourceCategory::ClaudeMd => {
+                        // Editable flag: project-scoped CLAUDE.md files are
+                        // editable, everything else is read-only.
+                        let editable = matches!(scope, Scope::Project)
+                            && project_root_for_editable
+                                .map(|pr| {
+                                    path == pr.join("CLAUDE.md")
+                                        || path == pr.join(".claude").join("CLAUDE.md")
+                                })
+                                .unwrap_or(false);
+                        match parse_claude_md(&path, scope, editable) {
+                            Ok(r) => vec![r],
+                            Err(e) => {
+                                tracing::warn!(path = %path.display(), error = %e, "parse_claude_md failed");
+                                continue;
+                            }
+                        }
+                    }
+                };
+
+                let is_create = matches!(kind, FileEventKind::Create);
+                for r in parsed {
+                    if is_create {
+                        resource_events.push(ResourceEvent::Added { resource: r });
+                    } else {
+                        resource_events.push(ResourceEvent::Changed { resource: r });
+                    }
+                }
+            }
+        }
+    }
+
+    (
+        FileEventBatch {
+            events: pipeline_events,
+            batch_id: pipeline_batch_id,
+            dropped_batches: 0,
+        },
+        ResourceEventBatch {
+            events: resource_events,
+            batch_id: resources_batch_id,
+            dropped_batches: 0,
+        },
+    )
 }
 
 fn process_debounce_result(
@@ -443,6 +848,373 @@ mod tests {
             3,
             "initial tree: {:?}",
             tree.keys().collect::<Vec<_>>()
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Plan 09-03: spawn_watcher_multi + D-06 fan-out invariant tests.
+    // -----------------------------------------------------------------
+
+    use crate::claude_resources::events::{Category as RCat, ResourceEventBatch};
+
+    fn make_scope_root(base: &Path) -> PathBuf {
+        let root = base.join(".claude");
+        fs::create_dir_all(root.join("skills")).unwrap();
+        fs::create_dir_all(root.join("agents")).unwrap();
+        root
+    }
+
+    fn write_skill(scope_root: &Path, name: &str, description: &str) -> PathBuf {
+        let dir = scope_root.join("skills").join(name);
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("SKILL.md");
+        fs::write(
+            &p,
+            format!("---\nname: {name}\ndescription: {description}\n---\nbody\n"),
+        )
+        .unwrap();
+        p
+    }
+
+    async fn collect_resources(
+        rx: &mut tokio::sync::mpsc::Receiver<ResourceEventBatch>,
+        window: Duration,
+    ) -> Vec<ResourceEventBatch> {
+        let deadline = std::time::Instant::now() + window;
+        let mut out = Vec::new();
+        while std::time::Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match tokio::time::timeout(remaining, rx.recv()).await {
+                Ok(Some(b)) => out.push(b),
+                Ok(None) | Err(_) => break,
+            }
+        }
+        out
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn spawn_watcher_with_extra_roots_covers_allowlisted_subdirs() {
+        let repo = make_temp_repo();
+        let global_base = tempfile::tempdir().unwrap();
+        let global_scope = make_scope_root(global_base.path());
+        write_skill(&global_scope, "my-skill", "a test skill");
+
+        let (pipe_tx, _pipe_rx) = tokio::sync::mpsc::channel::<FileEventBatch>(16);
+        let (res_tx, _res_rx) = tokio::sync::mpsc::channel::<ResourceEventBatch>(16);
+        let extras = vec![ExtraRoot {
+            root: global_scope.clone().canonicalize().unwrap(),
+            kind: ScopeKind::Global,
+            project_root: None,
+        }];
+        let out = spawn_watcher_multi(
+            repo.path(),
+            extras,
+            pipe_tx,
+            res_tx,
+            WriteFence::new(),
+        )
+        .expect("spawn_watcher_multi");
+
+        assert!(
+            out.initial_resources
+                .iter()
+                .any(|r| r.category == RCat::Skill && r.name == "my-skill"),
+            "expected initial my-skill resource; got {:?}",
+            out.initial_resources.iter().map(|r| &r.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn spawn_watcher_no_extra_roots_yields_empty_resources() {
+        let repo = make_temp_repo();
+        let (pipe_tx, _pipe_rx) = tokio::sync::mpsc::channel::<FileEventBatch>(16);
+        let (res_tx, _res_rx) = tokio::sync::mpsc::channel::<ResourceEventBatch>(16);
+        let out = spawn_watcher_multi(
+            repo.path(),
+            vec![],
+            pipe_tx,
+            res_tx,
+            WriteFence::new(),
+        )
+        .expect("spawn_watcher_multi");
+        assert!(out.initial_resources.is_empty());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn fanout_routes_pipeline_event_to_pipeline_only() {
+        let repo = make_temp_repo();
+        let global_base = tempfile::tempdir().unwrap();
+        let global_scope = make_scope_root(global_base.path());
+
+        let (pipe_tx, mut pipe_rx) = tokio::sync::mpsc::channel::<FileEventBatch>(16);
+        let (res_tx, mut res_rx) = tokio::sync::mpsc::channel::<ResourceEventBatch>(16);
+        let extras = vec![ExtraRoot {
+            root: global_scope.canonicalize().unwrap(),
+            kind: ScopeKind::Global,
+            project_root: None,
+        }];
+        let _out = spawn_watcher_multi(
+            repo.path(),
+            extras,
+            pipe_tx,
+            res_tx,
+            WriteFence::new(),
+        )
+        .expect("spawn_watcher_multi");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        write_file(repo.path(), "src/foo.rs", "fn foo() {}");
+
+        let pipe_batch = wait_for_batch(&mut pipe_rx, Duration::from_millis(1500))
+            .await
+            .expect("pipeline batch within 1.5s");
+        assert!(
+            pipe_batch.events.iter().any(|e| e.path.ends_with("foo.rs")),
+            "expected foo.rs in pipeline batch: {:?}",
+            pipe_batch.events
+        );
+
+        // Resources channel must NOT receive anything for the repo event.
+        let res_batches = collect_resources(&mut res_rx, Duration::from_millis(500)).await;
+        let leaked: Vec<_> = res_batches
+            .iter()
+            .flat_map(|b| b.events.iter())
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "fan-out invariant violated: repo event leaked to resources: {leaked:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn fanout_routes_claude_event_to_resources_only() {
+        let repo = make_temp_repo();
+        let global_base = tempfile::tempdir().unwrap();
+        let global_scope = make_scope_root(global_base.path());
+
+        let (pipe_tx, mut pipe_rx) = tokio::sync::mpsc::channel::<FileEventBatch>(16);
+        let (res_tx, mut res_rx) = tokio::sync::mpsc::channel::<ResourceEventBatch>(16);
+        let canonical_global = global_scope.canonicalize().unwrap();
+        let extras = vec![ExtraRoot {
+            root: canonical_global.clone(),
+            kind: ScopeKind::Global,
+            project_root: None,
+        }];
+        let _out = spawn_watcher_multi(
+            repo.path(),
+            extras,
+            pipe_tx,
+            res_tx,
+            WriteFence::new(),
+        )
+        .expect("spawn_watcher_multi");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // Use a pre-existing skill dir to avoid notify's "new subdir not yet
+        // watched" race on Linux. Create the dir first, wait for notify to
+        // register it, then write the SKILL.md.
+        let skill_dir = canonical_global.join("skills").join("fresh-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: fresh-skill\ndescription: new skill\n---\nbody\n",
+        )
+        .unwrap();
+
+        let res_batches = collect_resources(&mut res_rx, Duration::from_millis(2000)).await;
+        let saw_skill = res_batches.iter().flat_map(|b| b.events.iter()).any(|e| {
+            matches!(
+                e,
+                ResourceEvent::Added { resource } | ResourceEvent::Changed { resource }
+                    if resource.name == "fresh-skill"
+            )
+        });
+        assert!(
+            saw_skill,
+            "expected fresh-skill in resources batches: {res_batches:?}"
+        );
+
+        // Pipeline channel must NOT have received anything for the claude event.
+        let leaked_pipe: Vec<_> = (|| {
+            let mut collected = Vec::new();
+            loop {
+                match pipe_rx.try_recv() {
+                    Ok(b) => collected.extend(b.events),
+                    Err(_) => break,
+                }
+            }
+            collected
+        })();
+        assert!(
+            leaked_pipe.is_empty(),
+            "fan-out invariant violated: claude event leaked to pipeline: {leaked_pipe:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn write_fence_suppresses_self_emitted_changed() {
+        let repo = make_temp_repo();
+        let global_base = tempfile::tempdir().unwrap();
+        let global_scope = make_scope_root(global_base.path());
+        let canonical_global = global_scope.canonicalize().unwrap();
+        // Pre-create a CLAUDE.md in the scope root.
+        let claude_md = canonical_global.join("CLAUDE.md");
+        fs::write(&claude_md, "initial").unwrap();
+
+        let (pipe_tx, _pipe_rx) = tokio::sync::mpsc::channel::<FileEventBatch>(16);
+        let (res_tx, mut res_rx) = tokio::sync::mpsc::channel::<ResourceEventBatch>(16);
+        let fence = WriteFence::with_ttl(Duration::from_millis(400));
+        let extras = vec![ExtraRoot {
+            root: canonical_global.clone(),
+            kind: ScopeKind::Global,
+            project_root: None,
+        }];
+        let _out = spawn_watcher_multi(
+            repo.path(),
+            extras,
+            pipe_tx,
+            res_tx,
+            fence.clone(),
+        )
+        .expect("spawn_watcher_multi");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // Mark as ours, then touch.
+        fence.record(claude_md.clone());
+        fs::write(&claude_md, "written-by-us").unwrap();
+
+        let within_ttl = collect_resources(&mut res_rx, Duration::from_millis(500)).await;
+        let saw_change = within_ttl
+            .iter()
+            .flat_map(|b| b.events.iter())
+            .any(|e| matches!(e, ResourceEvent::Changed { resource } if resource.path == claude_md));
+        assert!(
+            !saw_change,
+            "fence should have suppressed the self-write: {within_ttl:?}"
+        );
+
+        // After TTL elapses, a new external-looking write should surface.
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        fs::write(&claude_md, "external-write").unwrap();
+        let after_ttl = collect_resources(&mut res_rx, Duration::from_millis(1500)).await;
+        let saw_change2 = after_ttl
+            .iter()
+            .flat_map(|b| b.events.iter())
+            .any(|e| matches!(e, ResourceEvent::Changed { resource } if resource.path == claude_md));
+        assert!(
+            saw_change2,
+            "post-TTL write should emit Changed: {after_ttl:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn missing_project_extra_root_is_ok() {
+        let repo = make_temp_repo();
+        let global_base = tempfile::tempdir().unwrap();
+        let global_scope = make_scope_root(global_base.path());
+        write_skill(&global_scope, "present", "x");
+        let canonical_global = global_scope.canonicalize().unwrap();
+
+        // Point Project extra root at a non-existent path.
+        let missing_project = repo.path().join("nope-does-not-exist");
+        let (pipe_tx, _pipe_rx) = tokio::sync::mpsc::channel::<FileEventBatch>(16);
+        let (res_tx, _res_rx) = tokio::sync::mpsc::channel::<ResourceEventBatch>(16);
+        let extras = vec![
+            ExtraRoot {
+                root: canonical_global,
+                kind: ScopeKind::Global,
+                project_root: None,
+            },
+            ExtraRoot {
+                root: missing_project.clone(),
+                kind: ScopeKind::Project,
+                project_root: Some(repo.path().to_path_buf()),
+            },
+        ];
+        let out = spawn_watcher_multi(
+            repo.path(),
+            extras,
+            pipe_tx,
+            res_tx,
+            WriteFence::new(),
+        )
+        .expect("missing project root must not fail");
+        // Global scope still contributed.
+        assert!(out.initial_resources.iter().any(|r| r.name == "present"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn allowlist_excludes_cache_session_env_etc() {
+        let repo = make_temp_repo();
+        let global_base = tempfile::tempdir().unwrap();
+        let global_scope = make_scope_root(global_base.path());
+        let canonical_global = global_scope.canonicalize().unwrap();
+        // Create a cache/ dir with a file — it must NOT be watched.
+        let cache_dir = canonical_global.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        fs::write(cache_dir.join("something.json"), "initial").unwrap();
+
+        let (pipe_tx, _pipe_rx) = tokio::sync::mpsc::channel::<FileEventBatch>(16);
+        let (res_tx, mut res_rx) = tokio::sync::mpsc::channel::<ResourceEventBatch>(16);
+        let extras = vec![ExtraRoot {
+            root: canonical_global.clone(),
+            kind: ScopeKind::Global,
+            project_root: None,
+        }];
+        let _out = spawn_watcher_multi(
+            repo.path(),
+            extras,
+            pipe_tx,
+            res_tx,
+            WriteFence::new(),
+        )
+        .expect("spawn_watcher_multi");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // Write inside cache/ → no resources event should fire.
+        fs::write(cache_dir.join("something.json"), "updated").unwrap();
+        let batches_cache = collect_resources(&mut res_rx, Duration::from_millis(500)).await;
+        let leaked_cache: Vec<_> = batches_cache
+            .iter()
+            .flat_map(|b| b.events.iter())
+            .collect();
+        assert!(
+            leaked_cache.is_empty(),
+            "cache/ write should not produce events: {leaked_cache:?}"
+        );
+
+        // Write a new skill → SHOULD produce an event. Create dir first, give
+        // notify time to register it on Linux, then write the SKILL.md.
+        let skill_dir = canonical_global.join("skills").join("after-cache");
+        fs::create_dir_all(&skill_dir).unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: after-cache\ndescription: x\n---\nbody\n",
+        )
+        .unwrap();
+        let batches_skill = collect_resources(&mut res_rx, Duration::from_millis(2000)).await;
+        let saw_skill = batches_skill.iter().flat_map(|b| b.events.iter()).any(|e| {
+            matches!(
+                e,
+                ResourceEvent::Added { resource } | ResourceEvent::Changed { resource }
+                    if resource.name == "after-cache"
+            )
+        });
+        assert!(
+            saw_skill,
+            "skills/ write must still emit: {batches_skill:?}"
         );
     }
 

@@ -122,12 +122,24 @@ pub async fn check_protected_paths(
             "protected path write detected, creating synthetic approval request"
         );
 
+        // write_access rows never carry Claude PreToolUse fields (those are
+        // reserved for pretool_use rows created by the /hook handler). Phase
+        // 17 D-21: protected_path gates carry `gate_reason="protected_path"`
+        // with `conflict_with_agent_id=None`; the file-watcher-triggered
+        // write_access path is a post-write detection with no conflict
+        // peer, so BOTH new fields are `None` here (legacy write_access
+        // semantics preserved).
         if let Err(e) = create_approval_request_internal(
             &agent_id,
             "write_access",
             Some(&file_path_str),
             None,
             "medium",
+            None,
+            None,
+            None,
+            None,
+            None,
             pool,
             app_handle,
         )

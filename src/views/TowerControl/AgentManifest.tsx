@@ -1,9 +1,13 @@
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { useAgentStore } from '../../stores/agentStore';
+import { useScopedAgents } from '../../hooks/useScopedAgents';
 import { AgentRow } from './AgentRow';
 
 export function AgentManifest() {
-  const agents = useAgentStore((s) => s.agents);
+  // Scoped to the currently-watched repo -- agents running elsewhere are
+  // still tracked by the registry but listing them here just confuses the
+  // user, who expects "agents in this airspace".
+  const agents = useScopedAgents();
   const isLoading = useAgentStore((s) => s.isLoading);
 
   if (agents.length === 0 && !isLoading) {
@@ -15,7 +19,7 @@ export function AgentManifest() {
         <h3 className="mt-4 font-headline text-sm font-bold uppercase tracking-widest text-on-surface-variant">
           TOWER_OFFLINE
         </h3>
-        <p className="mt-2 font-mono text-xs text-on-surface-variant/60 max-w-md text-center">
+        <p className="mt-2 font-mono text-xs text-on-surface-variant/60 max-w-xs text-center text-balance">
           No agents detected. Deploy or attach agents to populate the manifest.
         </p>
       </div>

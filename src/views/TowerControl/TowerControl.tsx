@@ -3,6 +3,7 @@ import { Rocket } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { useAgentStore } from '../../stores/agentStore';
 import { useConflictStore } from '../../stores/conflictStore';
+import { useScopedAgents } from '../../hooks/useScopedAgents';
 import { AgentManifest } from './AgentManifest';
 import { DeployDialog } from './DeployDialog';
 import { ConflictBanner } from './ConflictBanner';
@@ -11,7 +12,7 @@ import { SystemLogs } from './SystemLogs';
 
 export function TowerControl() {
   const [deployOpen, setDeployOpen] = useState(false);
-  const agents = useAgentStore((s) => s.agents);
+  const agents = useScopedAgents();
   const fetchAgents = useAgentStore((s) => s.fetchAgents);
   const startPolling = useAgentStore((s) => s.startPolling);
   const activeConflicts = useConflictStore((s) => s.activeCount());

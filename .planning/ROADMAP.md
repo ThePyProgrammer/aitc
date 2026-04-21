@@ -140,3 +140,214 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 4. Core UI Views | 0/5 | Planning complete | - |
 | 5. Conflict Resolution + History | 0/5 | Planning complete | - |
 | 6. Pipeline Activation + Integration Wiring | 0/5 | Planning complete | - |
+
+### Phase 7: Replace current blocked Codebase Map with a graph based codebase map with better spacing, properly sized nodes and traversal through the graph for agents (with ephemereally highlighted movement between nodes for me to track the agent's trail). The links between code should be stuff like imports/dependencies for now, and the files should have an additional gravitational force based on their proximity in the filesystem.
+
+**Goal:** Replace the squarified-treemap radar with a force-directed graph: nodes are source files, edges are import/dependency relationships extracted via tree-sitter, filesystem proximity acts as gravity (folder islands), and agents leave 10s fading comet trails travelling along edges in their assigned palette colour. Heat map, minimap, agent manifest, and conflict pulse are preserved on the new graph layout. Treemap is fully removed.
+**Requirements**: VIZN-01 (rewrite), VIZN-02 (rewrite), VIZN-04 (rewrite), VIZN-05 (rewrite), FMON-05 (preserve), EMON-01 (pulled forward from v2)
+**Depends on:** Phase 6
+**Plans:** 6 plans
+
+Plans:
+- [ ] 07-01-PLAN.md -- Wave 0: install Rust + JS deps, scaffold deps/ module + fixtures, get_dependency_graph stub command, regenerate bindings, extend radarStore shape, create 7 Wave 0 test files (EMON-01)
+- [ ] 07-02-PLAN.md -- Rust dep extraction: tree-sitter parsers per language, per-language resolution (TS/JS/Rust/Python), rayon parallel orchestrator with edge caps, T-07-A/B/C mitigations, 10k-file <2s benchmark (EMON-01, VIZN-04)
+- [ ] 07-03-PLAN.md -- forceCluster custom d3 force + useGraphLayout settle-then-freeze hook + radarStore refactor (fetchGraph, pin/unpin, commitSettledPositions; treeData removed) (VIZN-01, VIZN-05)
+- [ ] 07-04-PLAN.md -- GraphRenderer pure functions (hulls, edges, arrows, nodes with heat tint) + RadarCanvas rewrite + delete useTreemapLayout + uninstall squarify + performance banners (VIZN-01, VIZN-04, VIZN-05)
+- [ ] 07-05-PLAN.md -- CometTrail lifecycle (interpolate/sample/cull) + agent dot pulse + drag-to-pin + pipeline event subscription wiring (VIZN-02)
+- [ ] 07-06-PLAN.md -- HeatMapOverlay refactor to node tint + RadarMinimap rewrite for graph extents (preserves e62272d shift) + conflict pulse on graph nodes + visual verification checkpoint (FMON-05, VIZN-04)
+
+### Phase 8: Real Claude Code hook integration (PreToolUse approvals)
+
+**Goal:** Every Claude Code permission prompt surfaces in the AITC Requests page and the agent blocks on the user's approve/deny until resolved. Replaces the current `--accept-edits` / `--dangerously-skip-permissions` chip workaround so users can run Claude Code safely without pre-authorising every tool.
+
+**Scope:**
+- New `/hook` endpoint on the self-register HTTP server that accepts PreToolUse events.
+- Protocol: agent posts tool call context (tool name, inputs, file path, diff preview), AITC responds with `{decision: approve|deny, reason?}` after the user resolves the approval row.
+- Ship a Claude Code hook config (e.g. `.claude/hooks/aitc-pretooluse.sh` or JSON settings) that launched agents install into their cwd and that posts PreToolUse events to AITC's `/hook`.
+- Block Claude's tool call by holding the HTTP response until the user clicks approve/deny in the Requests page.
+- DB migration: extend `approval_requests` with `tool_name`, `tool_input_json`, and a new `request_type = "pretool_use"`. Existing `write_access` rows stay unchanged.
+- Frontend: per-tool context on ApprovalRequestCard (tool name badge, collapsible tool input preview). Deep-link the OS notification to the specific request.
+- Timeout + failure handling: if AITC is unreachable or the user doesn't respond within N seconds, the hook falls back to a deny (fail safe).
+
+**Out of scope:** PostToolUse hooks, Codex/OpenCode adapters (no hook surface yet), multi-user auth on the `/hook` endpoint.
+
+**Requirements:** Carries forward the Phase 4 comms hub request flow; no new milestone requirements.
+**Depends on:** Phase 7. (Also builds on the existing Phase 3 self-register server and Phase 4 approval UI.)
+**Plans:** 6/6 plans complete
+
+Plans:
+- [x] 08-01-PLAN.md -- Wave 0: workspace + sidecar crate scaffold, DB migration 005, hook_waiters/hook_install/port_file module stubs, bundle+capability config, frontend ToolPreview registry stub, test fixtures (foundation)
+- [x] 08-02-PLAN.md -- Wave 1 backend: /hook axum route with long-held response + AbandonGuard, WaiterRegistry impl, port_file writer, Tauri approve/deny/approve_with_edits signal waiters + terminate force-deny, e2e smokes (COMM-01/02/06, AGNT-03)
+- [x] 08-03-PLAN.md -- Wave 1 sidecar: aitc-hook binary parses Claude PreToolUse stdin, POSTs /hook, emits modern hookSpecificOutput envelope, fail-safe deny on every error path (COMM-02, COMM-06)
+- [x] 08-04-PLAN.md -- Wave 2 install: settings.local.json merge-safe writer, claude_code::launch chip-bypass wiring, passive consent event+commands, startup auto-heal, tauri-plugin-shell registration (AGNT-03, COMM-05)
+- [x] 08-05-PLAN.md -- Wave 2 frontend: ToolBadge, per-tool ToolPreview renderers (Edit/Write/Bash/Notebook/ProtectedPath/Unknown), DontAskAgainCheckbox, PassiveHookConsentDialog, deepLinkNotification, RequestQueue abandoned-row treatment (COMM-01/02/03/05/06)
+- [x] 08-06-PLAN.md -- Wave 3 e2e: cross-crate integration test driving real aitc-hook binary against real /hook endpoint (allow/allow_with_edits/deny/abandon); manual UAT + visual verification checkpoint against 08-UI-SPEC
+
+### Phase 9: Implement a plugin / skill / tool / hook manager page that scans both ~/.claude/ and cwd/.claude/ via the watcher, this should be for me to track what things claude has access to at any one point and also edit the CLAUDE.md files in cwd/CLAUDE.md and cwd/.claude/CLAUDE.md if need be
+
+**Goal:** Ship the ARSENAL page — a master/detail view under /arsenal that surfaces Skills, Agents, Plugins, and Configuration (Hooks+Commands+Settings+MCP) from both ~/.claude/ (global) and <cwd>/.claude/ (project) via a multi-root extension of the pipeline watcher, and provides an inline textarea editor for <cwd>/CLAUDE.md and <cwd>/.claude/CLAUDE.md with atomic writes + 10-second undo toast + non-blocking external-change banner. Backend parses all formats in Rust (gray_matter + serde_json), frontend mirrors the Phase 2 Channel<T>+Zustand trio. Establishes MasterDetailShell as a reusable layout primitive.
+**Requirements**: (none — phase added mid-milestone; behavioral spec lives in D-01..D-15 of 09-CONTEXT.md)
+**Depends on:** Phase 8
+**Plans:** 5/5 plans executed (UAT skipped at user request)
+
+Plans:
+- [x] 09-01-PLAN.md -- Wave 0: backend deps (gray_matter, runtime tempfile, dirs), claude_resources module skeleton, ResourceEvent/Resource/Category/Scope types registered via tauri-specta, fixture tree, frontend Arsenal placeholders
+- [x] 09-02-PLAN.md -- Wave 1: parse.rs (all resource categories + MCP secret masking), scan.rs (allowlist + exclude cache/session-env/projects/backups/downloads), routing.rs (classify + category_for_path), write_fence.rs (TTL suppression)
+- [x] 09-03-PLAN.md -- Wave 2: claude_md.rs (atomic_write + editable whitelist), watcher_routing.rs (two-Debouncer architecture — persistent global + ephemeral project), commands.rs (start/stop/readClaudeMd/writeClaudeMd with D-13 write gate), state management, bindings regen
+- [x] 09-04-PLAN.md -- Wave 2: frontend foundations — claudeResourcesStore (with D-03 shadow suppression in selectCombined), useClaudeResourcesChannel hook, MasterDetailShell primitive, ScopeChip/UndoToast/ExternalChangeBanner components
+- [x] 09-05-PLAN.md -- Wave 3: ArsenalView assembly — Sidebar ARSENAL entry (Lucide Package, after TOWER), /arsenal route, ScopeTabs/CategoryRail/ResourceList/ResourceRow/DetailPanel/FrontmatterTable/ContentPreview/ClaudeMdEditor, save+undo+external-change wiring (human-verify checkpoint skipped per user)
+
+### Phase 10: Implement a proper chat user interface for agents I deploy, since I can't do this right now at all. instead, I have to inspect the system logs or some shit which isn't good UI design.
+
+**Goal:** Ship a first-class CHAT tab inside Communications Hub driven by a long-lived `claude --input-format stream-json` subprocess per chattable agent, a new `agent_events` transcript table, an MCP server hosted on the existing self-register axum port (get_pending_user_messages + request_user_input tools), FIFO stdin outbound with delivery-status lifecycle, auto-resume fallback via `claude --resume --print`, read-only stdout/stderr capture for Codex/OpenCode/Generic, and full deletion of the Phase 4 embedded chat surface (ChatThread, ChatInput, MiniChatCard). Tab state URL-synced; unread badges on Sidebar + CHAT tab + per-agent rows; OS notifications only on @user / awaiting-user signals.
+**Requirements**: No new REQ-IDs; scope driven by CONTEXT.md decisions D-01..D-24. COMM-04 (freeform text messages to agents) carries forward from Phase 4 and is addressed implicitly by the new surface.
+**Depends on:** Phase 9
+**Plans:** 6/6 plans complete
+
+Plans:
+- [x] 10-01-PLAN.md — Wave 0: DB migration 006 (agent_events + one-shot chat_messages migration), backend scaffolds (chat_runtime/, mcp/, db/events.rs), 7 stream-json fixtures, DeliveryStatus `consumed` variant, MasterDetailShell width props, frontend component + store stubs
+- [x] 10-02-PLAN.md — Wave 1 chat_runtime core: session_registry, db/events CRUD, stream-json parser (with @250ms idle flush), FIFO outbound writer, launcher live-session, supervisor, auto_resume, Tauri commands (send/list/clear/markRead/relaunch)
+- [x] 10-03-PLAN.md — Wave 1 MCP server: Streamable HTTP POST/GET/DELETE /mcp on self_register host, two-tool surface (get_pending_user_messages + request_user_input), per-session .claude/aitc-mcp-{id}.json atomic writer
+- [x] 10-04-PLAN.md — Wave 2 integration: AgentAdapter::capabilities trait + ClaudeCodeAdapter long-lived rewrite (MCP config + stream-json), dispatch_chat_notification body + @user regex in parser, codex/opencode raw_stdout capture, Phase 4 send_chat_message/list_chat_messages/update_message_delivery_status DELETED
+- [x] 10-05-PLAN.md — Wave 3 frontend: chatStore (9-listener subscription), useChatChannel, all 9 event cards + dispatcher, ChatInput bound to store, TanStack Virtual AgentChannelList (active/archived), ChatTranscript reverse-scroll with loadOlder + new-messages pill, UnreadBadge, CommsTabBar
+- [x] 10-06-PLAN.md — Wave 4 integration + UAT: CommsView tab routing (URL-synced), ChatView full detail pane with 2-click CLEAR_THREAD, App-root useChatChannel, Sidebar COMMS unread dot, D-21 frontend deletions (ChatThread/ChatInput/MiniChatCard + RequestDetail + TelemetryPanel + commsStore cleanup), human-verify checkpoint against 10-UI-SPEC
+**UI hint**: yes
+
+
+### Phase 11: Move d3-force simulation to a WebWorker with Transferable Float32Arrays for non-blocking layout computation
+
+**Goal:** Relocate the d3-force simulation from the React main thread into a dedicated WebWorker; positions flow back as Transferable Float32Array; zero visual change; success = no main-thread long tasks >50ms during a 5k-node settle. (Completed 2026-04-21.)
+**Requirements**: VIZN-04 (performance — in spirit, no new REQ-IDs)
+**Depends on:** Phase 10
+**Plans:** 4/4 plans complete
+
+Plans:
+- [x] 11-01-PLAN.md -- Wave 0: scaffold src/workers/ module stubs + test files + graphSimConfig extraction
+- [x] 11-02-PLAN.md -- Wave 1: pure graphSimCore + BufferPool (3-cap) + 12 core tests + 5 pool tests green
+- [x] 11-03-PLAN.md -- Wave 2: graphSim.worker.ts postMessage shim (53 LOC) + useGraphLayout Worker-client rewrite + 13 mocked-Worker tests green
+- [x] 11-04-PLAN.md -- Wave 3: RadarCanvas hot path reads Float32Array + benchmark harness (D-31..D-34) + VERIFICATION.md
+
+**Verification status:** Passed (2026-04-21). User-confirmed manual smoke: worker loads cleanly in Tauri prod build, visual invariance preserved, force-config sliders "damn responsive" (live D-31 proxy witness — sim is off main thread). Zoom-scroll lag surfaced during manual smoke; not a Phase 11 regression (hot-path gate short-circuits when sim is settled); carried to Phase 11.1.
+
+### Phase 11.1: Fix zoom-scroll lag in RadarCanvas (INSERTED)
+
+**Goal:** Make wheel-driven zoom in/out on the Radar feel smooth on a settled graph. Surfaced during Phase 11 manual smoke: scrolling the wheel to zoom causes significant UI lag. Not a Phase 11 regression — the hot-path gate short-circuits when `isSimulatingRef.current === false`, so the render loop is byte-identical to Phase 7. Fix is scoped as performance-only; no visual change; no new capability.
+
+**Likely causes (to investigate during plan phase):**
+- (a) Wheel events fire at 120–240Hz on modern trackpads, driving React re-renders faster than rAF can consume → coalesce wheel events through rAF.
+- (b) `drawFolderHulls` recomputes convex hulls per frame even when positions are static → cache hulls keyed on `settledAt` / a positions-generation counter.
+- (c) `storeSetViewport(viewport)` round-trip triggers Zustand subscribers (minimap, force-config panel?) to re-render on every wheel event → audit subscriber list and move to a ref-based publication pattern if the cost shows up.
+
+**Requirements**: No new REQ-IDs (perf refactor of VIZN-04 delivery).
+**Depends on:** Phase 11
+**Plans:** 1/1 plans complete
+
+Plans:
+- [x] 11.1-01-PLAN.md — Wave 1: wheel rAF coalescer + useRafCoalesced hook + defensive viewport writeback throttle + settledAt-keyed hullCache + drawFolderHulls rewrite + radarPerfDebug rolling-p95 diagnostic (D-01..D-19; VIZN-04 perf delivery)
+
+**Verification status:** Code-complete 2026-04-21 (commits `16c663a` / `969db53` / `b367489` / `cb218e2`). Verifier confirmed 19/19 D-XX witnesses pass; 0 new test regressions; workers untouched (`git diff HEAD~5 -- src/workers/` empty). Pending manual wheel-zoom smoke in the Tauri prod build (`localStorage.radarPerfDebug = '1'` to capture numeric evidence).
+
+### Phase 12: Add IPC bridge nodes and cross-language boundary visualization — parse tauri-specta bindings.ts for the command surface, cross-reference invoke() callers with #[tauri::command] handlers, render bridge nodes on a visible frontend/backend boundary line
+
+**Goal:** Extend the Phase 7 graph radar with a first-class IPC-bridge layer: each #[tauri::command] becomes a diamond-shaped bridge node pinned on a horizontal y=0 boundary line; TS/TSX files cluster above via a new forceBoundary force, Rust files cluster below; hover + click surface bridge metadata (command, handler, signature, callers); BOUNDARY slider in ForceConfigPanel tunes the bifurcation strength.
+**Requirements**: V-12-01..V-12-24 (phase-local witnesses — no new REQ-IDs; extends VIZN-01 / VIZN-05 / EMON-01 in spirit)
+**Depends on:** Phase 11
+**Plans:** 5 plans
+
+Plans:
+- [x] 12-01-PLAN.md — Wave 0 foundation + test scaffolding (Rust module skeleton, fixtures, panic-stubs, forceBoundary skeleton, 5 frontend test scaffolds) — completed 2026-04-21, commits `a6e6a46` / `8038742`
+- [x] 12-02-PLAN.md — Wave 1 Rust scanners (bindings_parser regex, rust_handler_scanner rayon, frontend_callsite_scanner tree-sitter, build_ipc_bridges merge; V-12-01..V-12-12) — completed 2026-04-21, commits `f7192e0` / `4cc570b` / `4ee804b`
+- [x] 12-03-PLAN.md — Wave 2 Tauri command wiring (get_ipc_bridges + EdgeKind::{Invokes,Handles} + lib.rs registration + bindings regen; V-12-13..V-12-14) — completed 2026-04-21, commits `b5ccbab` / `3a1bf30`
+- [x] 12-04-PLAN.md — Wave 3 store + worker (radarStore widen, forceBoundary physics, worker protocol + graphSimCore registration, useGraphLayout payload; V-12-15..V-12-20) — completed 2026-04-21, commits `4bc9b35` / `62cf031`
+- [x] 12-05-PLAN.md — Wave 4 canvas + UI + human-verify (BridgeRenderer, BridgeTooltip, BridgeDetailPanel, RadarManifest wiring, RadarCanvas z-order + hit-test, BOUNDARY slider, prod smoke checkpoint; V-12-21..V-12-24) — code complete 2026-04-21, commits `9604920` / `b86c0f8` / `b48b46f`; 36/36 automated witnesses green; **D-34 human-verify checkpoint pending** at `.planning/phases/12-.../12-05-CHECKPOINT.md`
+
+### Phase 13: Implement 4-level semantic zoom — workspace (package blobs only), package (sub-packages + file dots), file (names + edges + agent indicators), code (content preview + function signatures). Replace current 3-tier shouldRenderHullAtZoom with a full semantic zoom system that changes representation, not just visibility
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 12
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 13 to break down)
+
+### Phase 14: Multi-layer offscreen canvas rendering — separate static graph (hulls, edges, nodes) from animated agent layer (trails, dots, pulses). Cache layers 1-5 to offscreen canvases, composite per frame. Only the agent layer (6) and DOM overlay (7) redraw at 60fps
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 13
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 14 to break down)
+
+### Phase 15: Enhanced agent overlay — ATC radar display patterns with 6-point history trails (exponential opacity decay), data blocks on leader lines showing agent callsign + current file + activity rate + intent, 3-tier conflict escalation adapted from TCAS (advisory/warning/critical), and velocity vectors for predicted agent movement direction
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 14
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 15 to break down)
+
+### Phase 16: Typed edge system + temporal coupling — add typed edges (import/ipc-call/type-share/temporal-coupling) with distinct visual styles (thin solid, thick dashed, dotted, faint). Integrate git-based temporal coupling analysis (files that change together) as faint weighted edges. Add Louvain community detection for automatic file clustering that reveals actual code communities beyond directory structure
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 15
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 16 to break down)
+
+### Phase 17: Conflict-triggered PreToolUse gating — replace tool-category gating (Edit/Write/Bash always prompt) with file-conflict gating (prompt only when another active agent is touching the same file). See 17-CONTEXT.md for the full pitch and open design questions.
+
+**Goal:** Swap PreToolUse gate predicate from tool-category (Edit/Write/Bash always prompt) to file-conflict (prompt only when another live agent is actively touching the same canonical file within the conflict window). Preserve protected_paths OR-branch, always-allow cache, long-held HTTP transport, and bypass chips from Phase 8. 23 locked D-XX decisions plus 2 research-surfaced amendments (D-14b window_ms param per RESEARCH §1, D-15b update_pid_mapping wire-up per RESEARCH §Pitfall 5).
+**Requirements**: CNFL-01, CNFL-02, CNFL-06, COMM-01, COMM-02, COMM-06 (inherited — no new REQ-IDs)
+**Depends on:** Phase 8
+**Plans:** 6 plans
+
+Plans:
+- [x] 17-01-PLAN.md — Wave 1: `agents/bash_paths.rs` module — safelist + verb dispatch (cp/mv/rm/touch/mkdir/patch/sed -i/awk inplace/dd of=/install/tee + stdout redirects) + operator-split + 25 unit tests. D-09..D-13. Mitigates T-17-01.
+- [x] 17-02-PLAN.md — Wave 1: `ConflictEngine::could_conflict_with` with amended D-14b signature (window_ms as 4th param) + `GateReason` enum (snake_case serde, specta::Type) + `canonicalize_for_conflict` shared helper + 11 unit tests. D-01/D-02/D-03/D-05/D-14/D-14b/D-20. Mitigates T-17-05.
+- [x] 17-03-PLAN.md — Wave 1: Scaffolding — Cargo.toml direct deps (`shlex = "1.3"`, `path-clean = "1.0"`), `pub mod bash_paths` registration, migration 007 (ALTER TABLE approval_requests ADD conflict_with_agent_id TEXT, gate_reason TEXT + UPDATE app_settings SET pretool_gated_tools='[]'). D-18/D-19/D-20. Mitigates T-17-06.
+- [x] 17-04-PLAN.md — Wave 2: Engine sharing — construct `Arc<tokio::sync::Mutex<ConflictEngine>>` once in lib.rs setup + register as Tauri State + axum Extension + refactor pipeline conflict_task to pull from managed state + extend `hook_handler` signature + `build_router` + `start_registration_server` + `spawn_hook_server` test fixture + `make_hook_pool` test schema (adds the two new columns). D-15/D-16. Mitigates T-17-04. No behavior change — mechanical wiring only.
+- [x] 17-05-PLAN.md — Wave 3: Rewrite `hook_handler` gate predicate — conflict query + Bash dispatch + protected_paths OR-branch + always-allow-first + liveness gate via `registry.get_agent(&id).is_some()` (D-04 clarified per RESEARCH §5) + wire `update_pid_mapping` in resolve_or_create_agent (D-15b) + extend `create_approval_request_internal` signature + SQL + `ApprovalRequest` struct + 6 new integration tests in `phase17` submodule + pivot 3 existing hook tests + tracing keys (`hook_gate`, `hook_allow`, `hook_lock_wait`, `conflict_query`). D-01..D-18, D-21, D-23. Mitigates T-17-02/T-17-03/T-17-07.
+- [x] 17-06-PLAN.md — Wave 4: Frontend + UAT — regenerate `src/bindings.ts` via canonical command + extend `commsStore` ApprovalRequest interface + `ApprovalRequestCard` conditional render (⚠ CONFLICT with {id} in text-error amber, 🔒 PROTECTED path in #ffd16f warning) + 5 vitest cases + blocking human-verify UAT checkpoint (6 scenarios: two-agent conflict, solo-agent silence, protected-path, Bash safelist, Bash-verb conflict, OS notification deep-link). D-22/D-23. **Phase code-complete 2026-04-22 — awaiting UAT sign-off at `17-06-CHECKPOINT.md`.**
+
+### Phase 18: Fix passive-scan registry flooding. AgentRegistry hits its MAX_AGENTS=100 cap within seconds of startup because passive_bridge.bridge_tick registers a PASSIVE-{pid} for every claude/codex/opencode-named process on the machine — including unrelated interactive CLI sessions in other terminals, plus short-lived subprocesses that Phase 10 long-lived stream-json runtime spawns (MCP request handlers, aitc-hook fires, node helpers). Once capped, new KAGENT launches fail with 'Registry at capacity (100)'. Need to scope passive registration to only processes that actually matter: PIDs that self-registered via /register, or PIDs whose cwd is inside the active watched repo AND command-line matches a narrow AITC-compatible shape, or a hybrid where noisy subprocess children do not get their own registry entry (only the parent claude/codex does). Also raise MAX_AGENTS ceiling as a safety net. Pre-existing bug from Phase 3 (T-03-03 throttle) / Phase 6 (passive_bridge). Phase 10 amplified it with 4 long-lived sessions.
+
+**Goal:** Scope `passive_bridge::bridge_tick` to drop subprocess children whose parent is itself an in-scope allowlisted candidate (D-01/D-02 hybrid filter: cwd-in-repo + parent-PID-in-candidate-set), formalize `MAX_AGENTS = 1000` as an intentional emergency ceiling with an explanatory doc comment (D-03), and expose a read-only `get_registry_stats` Tauri command backed by a new `capacity_hits_since_start: AtomicU64` on `AgentRegistry` for post-hoc debugging (D-04). Preserve AGNT-03 (externally-launched agents with non-candidate shell parents still register).
+**Requirements**: AGNT-03 (preservation-class — filter must not break external agent detection)
+**Depends on:** Phase 17
+**Plans:** 4 plans
+
+Plans:
+- [x] 18-01-PLAN.md — Wave 1: parent-PID in-candidate-set filter inside `bridge_tick` + `cand_with_parent` helper + 5 new unit/regression tests (parent-drops-children, orphaned-child-registers, child-of-cwd-filtered-parent-promoted, 1+50 flood regression, AGNT-03 preservation). Core fix. (D-01, D-02, D-05, AGNT-03) — completed 2026-04-21, 8min, 7 commits (7355a3f..525a3fe), 12/12 passive_bridge tests pass
+- [x] 18-02-PLAN.md — Wave 1: `capacity_hits_since_start: AtomicU64` field on `AgentRegistry` + increment on `upsert_agent`'s at-capacity branch + `RegistryStats` struct with specta derives + `snapshot_stats()` method + 2 unit tests. (D-03, D-04, D-05) — completed 2026-04-21, 8min, 6 commits (0d9b526..e173800), 11/11 registry tests pass
+- [x] 18-03-PLAN.md — Wave 2: `get_registry_stats` Tauri command in `agents/commands.rs` + registration in `lib.rs` `collect_commands!` + `RegistryStats` type registration + verified `src/bindings.ts` regen. Depends on 18-02. (D-04) — completed 2026-04-21, 7min, 2 commits (05ce27e..a5c3d70), 7/7 agents::commands + 11/11 agents::registry tests pass, getRegistryStats() + RegistryStats TS type live in bindings
+- [x] 18-04-PLAN.md — Wave 2: rewrite `MAX_AGENTS` doc comment with D-03 rationale (why 1000, why not 100, why not configurable) + forward-pointer to 18-02's `capacity_hits_since_start` and 18-03's `get_registry_stats` Tauri command. Depends on 18-02 (same file, different region). (D-03) — completed 2026-04-21, 3min, 1 commit (8571af0), 11/11 registry tests pass, cargo build --lib clean, rustdoc parses clean
+
+### Phase 19: Polish Phase 10 chat transcript rendering. Four related gaps surfaced during UAT: (1) Repeated assistant_text chunks — the parser/aggregator emits many small rows per turn (one per content_block_delta flush) instead of merging contiguous text into a single row. Even with the isContinuation label fix from 9c2f4e8, adjacent chunks still feel visually duplicated. Fix: aggregator-side turn-boundary merging or a store-side selector that collapses adjacent assistant_text events. (2) Tool-use cards don't represent what Claude did well — TOOL · EDIT path shows a raw truncation, no hunk count / diff preview for MultiEdit or Write, BashPreview shows command but not exit code / output. Need richer summary derivation + tighter visual treatment matching codey's collapsed details-summary aesthetic. (3) Markdown fences show as literal text — assistant_text body uses whitespace-pre-wrap so triple-backticks and * emphasis and - lists don't render. Need react-markdown + remark-gfm integration (codey's prose prose-sm prose-neutral dark:prose-invert pattern) with code-block syntax highlighting via the existing shiki / useSyntaxHighlight Phase 5 dep. (4) SessionStart hook line noise — 4x [HOOK_STARTED] SessionStart:startup + 4x [HOOK_RESPONSE] SessionStart:startup appear at every session boot because the parser emits raw stdout lines for each hook event --verbose surfaces. A parser filter should suppress pure hook-announcement lines (or fold them into a single system_note summarizing N hooks fired on SessionStart). All four are UI/parser polish; no schema changes.
+
+**Goal:** Ship Phase 10 chat transcript polish in four surgical changes: (D-01) coalesce assistant_text chunks at the aggregator so one DB row is written per assistant turn (progressive reveal preserved via existing agent-assistant-delta emit path); (D-02) enrich tool-use collapsed rows with per-tool summary dispatcher returning `{primary, secondary?}` (Edit/MultiEdit hunks, Write lines, WebFetch host+path) plus a green/red/grey status dot sourced from the paired tool_result via a new `selectToolUseWithResult` store selector; (D-03) render assistant markdown via react-markdown + remark-gfm + rehype-sanitize with code-fence highlighting through the existing Phase 5 useSyntaxHighlight shiki singleton; (D-04) silently drop SessionStart:* hook envelopes at `parser::dispatch_system`. No schema changes, no new Tauri commands, no new StreamEvent variants; Phase 8 ToolPreview registry untouched. 21 Nyquist assertions V-19-01..V-19-21 gate the work.
+**Requirements**: No new REQ-IDs (polish-only phase). Scope driven by CONTEXT.md decisions D-01..D-04 (21 sub-decisions) and VALIDATION.md V-19-01..V-19-21.
+**Depends on:** Phase 18
+**Plans:** 4 plans
+
+Plans:
+- [x] 19-01-PLAN.md — Wave 0: install react-markdown@^10 + remark-gfm@^4 + rehype-sanitize@^6 + @tailwindcss/typography@^0.5; wire `@plugin "@tailwindcss/typography"` into theme.css; create 3 stream-json fixtures (coalesced_turn, interrupted_turn, hook_pretool_use); scaffold MarkdownBody.test.tsx (7 .todo entries keyed to V-19-13..V-19-19) + chatStore.test.ts selectToolUseWithResult describe block + mkToolUse/mkToolResult factories. (dependency foundation for Waves 1 + 2) — completed 2026-04-21, 9min, 3 commits (1c9ac0e..a1a0c0a), vitest 21 passed + 10 todo, `npm run build` 6.42s clean, RESEARCH.md Open Q#3 resolved (@plugin on line 2 first-try)
+- [x] 19-02-PLAN.md — Wave 1 Rust: D-04 dispatch_system SessionStart silent drop (4-line parser edit) + 2 tests (V-19-20, V-19-21); D-01 run_event_aggregator TurnBuffer coalescing (AssistantText arm no longer writes; TurnComplete flushes one row; StdoutClosed flushes interrupted turn + synthesizes agent-turn-complete with terminalReason:"interrupted"; @user notification preserved pre-buffer per Pitfall 1) + 4 tests (V-19-01..V-19-04). Single file: src-tauri/src/chat_runtime/parser.rs. (D-01, D-04) — completed 2026-04-21, 11min, 3 commits (e7de43e..2948369), `cargo test --lib chat_runtime::parser::tests` 17 passed / 0 failed; reader EOF-flush added as Rule 3 blocker fix (required for V-19-02 end-to-end); StreamEvent schema + insert_agent_event signature + agents/commands.rs call site untouched (verified empty `git diff --stat`)
+- [x] 19-03-PLAN.md — Wave 2 frontend markdown: new `src/components/chat/MarkdownBody.tsx` with react-markdown + remarkGfm + rehypeSanitize + CodeBlock (shiki via highlightLines + dangerouslySetInnerHTML OUTSIDE the sanitizer tree per Pattern 4); migrate @user tokenizer from AssistantTextCard into MarkdownBody; AssistantTextCard delegates body render via `<MarkdownBody content={content} streaming={streaming}/>`; replace 7 .todo stubs with V-19-13..V-19-19 assertions. (D-03) — completed 2026-04-21, 10min, 3 commits (d6697b7..a3c5975), MarkdownBody 165 lines, AssistantTextCard 105→68 lines, MarkdownBody.test.tsx 7/7 green + AssistantTextCard.test.tsx 6/6 green, `npm run build` 15.74s clean, V-19-17 input tweaked for react-markdown HTML-block semantics (Rule 1 test-fixture fix); 4 pre-existing failures in full-suite (D-02 + new D-04 useGraphLayout flake) left per "only fix own bugs"
+- [x] 19-04-PLAN.md — Wave 2 frontend tool-use: export `selectToolUseWithResult(events, toolUseId)` from chatStore.ts (pure linear scan, returns {toolUse, toolResult}); flip 3 chatStore .todo tests to V-19-08 assertions; ToolUseCard.tsx per-tool dispatcher ({primary, secondary?}) + 8px status dot before TOOL label (green/red/grey from paired tool_result.is_error) + py-1.5 + bg-surface-container/10 visual polish; add 7 new tests (V-19-05..V-19-07, V-19-09..V-19-12). Phase 8 ToolPreview registry untouched (Pitfall 6 scope guard). (D-02) — completed 2026-04-21, 15min, 3 commits (368958c..090b57e), chatStore.test.ts 24/24 green (3 new V-19-08) + ToolUseCard.test.tsx 11/11 green (7 new V-19-05..V-19-12) + EventCard.test.tsx 9/9 green; `bg-primary`/`bg-error` used instead of RESEARCH sketch's non-existent `bg-status-*` tokens (matches theme.css Command Horizon vocabulary); useMemo + module-level EMPTY_EVENTS sentinel on useChatStore selector prevents infinite-render loop under useSyncExternalStore (Rule 1 bug auto-fixed in source commit); `git diff --stat src/views/CommsHub/ToolPreview/` empty (Phase 8 contract preserved); `git diff --stat src-tauri/` empty (D-02.3 backend untouched); `npm run build` exits 0; Phase 19 complete (pending combined manual UAT with Plan 19-03 markdown body)
+
+### Phase 20: Diff-aware agent polling — replace the wholesale `set({ agents })` in agentStore's 2s poll loop with a diff-emit mechanism so only changed agents trigger re-renders
+
+**Goal:** [To be planned] — Replace the wholesale `set({ agents, isLoading: false })` in `src/stores/agentStore.ts:89–93` `fetchAgents()` with a diff-aware update: compare the incoming agent list to the current store array, apply per-agent patches (upsert changed, remove missing, keep untouched by reference) so Zustand's reference-equality selectors let unchanged subscribers (AgentChannelList, Tower, etc.) skip re-render. In sessions with 20+ agents the current 2s poll produces ~30 full-list re-renders per minute for a single state delta. Perf-only scope; no behavioral change; no schema change. Source: surfaced by the 2026-04-21 codebase inefficiency survey as the highest-ROI frontend perf fix.
+**Requirements**: TBD (no new REQ-IDs expected — perf-only delivery of existing agent-manifest surface)
+**Depends on:** Phase 19
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 20 to break down)

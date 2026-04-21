@@ -2,10 +2,10 @@ import { useState, useCallback } from 'react';
 import { useCommsStore } from '../../stores/commsStore';
 import { InlineDiff } from './InlineDiff';
 import { ApprovalActions } from './ApprovalActions';
-import { ChatThread } from './ChatThread';
-import { ChatInput } from './ChatInput';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { UrgencyBadge } from '../../components/ui/UrgencyBadge';
+import { ToolBadge, toolLabelFor } from '../../components/ui/ToolBadge';
+import { ToolPreview } from './ToolPreview';
 
 export function RequestDetail() {
   const selectedRequest = useCommsStore((s) => s.selectedRequest());
@@ -71,6 +71,9 @@ export function RequestDetail() {
             {selectedRequest.status.toUpperCase()}
           </StatusBadge>
           <UrgencyBadge urgency={selectedRequest.urgency} />
+          {selectedRequest.requestType === 'pretool_use' && selectedRequest.toolName && (
+            <ToolBadge toolName={selectedRequest.toolName} />
+          )}
         </div>
 
         {/* Request type and file path */}
@@ -86,13 +89,22 @@ export function RequestDetail() {
         </div>
       </div>
 
-      {/* Diff viewer */}
+      {/* Body: ToolPreview for pretool_use rows, InlineDiff for write_access. */}
       <div className="px-6 flex-1">
-        <InlineDiff
-          diffContent={selectedRequest.diffContent}
-          onEditsChange={handleEditsChange}
-          onEditStart={handleEditStart}
-        />
+        {selectedRequest.requestType === 'pretool_use' ? (
+          <ToolPreview
+            requestId={selectedRequest.id}
+            toolName={selectedRequest.toolName ?? ''}
+            toolInputJson={selectedRequest.toolInputJson}
+            filePath={selectedRequest.filePath}
+          />
+        ) : (
+          <InlineDiff
+            diffContent={selectedRequest.diffContent}
+            onEditsChange={handleEditsChange}
+            onEditStart={handleEditStart}
+          />
+        )}
       </div>
 
       {/* Approval actions */}
@@ -101,17 +113,10 @@ export function RequestDetail() {
           requestId={selectedRequest.id}
           hasEdits={edits.size > 0}
           editedContent={buildEditedContent()}
+          requestType={selectedRequest.requestType}
+          toolBadgeLabel={toolLabelFor(selectedRequest.toolName)}
+          agentId={selectedRequest.agentId}
         />
-      </div>
-
-      {/* Chat thread */}
-      <div className="px-6 pb-2">
-        <ChatThread agentId={selectedRequest.agentId} />
-      </div>
-
-      {/* Chat input */}
-      <div className="px-6 pb-4">
-        <ChatInput agentId={selectedRequest.agentId} />
       </div>
     </div>
   );
