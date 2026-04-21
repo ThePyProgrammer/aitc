@@ -104,6 +104,22 @@ pub async fn bridge_tick(
         })
         .collect();
 
+    // Phase 18 D-02: drop subprocess children whose parent is itself an
+    // in-scope allowlisted candidate. Prevents Phase 10's MCP-helper /
+    // node-shim / aitc-hook amplification from flooding PASSIVE-{pid}
+    // entries under each top-level agent. Filter order matters: cwd-scope
+    // BEFORE this step so a parent filtered out by cwd does NOT keep its
+    // child in-filter (see 18-RESEARCH.md Pitfall 4 / CONTEXT.md D-02).
+    //
+    // Note: `in_scope` holds `ProcessInfo` (returned by
+    // `ProcessSnapshot::candidates()`). The field is `parent_pid`, not
+    // `parent` — do not copy the `CandidateProc` field name.
+    let candidate_pids: HashSet<u32> = in_scope.iter().map(|c| c.pid).collect();
+    // Skeleton: shadow with identity filter; filter logic lands in the
+    // next commit.
+    let _ = &candidate_pids;
+    let in_scope: Vec<_> = in_scope.into_iter().collect();
+
     let mut live_pids: HashSet<u32> = HashSet::with_capacity(in_scope.len());
     for c in &in_scope {
         live_pids.insert(c.pid);
@@ -242,6 +258,16 @@ mod tests {
             cwd: PathBuf::from("/tmp/test-cwd"),
             exe: None,
             parent: None,
+        }
+    }
+
+    fn cand_with_parent(pid: u32, name: &str, parent_pid: u32) -> CandidateProc {
+        CandidateProc {
+            pid,
+            name: name.into(),
+            cwd: PathBuf::from("/tmp/test-cwd"),
+            exe: None,
+            parent: Some(parent_pid),
         }
     }
 
