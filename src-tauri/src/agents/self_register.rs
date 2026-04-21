@@ -18,7 +18,6 @@
 use crate::agents::adapter::{AgentInfo, AgentState};
 use crate::agents::hook_waiters::{HookDecision, WaiterEntry, WaiterRegistry};
 use crate::agents::registry::AgentRegistry;
-use crate::comms::app_settings::get_pretool_gated_tools;
 use crate::comms::commands::create_approval_request_internal;
 use axum::{
     extract::{DefaultBodyLimit, Extension},
@@ -156,7 +155,39 @@ async fn protected_path_matches(pool: &sqlx::SqlitePool, file_path: &str) -> boo
 /// When session_id is present and the binding either does not exist or
 /// points to an unknown agent, rebind to whatever the PID-path resolves to
 /// so a /hook with session_id re-asserts attribution each call.
+///
+/// Phase 17 D-15b amendment (17-RESEARCH §Pitfall 5): after the canonical
+/// `agent_id` is resolved, acquire the engine lock briefly and record the
+/// PID→agent_id mapping so future `process_batch` write records carry
+/// `KAGENT-*` / `PASSIVE-*` IDs instead of falling through to the
+/// `format!("PID-{pid}")` default. Without this wire-up the liveness gate
+/// in `hook_handler` (which does `registry.get_agent(other_id)`) never
+/// matches and conflicts are under-gated.
 async fn resolve_or_create_agent(
+    registry: &AgentRegistry,
+    waiters: &WaiterRegistry,
+    engine: &Arc<Mutex<crate::conflict::engine::ConflictEngine>>,
+    pid: u32,
+    session_id: Option<&str>,
+    cwd: Option<&str>,
+) -> String {
+    let agent_id = resolve_or_create_agent_inner(registry, waiters, pid, session_id, cwd).await;
+
+    // D-15b: propagate PID→agent_id into the shared engine so write records
+    // carry canonical IDs (not `PID-{pid}`). Lock held only for the single
+    // HashMap insert — drop before any further await.
+    {
+        let mut eng = engine.lock().await;
+        eng.update_pid_mapping(pid, agent_id.clone());
+    }
+
+    agent_id
+}
+
+/// Inner resolver — unchanged 3-branch lookup from Phase 8. Split out of
+/// `resolve_or_create_agent` so the D-15b engine wire-up can happen at a
+/// single post-resolution site (Phase 17 Plan 05 Task 2).
+async fn resolve_or_create_agent_inner(
     registry: &AgentRegistry,
     waiters: &WaiterRegistry,
     pid: u32,
@@ -215,12 +246,6 @@ async fn hook_handler<R: tauri::Runtime>(
     Extension(app): Extension<tauri::AppHandle<R>>,
     Json(body): Json<HookRequest>,
 ) -> axum::response::Response {
-    // Phase 17 Plan 04 breadcrumb — Plan 05 rewrites the gate branch below
-    // to call `engine.lock().await.could_conflict_with(...)`. The Extension
-    // is plumbed here so Plan 05 is a pure-behavioral diff rather than a
-    // wiring + behavior diff. Until then, the handle is intentionally unused.
-    let _engine_handle_for_plan_05 = engine;
-
     // T-08-Rate.
     if !rate_limiter.check().await {
         return (
@@ -263,33 +288,181 @@ async fn hook_handler<R: tauri::Runtime>(
     let agent_id = resolve_or_create_agent(
         &registry,
         &waiters,
+        &engine,
         body.pid,
         body.session_id.as_deref(),
         body.cwd.as_deref(),
     )
     .await;
 
-    // Always-allow fast path (D-22).
+    // Always-allow fast path (D-08 — run first so cached sessions bypass
+    // every downstream check). Unchanged from Phase 8.
     if waiters.is_always_allowed(&agent_id, &body.tool_name).await {
         return (StatusCode::OK, Json(AitcDecisionResponse::Allow)).into_response();
     }
 
-    // Tool allowlist (D-19/D-20) OR protected-path match (D-21).
-    let gated_tools = get_pretool_gated_tools(&pool).await.unwrap_or_default();
-    let file_path = body
-        .tool_input
-        .get("file_path")
-        .and_then(|v| v.as_str());
-    let tool_gated = gated_tools.iter().any(|t| t == &body.tool_name);
-    let path_gated = if let Some(fp) = file_path {
-        protected_path_matches(&pool, fp).await
-    } else {
-        false
+    // -----------------------------------------------------------------
+    // Phase 17 D-01..D-18 gate-decision rewrite: replace the Phase 8
+    // tool-category allowlist (D-19/D-20, removed) with a conflict-query
+    // against the shared ConflictEngine, preserving the protected_paths
+    // OR-branch (D-07). See 17-CONTEXT.md for the locked semantics.
+    //
+    // Phase 17 D-04 amendment (17-RESEARCH §5): `AgentState` has NO
+    // `Terminated` variant — terminated agents are *removed* from the
+    // registry, not transitioned. The liveness gate therefore reduces to
+    // `registry.get_agent(&id).await.is_some()`.
+    // -----------------------------------------------------------------
+
+    use crate::conflict::canonicalize::canonicalize_for_conflict;
+    use std::path::{Path, PathBuf};
+
+    // D-06: derive the conflict-check path from `tool_input` based on the
+    // tool_name. Canonicalization flows through the shared helper so the
+    // HashMap-key parity with the pipeline's write path is guaranteed
+    // (T-17-05 mitigation). `gate_file_path_str` feeds both the
+    // protected_paths glob check and the approval row's `file_path` column.
+    let (canonical_path, gate_file_path_str): (Option<PathBuf>, Option<String>) = match body
+        .tool_name
+        .as_str()
+    {
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => body
+            .tool_input
+            .get("file_path")
+            .and_then(|v| v.as_str())
+            .map(|p| {
+                let canon = canonicalize_for_conflict(Path::new(p));
+                let s = canon.to_string_lossy().into_owned();
+                (Some(canon), Some(s))
+            })
+            .unwrap_or((None, None)),
+        "Bash" => {
+            // D-09..D-13: best-effort Bash path extraction; Safelisted +
+            // ParseFailed + empty Targets all collapse to (None, None) →
+            // no conflict query → allow (D-10 + D-11).
+            let cmd = body
+                .tool_input
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let cwd_str = body.cwd.as_deref().unwrap_or(".");
+            let cwd_path = Path::new(cwd_str);
+            match crate::agents::bash_paths::extract_target_paths(cmd, cwd_path) {
+                crate::agents::bash_paths::BashParseResult::Targets(v) if !v.is_empty() => {
+                    // v1 policy: take the first target. Multi-target Bash
+                    // commands (`cp a b && rm c`) are rare and the approval
+                    // row is one-path-one-row; extra targets fall through
+                    // to the filesystem-watcher path for post-write
+                    // convergence per D-17's accepted race.
+                    let canon = canonicalize_for_conflict(&v[0]);
+                    let s = canon.to_string_lossy().into_owned();
+                    (Some(canon), Some(s))
+                }
+                _ => (None, None),
+            }
+        }
+        // D-06: Read/LS/Grep/Glob/WebFetch/WebSearch/Task/MCP pass through.
+        // They still honor protected_paths (handled below) but never drive
+        // a conflict query.
+        _ => (None, None),
     };
-    if !tool_gated && !path_gated {
-        // Pass-through tool — no row, no waiter. D-01 fast path.
+
+    // D-07: protected_paths OR-branch — unchanged semantics from Phase 8.
+    // Checked against the RAW `tool_input.file_path` so Read/LS/Grep also
+    // gate on protected globs (D-06 explicitly preserves this: "Read-vs-
+    // write gating is an explicit defer; users who want it can add globs
+    // to `protected_paths`"). For write-class tools this matches the
+    // canonical form via `gate_file_path_str`; for pass-through tools it
+    // falls back to the raw JSON value so gating is still possible.
+    let raw_file_path_for_glob: Option<String> = gate_file_path_str.clone().or_else(|| {
+        body.tool_input
+            .get("file_path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    });
+    let path_gated: bool = match &raw_file_path_for_glob {
+        Some(p) => protected_path_matches(&pool, p).await,
+        None => false,
+    };
+
+    // D-14/D-14b/D-15: conflict query against the shared ConflictEngine.
+    // Pitfall 1: scope the lock tightly; drop BEFORE any DB call or await.
+    // D-05 self-exclusion via `except_agent_id = agent_id`. D-04 liveness
+    // gate via `registry.get_agent(&id).await.is_some()` (amended per
+    // RESEARCH §5 — there is NO Terminated variant).
+    let conflict_other: Option<String> = match &canonical_path {
+        Some(p) => {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            // Fresh-read window each request — routes around the engine's
+            // `self.window` staleness (RESEARCH §1) by passing the live
+            // `ConflictState::get_window_ms()` as an explicit argument.
+            // `Manager` trait brings `app.state::<T>()` into scope.
+            use tauri::Manager;
+            let window_ms: i64 = app
+                .state::<crate::conflict::types::ConflictState>()
+                .get_window_ms() as i64;
+
+            let t0 = std::time::Instant::now();
+            let raw = {
+                let eng = engine.lock().await;
+                eng.could_conflict_with(p, &agent_id, now_ms, window_ms)
+            };
+            let elapsed = t0.elapsed();
+            tracing::debug!(
+                kind = "hook_lock_wait",
+                elapsed_us = elapsed.as_micros() as u64,
+                agent = %agent_id,
+                "engine lock acquire + could_conflict_with"
+            );
+
+            match raw {
+                Some(id) if registry.get_agent(&id).await.is_some() => Some(id),
+                // D-04 liveness gate: ghost record from an agent no longer
+                // in the registry (crashed / reaped). Under-gate fail-safe.
+                _ => None,
+            }
+        }
+        None => None,
+    };
+
+    // D-20/D-21: compose gate decision. Both-or-neither invariant for
+    // (conflict_with_agent_id, gate_reason) enforced at this single site
+    // (T-17-07 mitigation — no DB CHECK constraint needed).
+    let (should_gate, gate_reason, conflict_with): (bool, &str, Option<&str>) =
+        match (conflict_other.as_deref(), path_gated) {
+            (Some(id), _) => (true, "file_conflict", Some(id)),
+            (None, true) => (true, "protected_path", None),
+            _ => (false, "", None),
+        };
+
+    if !should_gate {
+        let allow_reason = if canonical_path.is_some() {
+            "no_conflict"
+        } else if body.tool_name == "Bash" {
+            "safelisted_or_parse_fail"
+        } else {
+            "passthrough"
+        };
+        tracing::debug!(
+            kind = "hook_allow",
+            agent = %agent_id,
+            tool = %body.tool_name,
+            reason = allow_reason,
+            "instant allow"
+        );
         return (StatusCode::OK, Json(AitcDecisionResponse::Allow)).into_response();
     }
+
+    tracing::info!(
+        kind = "hook_gate",
+        reason = gate_reason,
+        agent = %agent_id,
+        file = ?gate_file_path_str,
+        conflict_with = ?conflict_with,
+        "gating PreToolUse"
+    );
 
     // Derive a minimal diff_content preview so Phase 4's ApprovalRequestCard
     // preview path keeps working until Plan 05's ToolPreview reads
@@ -311,21 +484,27 @@ async fn hook_handler<R: tauri::Runtime>(
     let tool_input_str =
         serde_json::to_string(&body.tool_input).unwrap_or_else(|_| "{}".into());
 
+    // Row `file_path`: prefer the canonical form (so it matches the engine's
+    // HashMap key) when we have one; fall back to the raw tool_input path
+    // so protected_path gates on Read/LS still show a useful file in the
+    // approval card.
+    let row_file_path: Option<&str> = gate_file_path_str
+        .as_deref()
+        .or(raw_file_path_for_glob.as_deref());
+
     let req = match create_approval_request_internal(
         &agent_id,
         "pretool_use",
-        file_path,
+        // D-02/D-21: canonical when available (file_conflict path), raw
+        // otherwise (protected_path on a non-write tool).
+        row_file_path,
         diff_preview.as_deref(),
         "high",
         Some(&body.tool_name),
         Some(&tool_input_str),
         body.session_id.as_deref(),
-        // Phase 17 Task 1 signature sweep: hook gate metadata is populated
-        // by Task 2's rewrite of this branch. Until then, pass `None, None`
-        // so Task 1 lands a standalone-compilable signature change. The
-        // Task 2 diff replaces this whole call site.
-        None,
-        None,
+        conflict_with,
+        Some(gate_reason),
         &pool,
         &app,
     )
