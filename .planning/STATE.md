@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 10 UAT signed off; polish follow-ups in Phase 19
-last_updated: "2026-04-21T05:54:31.837Z"
-last_activity: 2026-04-21 -- Phase 18-02 completed (registry capacity counter + RegistryStats + snapshot_stats)
+stopped_at: Phase 18-03 complete; plan 18-04 ready to start
+last_updated: "2026-04-21T05:52:19Z"
+last_activity: 2026-04-21 -- Phase 18-03 completed (get_registry_stats Tauri command + RegistryStats TS binding, 2 commits)
 progress:
   total_phases: 20
   completed_phases: 12
   total_plans: 59
-  completed_plans: 58
-  percent: 98
+  completed_plans: 59
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 ## Current Position
 
 Phase: 18 (fix-passive-scan-registry-flooding-agentregistry-hits-its-ma) — EXECUTING
-Plan: 2 of 4 complete (18-01 ✓, 18-02 ✓; 18-03, 18-04 pending)
-Status: Executing Phase 18 wave 1 complete (18-01 + 18-02 both in)
-Last activity: 2026-04-21 -- Phase 18-02 completed (registry capacity counter + RegistryStats + snapshot_stats)
+Plan: 3 of 4 complete (18-01 ✓, 18-02 ✓, 18-03 ✓; 18-04 pending)
+Status: Executing Phase 18 wave 2 complete (get_registry_stats Tauri command + TS binding landed)
+Last activity: 2026-04-21 -- Phase 18-03 completed (get_registry_stats Tauri command + RegistryStats TS binding, 2 commits)
 
-Progress: [█████░░░░░] 50%
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
@@ -68,6 +68,7 @@ Progress: [█████░░░░░] 50%
 | Phase 10 P06 | 14 min | 3 tasks | 13 files |
 | Phase 18 P01 | 8 min | 1 task (7 commits) | 1 file |
 | Phase 18 P02 | 8 min | 1 task (6 commits) | 1 file |
+| Phase 18 P03 | 7 min | 1 task (2 commits) | 3 files |
 
 ## Accumulated Context
 
@@ -105,6 +106,8 @@ Recent decisions affecting current work:
 - [Phase 18]: Plan 02: capacity_hits_since_start counter lives on AgentRegistry (not passive_bridge) — registry-level framing matches the existing 'Registry at capacity' error message and counts ALL upsert failures, not just PASSIVE churn. Relaxed ordering; no happens-before with other memory.
 - [Phase 18]: Plan 02: snapshot_stats loads the atomic BEFORE acquiring the read lock (Pitfall 7 / T-18-02) — gives monotonic-lagging semantics, never 'from the future'. No write-lock acquisition, so diagnostic polling does not contend with upsert_agent's write path.
 - [Phase 18]: Plan 02: RegistryStats fields are u32/u64 (not usize) per the authoritative PLAN.md signature — specta/TS-cross-boundary-friendly, avoids platform-dependent usize width. 10,000x MAX_AGENTS headroom for u32 count fields.
+- [Phase 18]: Plan 03: get_registry_stats uses fully-qualified `crate::agents::registry::RegistryStats` return type (no new `use` import in commands.rs) — single-use, matches existing commands.rs pattern for single-use external types.
+- [Phase 18]: Plan 03: Binding regen via `cargo build --bin aitc && timeout --preserve-status 8 ./target/debug/aitc` — the specta `.export(...)` is gated inside `pub fn run()`, so `cargo test --lib` does NOT regenerate bindings despite both paths having debug_assertions. This is the canonical regen command for future Tauri command additions in this repo.
 
 ### Roadmap Evolution
 
@@ -145,6 +148,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-21T05:54:31.811Z
-Stopped at: Phase 10 UAT signed off; polish follow-ups in Phase 19
-Resume file: .planning/phases/10-implement-a-proper-chat-user-interface-for-agents-i-deploy-s/10-06-CHECKPOINT.md
+Last session: 2026-04-21T05:52:19Z
+Stopped at: Phase 18-03 complete; plan 18-04 ready to start
+Resume file: .planning/phases/18-fix-passive-scan-registry-flooding-agentregistry-hits-its-ma/18-04-PLAN.md
