@@ -9,6 +9,8 @@ import { ConflictsView } from './views/ConflictsView';
 import { HistoryView } from './views/HistoryView';
 import { PassiveHookConsentDialog } from './views/CommsHub/PassiveHookConsentDialog';
 import { mountDeepLink } from './lib/deepLinkNotification';
+import { useChatChannel } from './hooks/useChatChannel';
+import { useChatStore } from './stores/chatStore';
 
 const router = createMemoryRouter([
   {
@@ -42,6 +44,18 @@ function App() {
       });
     return () => unlisten?.();
   }, []);
+
+  // Phase 10 Plan 06 (D-24): mount chat subscriptions at the app root so
+  // agent-event-appended / agent-turn-complete / etc. fire regardless of
+  // whether CommsView is currently mounted. Also fetch the initial channel
+  // list so the unread dot / master list is populated before the user
+  // navigates to /comms.
+  const { subscribe, unsubscribe } = useChatChannel();
+  useEffect(() => {
+    void subscribe();
+    void useChatStore.getState().fetchChannels();
+    return () => unsubscribe();
+  }, [subscribe, unsubscribe]);
 
   return (
     <>

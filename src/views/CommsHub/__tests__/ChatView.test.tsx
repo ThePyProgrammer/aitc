@@ -94,11 +94,11 @@ describe('ChatView', () => {
       selectedAgentId: 'KAGENT-1',
     });
     renderChatView();
-    // Agent ID in mono bold
-    expect(screen.getByText('KAGENT-1')).toBeInTheDocument();
-    // Session pill (first 8 chars)
+    // Agent ID appears in both master list row + detail header (2x expected).
+    expect(screen.getAllByText('KAGENT-1').length).toBeGreaterThanOrEqual(1);
+    // Session pill (first 8 chars) lives only in the detail header.
     expect(screen.getByText(/SESSION · abcdef12/)).toBeInTheDocument();
-    // Clear thread button
+    // Clear thread button is unique to the detail header.
     expect(screen.getByText('CLEAR_THREAD')).toBeInTheDocument();
   });
 
@@ -128,7 +128,8 @@ describe('ChatView', () => {
       selectedAgentId: 'CODEX-1',
     });
     renderChatView();
-    expect(screen.getByText('READ-ONLY_TRANSCRIPT')).toBeInTheDocument();
+    // READ-ONLY_TRANSCRIPT appears in both master row and detail header.
+    expect(screen.getAllByText('READ-ONLY_TRANSCRIPT').length).toBeGreaterThanOrEqual(1);
     const input = screen.getByTestId('chat-input');
     expect(input.className).toContain('opacity-50');
   });
