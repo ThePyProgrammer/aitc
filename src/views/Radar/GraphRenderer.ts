@@ -260,10 +260,20 @@ export function drawEdges(
     ) {
       continue;
     }
+    // Phase 12 (D-17): cross-language IPC edges (invokes = frontend → bridge,
+    // handles = bridge → Rust handler) get an alpha boost (~0.70) so the
+    // boundary-crossing links read distinctly from default 0.55 dir-level edges.
+    const isIpc = e.kind === 'invokes' || e.kind === 'handles';
+    if (isIpc) {
+      ctx.globalAlpha = Math.min(1, 0.55 * 1.27);
+    }
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
+    if (isIpc) {
+      ctx.globalAlpha = 1;
+    }
   }
   if (theme.edgeGlow) {
     ctx.shadowColor = 'transparent';
