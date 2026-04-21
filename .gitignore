@@ -25,4 +25,5 @@ src-tauri/target
 *.sw?
 
 .claude/settings.local.json
+.claude/aitc-mcp-*.json
 
