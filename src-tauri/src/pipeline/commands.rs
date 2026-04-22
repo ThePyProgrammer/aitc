@@ -290,10 +290,17 @@ pub async fn list_worktrees(repo_root: String) -> Result<Vec<Worktree>, String> 
 /// Strips the `repo_root` prefix from each absolute HashMap key so the
 /// frontend treemap renders a repo-rooted hierarchy (e.g. `src/foo.rs`)
 /// instead of absolute OS paths (e.g. `C:/Users/.../aitc/src/foo.rs`).
+/// Normalizes Windows backslashes to forward slashes so the frontend
+/// treemap's `split('/')` yields correct segments.
 ///
-/// Skips the repo-root entry itself (empty relative path) — the frontend
-/// synthesizes its own root node. Normalizes Windows backslashes to forward
-/// slashes so the frontend treemap's `split('/')` yields correct segments.
+/// The repo-root entry itself serializes as `path: ""` (depth 0) so the
+/// frontend root aggregate stays intact.
+///
+/// A path that is NOT under `repo_root` (shouldn't happen — the walker
+/// only produces descendants of repo_root) falls back to its absolute
+/// form via `strip_prefix(...).unwrap_or(path)` rather than being
+/// silently dropped. Belt-and-suspenders against a canonicalization
+/// quirk leaving the map blank.
 ///
 /// In-memory HashMap keys remain absolute PathBufs; attribution and
 /// reconciliation depend on that invariant and are NOT touched here.
@@ -302,14 +309,11 @@ pub(crate) fn serialize_tree_index(
     repo_root: &Path,
 ) -> Vec<TreeIndexEntry> {
     tree.iter()
-        .filter_map(|(path, node)| {
-            let rel = path.strip_prefix(repo_root).ok()?;
-            if rel.as_os_str().is_empty() {
-                return None;
-            }
+        .map(|(path, node)| {
+            let rel = path.strip_prefix(repo_root).unwrap_or(path);
             let path_str = rel.to_string_lossy().replace('\\', "/");
             let depth = rel.components().count() as u32;
-            Some(TreeIndexEntry {
+            TreeIndexEntry {
                 path: path_str,
                 size: node.size,
                 // WR-01: read is_dir from the walker-populated FileNode
@@ -317,7 +321,7 @@ pub(crate) fn serialize_tree_index(
                 // can render folder aggregates correctly.
                 is_dir: node.is_dir,
                 depth,
-            })
+            }
         })
         .collect()
 }
@@ -328,8 +332,8 @@ pub(crate) fn serialize_tree_index(
 /// Paths are serialized as repo-relative with forward-slash separators. Storing
 /// absolute paths on the frontend created an O(depth) chain of single-child
 /// directory wrappers (`/`, `home`, `prannayag`, …) before any real content,
-/// which visually crushed the treemap into a corner. The repo-root entry is
-/// skipped — the frontend synthesizes its own root aggregate from file paths.
+/// which visually crushed the treemap into a corner. The repo root itself is
+/// emitted as `""` so the frontend root aggregate stays intact.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_tree_index(
@@ -541,14 +545,21 @@ mod serialize_tests {
     }
 
     #[test]
-    fn skips_repo_root_entry() {
+    fn emits_repo_root_as_empty_string() {
+        // The repo-root entry serializes as path: "" (depth 0) so the
+        // frontend root aggregate stays intact.
         let mut tree: HashMap<PathBuf, FileNode> = HashMap::new();
         tree.insert(repo_root(), node(0, true));
         tree.insert(under_root("src/foo.rs"), node(10, false));
         let entries = serialize_tree_index(&tree, &repo_root());
-        // Only the src/foo.rs entry, not the repo root itself.
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].path, "src/foo.rs");
+        assert_eq!(entries.len(), 2);
+        let root = entries
+            .iter()
+            .find(|e| e.path.is_empty())
+            .expect("repo-root entry missing");
+        assert_eq!(root.depth, 0);
+        assert!(root.is_dir);
+        assert!(entries.iter().any(|e| e.path == "src/foo.rs"));
     }
 
     #[test]
@@ -567,9 +578,11 @@ mod serialize_tests {
     }
 
     #[test]
-    fn skips_paths_outside_repo_root() {
-        // Paths not under repo_root (shouldn't happen in practice but we
-        // shouldn't panic or leak them with absolute form).
+    fn falls_back_to_absolute_for_outside_root() {
+        // Paths not under repo_root (shouldn't happen in practice — walker
+        // only produces descendants). Belt-and-suspenders: fall back to the
+        // absolute path rather than silently dropping the row, so a
+        // canonicalization quirk doesn't leave the map blank.
         let mut tree: HashMap<PathBuf, FileNode> = HashMap::new();
         #[cfg(not(windows))]
         let outside = PathBuf::from("/other/place/x.rs");
@@ -578,8 +591,12 @@ mod serialize_tests {
         tree.insert(outside, node(1, false));
         tree.insert(under_root("src/foo.rs"), node(1, false));
         let entries = serialize_tree_index(&tree, &repo_root());
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].path, "src/foo.rs");
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().any(|e| e.path == "src/foo.rs"));
+        #[cfg(not(windows))]
+        assert!(entries.iter().any(|e| e.path == "/other/place/x.rs"));
+        #[cfg(windows)]
+        assert!(entries.iter().any(|e| e.path == "D:/elsewhere/x.rs"));
     }
 }
 
