@@ -3,12 +3,21 @@ status: partial
 phase: 19-polish-phase-10-chat-transcript-rendering-four-related-gaps
 source: [19-VERIFICATION.md, 19-VALIDATION.md §Manual-Only Verifications]
 started: 2026-04-21T08:56:34Z
-updated: 2026-04-21T08:56:34Z
+updated: 2026-04-22T10:41:00Z
 ---
 
 ## Current Test
 
-[awaiting human testing]
+[awaiting human testing — re-verify after gap-closure fixes landed 2026-04-22]
+
+## Gap-Closure Fixes Landed After First UAT Round (2026-04-22)
+
+First round of human UAT surfaced two real issues; both fixed and re-testable now:
+
+- **Tool-card polish (Fix 1 — commit 0d7113e):** Dropped all opacity modifiers. Wrapper now uses solid `bg-surface-container-high` (#201f1f), border uses solid `border-outline-variant` (#494847), hover uses `bg-surface-container-highest` (#262626). Should read as a visibly grayer panel with a clear border against the #0e0e0e chat bg.
+- **Live streamed markdown (Fix 2 — commit 7ad01c1):** D-01 aggregator coalescing eliminated per-idle-flush DB rows; the frontend never subscribed to `agent-assistant-delta` despite CONTEXT.md D-01.3 assuming it did. Added 10th listener + per-agent streaming buffer + synthetic `streaming-assistant-row` rendered below the virtualized transcript. Should reveal markdown progressively during a turn, with the final authoritative row replacing the synthetic stream at TurnComplete.
+
+Separate (NOT Phase 19) — Permission-prompt regression tracked under `/gsd-debug` session.
 
 ## Tests
 
