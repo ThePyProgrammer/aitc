@@ -351,3 +351,13 @@ Plans:
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 20 to break down)
+
+### Phase 21: Polyglot IPC bridge extractor — pluggable per-language parsers (FastAPI/Flask/Django, tRPC, OpenAPI, gRPC, Express/Fastify, Python↔TS) + auto-detected boundary labels (generalize Phase 12 beyond Tauri)
+
+**Goal:** [To be planned] — Generalize the Phase 12 IPC bridge extractor beyond the Tauri-specific binary (tauri-specta `src/bindings.ts` + `#[tauri::command]`) to any cross-language API surface. Ship pluggable per-language extractors in a new `pipeline/ipc_bridges/extractors/` submodule covering FastAPI/Flask/Django route decorators, tRPC router definitions, OpenAPI/Swagger specs, gRPC `.proto` files, Express/Fastify route registrations, and Python↔TS message-passing contracts (JSON-RPC, WebSocket envelopes). Replace the hardcoded "FRONTEND · TypeScript" / "BACKEND · Rust" boundary labels with per-repo auto-detected language groupings — e.g. "TYPESCRIPT" above and "PYTHON" below for a TS+Python repo, or three lanes for monorepos with TS + Python + Go. Detect the primary frontend/backend axis from file-type distribution + inferred dependency flow (imports crossing the language boundary). Reuse Phase 12's IpcBridgeDto shape, `get_ipc_bridges` Tauri command surface, `forceBoundary` mechanic, and bridge diamond rendering — changes are additive (new extractor trait, dynamic boundary-label selection in `BridgeRenderer.drawBoundaryAnchorLabels`) not breaking. Surfaced during Phase 12 UAT on a "2 TS frontends + Python backend" repo where the hardcoded Tauri binary split was misleading. Quick-task 260422-dqu shipped a runtime no-bridges guard as the short-term fix (so non-Tauri repos cleanly hide the boundary layer today); this phase is the structural generalization that makes the layer meaningful on polyglot repos.
+**Requirements**: TBD (extends VIZN-01 / VIZN-05 / EMON-01 in spirit; no new REQ-IDs expected)
+**Depends on:** Phase 12
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 21 to break down)
