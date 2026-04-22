@@ -155,13 +155,13 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
     <motion.div
       layout
       data-testid="tool-use-card"
-      className="border border-outline-variant/30 bg-surface-container-high/40 rounded-sm mx-5 my-1.5"
+      className="border border-outline-variant bg-surface-container-high rounded-sm mx-5 my-1.5"
       transition={{ duration: 0.12, ease: 'easeOut' }}
     >
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
-        className="w-full flex items-center gap-2 px-4 py-1.5 text-left hover:bg-surface-container-high/60 transition-colors"
+        className="w-full flex items-center gap-2 px-4 py-1.5 text-left hover:bg-surface-container-highest transition-colors"
         aria-expanded={expanded}
       >
         <span
@@ -221,7 +221,7 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
             transition={{ duration: 0.15 }}
             className="overflow-hidden"
           >
-            <div className="px-4 pb-3 pt-1 bg-surface-container-high/50 border-t border-outline-variant/30">
+            <div className="px-4 pb-3 pt-1 bg-surface-container-high border-t border-outline-variant">
               <ToolPreview
                 toolName={toolName ?? ''}
                 toolInputJson={toolInput}
