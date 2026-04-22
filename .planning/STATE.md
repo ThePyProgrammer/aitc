@@ -197,11 +197,12 @@ None yet.
 | 260415-07f | Repo-relative paths from get_tree_index (radar) | 2026-04-15 | 66181eb, bbafa5a, 4670a23 |
 | 260421-igz | Rename top bar title AI_CONTROL_CENTRE → AI_CMD_CENTRE | 2026-04-21 | 236b46e |
 | 260421-fast | Rename top bar title AI_CMD_CENTRE → AI_CONTROL_CENTRE | 2026-04-21 | 3cffd8b |
+| 260422-dqu | Gate Phase 12 boundary layer on bridges-present (polyglot-repo UAT fix) | 2026-04-22 | 6b9f1bb, e7fe5b8 |
 
 ## Session Continuity
 
-Last session: 2026-04-21T14:12:34Z
-Stopped at: Phase 12 Plan 05 (Wave 4 canvas + UI + D-34 checkpoint) complete — awaiting manual UAT via 12-05-CHECKPOINT.md
+Last session: 2026-04-22T01:55:00Z
+Stopped at: Quick task 260422-dqu complete — Phase 12 boundary layer now gated on bridges-present so polyglot (non-Tauri) repos cleanly hide the FE/BE visualization. Phase 12 UAT re-smoke pending.
 Resume file: .planning/phases/12-add-ipc-bridge-nodes-and-cross-language-boundary-visualizati/12-05-CHECKPOINT.md
 Active debug sessions:
 
