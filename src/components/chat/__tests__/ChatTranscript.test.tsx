@@ -50,6 +50,14 @@ vi.mock('../../../views/CommsHub/ToolPreview', () => ({
   ToolPreview: () => <div data-testid="tool-preview-stub" />,
 }));
 
+// Stub the shiki singleton — the streaming-row test exercises MarkdownBody
+// with plain text (no fences), but the hook still initializes. Mocking it
+// avoids lazy shiki loading during jsdom tests.
+vi.mock('../../../hooks/useSyntaxHighlight', () => ({
+  useSyntaxHighlight: () => ({ highlighter: null, isLoading: false }),
+  highlightLines: () => [],
+}));
+
 function renderT(ui: React.ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
 }
@@ -143,6 +151,40 @@ describe('ChatTranscript', () => {
     });
     fireEvent.scroll(scrollEl);
     expect(loadOlderSpy).toHaveBeenCalledWith('a');
+  });
+
+  // Phase 19 gap closure — synthetic streaming row below the virtualized list.
+  it('renders a streaming-assistant-row when streamingByAgent[agentId] is non-empty', () => {
+    useChatStore.setState({
+      streamingByAgent: { a: 'Hello world, streaming in progress' },
+    });
+    renderT(<ChatTranscript agentId="a" />);
+    const row = screen.getByTestId('streaming-assistant-row');
+    expect(row).toBeInTheDocument();
+    expect(row.textContent ?? '').toContain(
+      'Hello world, streaming in progress',
+    );
+    // CLAUDE label rides on the streaming row like a non-continuation assistant row.
+    expect(row.textContent ?? '').toContain('CLAUDE');
+  });
+
+  it('streaming-assistant-row is absent when streamingByAgent[agentId] is empty', () => {
+    useChatStore.setState({
+      eventsByAgent: { a: [mkEvent()] },
+      streamingByAgent: {},
+    });
+    renderT(<ChatTranscript agentId="a" />);
+    expect(screen.queryByTestId('streaming-assistant-row')).toBeNull();
+  });
+
+  it('streaming row replaces NO_MESSAGES empty state when no persisted events exist yet', () => {
+    useChatStore.setState({
+      streamingByAgent: { 'claude-cc-001': 'Partial first-turn text' },
+    });
+    renderT(<ChatTranscript agentId="claude-cc-001" />);
+    // Empty state suppressed — streaming content IS the first sign of life.
+    expect(screen.queryByText('NO_MESSAGES')).toBeNull();
+    expect(screen.getByTestId('streaming-assistant-row')).toBeInTheDocument();
   });
 
   it('new-messages pill appears when scrolled up and a new event arrives', () => {

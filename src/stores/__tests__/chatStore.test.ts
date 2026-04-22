@@ -204,7 +204,7 @@ describe('chatStore', () => {
     expect(useChatStore.getState().unreadByAgent['claude-cc-001']).toBe(0);
   });
 
-  it('subscribeToChat wires all nine listeners', async () => {
+  it('subscribeToChat wires all ten listeners', async () => {
     mockListen.mockImplementation(async () => () => {});
     await useChatStore.getState().subscribeToChat();
     const calls = mockListen.mock.calls.map((c) => c[0]);
@@ -219,9 +219,10 @@ describe('chatStore', () => {
         'agent-thread-cleared',
         'agent-events-marked-read',
         'agent-session-resumed',
+        'agent-assistant-delta',
       ]),
     );
-    expect(calls.length).toBe(9);
+    expect(calls.length).toBe(10);
   });
 
   it('agent-event-appended increments unread when agent is not selected', async () => {
@@ -339,6 +340,89 @@ describe('chatStore', () => {
     expect(
       useChatStore.getState().eventsByAgent['claude-cc-001'] ?? [],
     ).toEqual([]);
+  });
+
+  // Phase 19 gap closure — live streaming via agent-assistant-delta.
+  it('agent-assistant-delta appends to streamingByAgent', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    const handler = handlers.get('agent-assistant-delta')!;
+    handler({ payload: { agentId: 'claude-cc-001', delta: 'Hel' } });
+    handler({ payload: { agentId: 'claude-cc-001', delta: 'lo' } });
+    handler({ payload: { agentId: 'claude-cc-001', delta: ' world' } });
+    expect(
+      useChatStore.getState().streamingByAgent['claude-cc-001'],
+    ).toBe('Hello world');
+  });
+
+  it('agent-assistant-delta ignores empty delta payloads', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    const handler = handlers.get('agent-assistant-delta')!;
+    handler({ payload: { agentId: 'claude-cc-001', delta: 'hi' } });
+    handler({ payload: { agentId: 'claude-cc-001', delta: '' } });
+    expect(
+      useChatStore.getState().streamingByAgent['claude-cc-001'],
+    ).toBe('hi');
+  });
+
+  it('agent-event-appended with eventType assistant_text clears streamingByAgent', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    useChatStore.setState({
+      streamingByAgent: { 'claude-cc-001': 'partial text' },
+    });
+    const appendHandler = handlers.get('agent-event-appended')!;
+    appendHandler({ payload: mkAssistant(42, false) });
+    expect(
+      useChatStore.getState().streamingByAgent['claude-cc-001'],
+    ).toBeUndefined();
+  });
+
+  it('agent-event-appended for non-assistant-text events does NOT clear streaming', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    useChatStore.setState({
+      streamingByAgent: { 'claude-cc-001': 'partial text' },
+    });
+    const appendHandler = handlers.get('agent-event-appended')!;
+    appendHandler({ payload: { ...mockUserEvent, id: 99 } });
+    expect(
+      useChatStore.getState().streamingByAgent['claude-cc-001'],
+    ).toBe('partial text');
+  });
+
+  it('agent-turn-complete clears streamingByAgent as a tool-only-turn safety net', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    useChatStore.setState({
+      streamingByAgent: { 'claude-cc-001': 'partial text' },
+      eventsByAgent: {},
+    });
+    const handler = handlers.get('agent-turn-complete')!;
+    handler({
+      payload: {
+        agentId: 'claude-cc-001',
+        terminalReason: 'completed',
+        isError: false,
+      },
+    });
+    expect(
+      useChatStore.getState().streamingByAgent['claude-cc-001'],
+    ).toBeUndefined();
+  });
+
+  it('agent-thread-cleared also drops streamingByAgent for that agent', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    useChatStore.setState({
+      streamingByAgent: { 'claude-cc-001': 'partial text' },
+    });
+    const handler = handlers.get('agent-thread-cleared')!;
+    handler({ payload: 'claude-cc-001' });
+    expect(
+      useChatStore.getState().streamingByAgent['claude-cc-001'],
+    ).toBeUndefined();
   });
 
   it('agent-events-marked-read zeros unread for that agent', async () => {
