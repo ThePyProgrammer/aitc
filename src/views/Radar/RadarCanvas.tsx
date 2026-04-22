@@ -690,10 +690,21 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         }
       }
 
+      // Phase 12 fix (quick/260422-dqu) — derive bridgeNodes ONCE per frame
+      // up-front so the boundary line (step 3), bridge diamonds/labels
+      // (steps 12-13), and screen-space anchor labels (steps 22-24) can all
+      // share the same filter + gate on bridges-present.
+      const bridgeNodes = liveNodes.filter((n) => n.kind === 'bridge');
+
       // Phase 12 (D-18, D-31 z-order step 3): world-space boundary line at
       // y=0 — drawn BEFORE folder hulls so file-node hulls read as layered
       // atop the cross-language spine rather than being bisected.
-      drawBoundaryLine(ctx, vp, w, h, s.theme);
+      // quick/260422-dqu: skipped entirely on no-bridges repos (renderer
+      // itself also early-returns — belt-and-braces prevents the ctx.save()
+      // churn even though drawBoundaryLine no-ops on empty).
+      if (bridgeNodes.length > 0) {
+        drawBoundaryLine(ctx, bridgeNodes, vp, w, h, s.theme);
+      }
 
       // Steps 2-3: Folder hulls (fill/stroke + label).
       drawFolderHulls(
@@ -728,8 +739,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       // Phase 12 (D-17, D-31 z-order steps 12-13): bridge diamonds + labels.
       // Drawn AFTER file nodes/labels so diamonds read as layered atop the
       // file-node scatter, but BEFORE selection halo / agent pulses so user
-      // overlays win the z-fight.
-      const bridgeNodes = liveNodes.filter((n) => n.kind === 'bridge');
+      // overlays win the z-fight. bridgeNodes was computed earlier (shared
+      // with the boundary-line gate) — reusing the same filter result.
       drawBridgeNodes(
         ctx,
         bridgeNodes,
@@ -783,10 +794,15 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       // so leftX=12 resolves to actual 12 logical screen pixels. Canvas
       // dimensions passed in logical (w × h) so boundaryScreenY clamp math
       // stays in the same coordinate space as viewport.panY.
-      ctx.save();
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      drawBoundaryAnchorLabels(ctx, vp, w, h, s.theme);
-      ctx.restore();
+      // quick/260422-dqu: gated on bridges-present — avoids the
+      // setTransform/save/restore churn on no-bridges repos even though
+      // drawBoundaryAnchorLabels also early-returns on an empty bridges arg.
+      if (bridgeNodes.length > 0) {
+        ctx.save();
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        drawBoundaryAnchorLabels(ctx, bridgeNodes, vp, w, h, s.theme);
+        ctx.restore();
+      }
 
       // Phase 11.1 — perf bracket close + emit (D-12, D-13). No observer API.
       // Runs only when radarPerfDebug === '1'. Emits once per 120-frame ring wrap

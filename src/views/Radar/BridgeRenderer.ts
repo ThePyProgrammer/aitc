@@ -53,11 +53,18 @@ export const BRIDGE_HIT_RADIUS = 10;
  */
 export function drawBoundaryLine(
   ctx: CanvasRenderingContext2D,
+  bridges: GraphNode[],
   viewport: Viewport,
   canvasWidth: number,
   _canvasHeight: number,
   theme: GraphTheme = FALLBACK_THEME,
 ): void {
+  // Phase 12 fix (quick/260422-dqu) — gate on bridges-present. On repos
+  // without a Tauri IPC surface (e.g. TS + Python) `get_ipc_bridges`
+  // returns an empty Vec, so the boundary line is meaningless — would
+  // imply a FE/BE divide that doesn't exist. D-15/D-16 locked the Tauri-
+  // binary layout assumption; this guard adds the runtime check.
+  if (bridges.length === 0) return;
   const zoom = viewport.zoom || 1;
   const leftWorld = -viewport.panX / zoom;
   const rightWorld = (canvasWidth - viewport.panX) / zoom;
@@ -210,11 +217,14 @@ export function drawBridgeLabels(
  */
 export function drawBoundaryAnchorLabels(
   ctx: CanvasRenderingContext2D,
+  bridges: GraphNode[],
   viewport: Viewport,
   _canvasWidth: number,
   canvasHeight: number,
   theme: GraphTheme = FALLBACK_THEME,
 ): void {
+  // Phase 12 fix (quick/260422-dqu) — see drawBoundaryLine note.
+  if (bridges.length === 0) return;
   let boundaryScreenY = viewport.panY;
   if (boundaryScreenY < 24) boundaryScreenY = 24;
   if (boundaryScreenY > canvasHeight - 24) boundaryScreenY = canvasHeight - 24;

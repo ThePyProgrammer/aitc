@@ -9,6 +9,21 @@ import {
   BOUNDARY_LINE_OPACITY,
 } from '../BridgeRenderer';
 import { THEMES } from '../themes';
+import type { GraphNode } from '../../../stores/radarStore';
+
+// quick/260422-dqu — shared fixture representing a Tauri repo with at least
+// one bridge. Every drawBoundaryLine / drawBoundaryAnchorLabels call that
+// previously relied on the unconditional render path must now pass a non-
+// empty bridges array to activate the renderer.
+const BRIDGES_FIXTURE: GraphNode[] = [
+  {
+    id: 'bridge:foo',
+    kind: 'bridge',
+    commandName: 'foo',
+    dirKey: 'bridge',
+    dirDepth: 0,
+  },
+];
 
 if (typeof globalThis.Path2D === 'undefined') {
   (globalThis as any).Path2D = class Path2D {
@@ -61,7 +76,7 @@ function makeMockCtx() {
 describe('drawBoundaryLine', () => {
   it('V-12-22: strokes horizontal line across viewport at world y=0', () => {
     const ctx = makeMockCtx();
-    drawBoundaryLine(ctx, { zoom: 1, panX: 0, panY: 0 }, 800, 600);
+    drawBoundaryLine(ctx, BRIDGES_FIXTURE, { zoom: 1, panX: 0, panY: 0 }, 800, 600);
     const move = ctx._calls.find((c: Call) => c.fn === 'moveTo');
     const line = ctx._calls.find((c: Call) => c.fn === 'lineTo');
     expect(move).toBeDefined();
@@ -75,25 +90,25 @@ describe('drawBoundaryLine', () => {
   it('V-12-22: stroke uses theme.hullStroke at BOUNDARY_LINE_OPACITY', () => {
     const ctx = makeMockCtx();
     const theme = THEMES['phosphor-classic'];
-    drawBoundaryLine(ctx, { zoom: 1, panX: 0, panY: 0 }, 800, 600, theme);
+    drawBoundaryLine(ctx, BRIDGES_FIXTURE, { zoom: 1, panX: 0, panY: 0 }, 800, 600, theme);
     expect(ctx._assignments.strokeStyle).toContain(theme.hullStroke);
     expect(ctx._assignments.globalAlpha).toContain(BOUNDARY_LINE_OPACITY);
   });
 
   it('V-12-22: stroke width is 1/viewport.zoom (world-space thickness)', () => {
     const ctxA = makeMockCtx();
-    drawBoundaryLine(ctxA, { zoom: 2, panX: 0, panY: 0 }, 800, 600);
+    drawBoundaryLine(ctxA, BRIDGES_FIXTURE, { zoom: 2, panX: 0, panY: 0 }, 800, 600);
     expect(ctxA._assignments.lineWidth).toContain(1 / 2);
 
     const ctxB = makeMockCtx();
-    drawBoundaryLine(ctxB, { zoom: 0.5, panX: 0, panY: 0 }, 800, 600);
+    drawBoundaryLine(ctxB, BRIDGES_FIXTURE, { zoom: 0.5, panX: 0, panY: 0 }, 800, 600);
     expect(ctxB._assignments.lineWidth).toContain(1 / 0.5);
   });
 
   it('V-12-22: line extents cover full viewport width projected back to world', () => {
     const ctx = makeMockCtx();
     // panX=100, zoom=2 → leftWorld = -100/2 = -50; rightWorld = (800-100)/2 = 350.
-    drawBoundaryLine(ctx, { zoom: 2, panX: 100, panY: 0 }, 800, 600);
+    drawBoundaryLine(ctx, BRIDGES_FIXTURE, { zoom: 2, panX: 100, panY: 0 }, 800, 600);
     const move = ctx._calls.find((c: Call) => c.fn === 'moveTo');
     const line = ctx._calls.find((c: Call) => c.fn === 'lineTo');
     expect(move!.args[0]).toBe(-50);
@@ -101,10 +116,20 @@ describe('drawBoundaryLine', () => {
   });
 });
 
+describe('drawBoundaryLine — no-bridges gate (quick/260422-dqu)', () => {
+  it('does not stroke when bridges array is empty', () => {
+    const ctx = makeMockCtx();
+    drawBoundaryLine(ctx, [], { zoom: 1, panX: 0, panY: 0 }, 800, 600);
+    expect(ctx._calls.some((c: Call) => c.fn === 'moveTo')).toBe(false);
+    expect(ctx._calls.some((c: Call) => c.fn === 'lineTo')).toBe(false);
+    expect(ctx._calls.some((c: Call) => c.fn === 'stroke')).toBe(false);
+  });
+});
+
 describe('drawBoundaryAnchorLabels', () => {
   it('V-12-22: renders FRONTEND/TypeScript (above) + BACKEND/Rust (below) labels', () => {
     const ctx = makeMockCtx();
-    drawBoundaryAnchorLabels(ctx, { zoom: 1, panX: 0, panY: 300 }, 800, 600);
+    drawBoundaryAnchorLabels(ctx, BRIDGES_FIXTURE, { zoom: 1, panX: 0, panY: 300 }, 800, 600);
     const texts = ctx._calls
       .filter((c: Call) => c.fn === 'fillText')
       .map((c: Call) => c.args[0]);
@@ -116,7 +141,7 @@ describe('drawBoundaryAnchorLabels', () => {
 
   it('V-12-22: labels anchored at leftX=12 (screen-space inset)', () => {
     const ctx = makeMockCtx();
-    drawBoundaryAnchorLabels(ctx, { zoom: 1, panX: 0, panY: 300 }, 800, 600);
+    drawBoundaryAnchorLabels(ctx, BRIDGES_FIXTURE, { zoom: 1, panX: 0, panY: 300 }, 800, 600);
     const texts = ctx._calls.filter((c: Call) => c.fn === 'fillText');
     for (const t of texts) {
       expect(t.args[1]).toBe(12);
@@ -125,7 +150,7 @@ describe('drawBoundaryAnchorLabels', () => {
 
   it('V-12-22: clamps boundaryScreenY to 24 when panY < 24', () => {
     const ctx = makeMockCtx();
-    drawBoundaryAnchorLabels(ctx, { zoom: 1, panX: 0, panY: -100 }, 800, 600);
+    drawBoundaryAnchorLabels(ctx, BRIDGES_FIXTURE, { zoom: 1, panX: 0, panY: -100 }, 800, 600);
     // FRONTEND y = clamped(24) - 18 = 6.
     const frontend = ctx._calls.find(
       (c: Call) => c.fn === 'fillText' && c.args[0] === 'FRONTEND',
@@ -135,7 +160,7 @@ describe('drawBoundaryAnchorLabels', () => {
 
   it('V-12-22: clamps boundaryScreenY to canvasHeight-24 when panY > canvasHeight-24', () => {
     const ctx = makeMockCtx();
-    drawBoundaryAnchorLabels(ctx, { zoom: 1, panX: 0, panY: 10000 }, 800, 600);
+    drawBoundaryAnchorLabels(ctx, BRIDGES_FIXTURE, { zoom: 1, panX: 0, panY: 10000 }, 800, 600);
     // BACKEND y = clamped(canvasHeight - 24) + 18 = 576 + 18 = 594.
     const backend = ctx._calls.find(
       (c: Call) => c.fn === 'fillText' && c.args[0] === 'BACKEND',
@@ -148,11 +173,40 @@ describe('drawBoundaryAnchorLabels', () => {
     const theme = THEMES['phosphor-classic'];
     drawBoundaryAnchorLabels(
       ctx,
+      BRIDGES_FIXTURE,
       { zoom: 1, panX: 0, panY: 300 },
       800,
       600,
       theme,
     );
     expect(ctx._assignments.fillStyle).toContain(theme.folderLabelColor);
+  });
+});
+
+describe('drawBoundaryAnchorLabels — no-bridges gate (quick/260422-dqu)', () => {
+  it('does not render FRONTEND/BACKEND labels when bridges array is empty', () => {
+    const ctx = makeMockCtx();
+    drawBoundaryAnchorLabels(ctx, [], { zoom: 1, panX: 0, panY: 300 }, 800, 600);
+    const texts = ctx._calls
+      .filter((c: Call) => c.fn === 'fillText')
+      .map((c: Call) => c.args[0]);
+    expect(texts).not.toContain('FRONTEND');
+    expect(texts).not.toContain('BACKEND');
+  });
+
+  it('renders labels when at least one bridge is present (regression guard for V-12-22)', () => {
+    const ctx = makeMockCtx();
+    drawBoundaryAnchorLabels(
+      ctx,
+      BRIDGES_FIXTURE,
+      { zoom: 1, panX: 0, panY: 300 },
+      800,
+      600,
+    );
+    const texts = ctx._calls
+      .filter((c: Call) => c.fn === 'fillText')
+      .map((c: Call) => c.args[0]);
+    expect(texts).toContain('FRONTEND');
+    expect(texts).toContain('BACKEND');
   });
 });
