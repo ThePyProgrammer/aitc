@@ -44,11 +44,13 @@ describe('hullCache bridge exclusion (Phase 22 Fix 2, W-22-03)', () => {
     // File-only centroid: cy ≈ (10+10+20)/3 ≈ 13.33.
     // If bridge were included: cy ≈ (10+10+20+0)/4 ≈ 10.
     // Assert cy > 11 to distinguish unambiguously.
+    // dirDepth=0 ensures shouldBuildHullAtZoom returns true at every zoom
+    // bucket (zoom < 0.6 gates on dirDepth === 0 specifically).
     const nodes: GraphNode[] = [
-      { id: 'src/a.ts', dirKey: 'src', dirDepth: 1, kind: 'file', x: 0, y: 10 } as GraphNode,
-      { id: 'src/b.ts', dirKey: 'src', dirDepth: 1, kind: 'file', x: 10, y: 10 } as GraphNode,
-      { id: 'src/c.ts', dirKey: 'src', dirDepth: 1, kind: 'file', x: 5, y: 20 } as GraphNode,
-      { id: 'bridge:ping', dirKey: 'src', dirDepth: 1, kind: 'bridge', x: 5, y: 0 } as GraphNode,
+      { id: 'src/a.ts', dirKey: 'src', dirDepth: 0, kind: 'file', x: 0, y: 10 } as GraphNode,
+      { id: 'src/b.ts', dirKey: 'src', dirDepth: 0, kind: 'file', x: 10, y: 10 } as GraphNode,
+      { id: 'src/c.ts', dirKey: 'src', dirDepth: 0, kind: 'file', x: 5, y: 20 } as GraphNode,
+      { id: 'bridge:ping', dirKey: 'src', dirDepth: 0, kind: 'bridge', x: 5, y: 0 } as GraphNode,
     ];
     const result = getHullCache(nodes, 1.0, 1000);
     const entry = result.get('src');
@@ -57,11 +59,13 @@ describe('hullCache bridge exclusion (Phase 22 Fix 2, W-22-03)', () => {
   });
 
   it('W-22-03: invariant holds across zoom buckets (cache-epoch sanity)', () => {
+    // dirDepth=0 so shouldBuildHullAtZoom(0, zoom) returns true for every
+    // bucket including zoom=0.5 (which gates deeper dirs off).
     const nodes: GraphNode[] = [
-      { id: 'src/a.ts', dirKey: 'src', dirDepth: 1, kind: 'file', x: 0, y: 10 } as GraphNode,
-      { id: 'src/b.ts', dirKey: 'src', dirDepth: 1, kind: 'file', x: 10, y: 10 } as GraphNode,
-      { id: 'src/c.ts', dirKey: 'src', dirDepth: 1, kind: 'file', x: 5, y: 20 } as GraphNode,
-      { id: 'bridge:ping', dirKey: 'src', dirDepth: 1, kind: 'bridge', x: 5, y: 0 } as GraphNode,
+      { id: 'src/a.ts', dirKey: 'src', dirDepth: 0, kind: 'file', x: 0, y: 10 } as GraphNode,
+      { id: 'src/b.ts', dirKey: 'src', dirDepth: 0, kind: 'file', x: 10, y: 10 } as GraphNode,
+      { id: 'src/c.ts', dirKey: 'src', dirDepth: 0, kind: 'file', x: 5, y: 20 } as GraphNode,
+      { id: 'bridge:ping', dirKey: 'src', dirDepth: 0, kind: 'bridge', x: 5, y: 0 } as GraphNode,
     ];
     for (const zoom of [0.5, 1.0, 2.0, 5.0]) {
       _resetHullCacheForTest();
