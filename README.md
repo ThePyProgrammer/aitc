@@ -92,7 +92,7 @@ wireframes/                Command Horizon design-system source
 
 ## the build plan, featuring scope creep
 
-Built phase-by-phase through [GSD](.planning/). Started as "oh I'll ship six phases, a cute little tower + radar + merge UI app." Now there are twenty-one, plus a decimal (11.1), and the count keeps going up every time I actually run the thing. Phases 11-17 were added *after* v1.0 shipped because once you have a functional ATC radar you cannot stop asking what if the radar was cooler. Phase 18 was added because running four agents at once filled the registry in about ten seconds. Phase 19 was added because the chat UI showed hook noise, duplicated text blocks, and literal triple-backticks where code blocks should go. Phase 20 was added because an inefficiency audit caught `fetchAgents()` re-rendering every subscriber on every 2-second poll even when nothing about the agents actually changed. Phase 21 was added because Phase 12's cross-language boundary visualization quietly assumed a Tauri layout, and it turns out not everything is a Tauri app. Classic.
+Built phase-by-phase through [GSD](.planning/). Started as "oh I'll ship six phases, a cute little tower + radar + merge UI app." Now there are twenty-two, plus a decimal (11.1), and the count keeps going up every time I actually run the thing. Phases 11-17 were added *after* v1.0 shipped because once you have a functional ATC radar you cannot stop asking what if the radar was cooler. Phase 18 was added because running four agents at once filled the registry in about ten seconds. Phase 19 was added because the chat UI showed hook noise, duplicated text blocks, and literal triple-backticks where code blocks should go. Phase 20 was added because an inefficiency audit caught `fetchAgents()` re-rendering every subscriber on every 2-second poll even when nothing about the agents actually changed. Phase 21 was added because Phase 12's cross-language boundary visualization quietly assumed a Tauri layout, and it turns out not everything is a Tauri app. Phase 22 was added because Phase 12's UAT also caught a phantom aura circle under the bridge diamonds (wrong render pass), folder hulls enveloping bridges (wrong filter in the hull cache), and anchor labels you can barely see (same color token as the folder labels). Classic.
 
 Each phase has a `.planning/phases/NN-*/` folder with research · context · plan(s) · verification artefacts. The arrow after each phase name lists its **real dependencies** — not execution order. GSD happens to run one phase at a time, but Wave 3's phases fan out sideways from the main chain: each one was filed after something surfaced while actually running the tower.
 
@@ -114,29 +114,30 @@ Wave 1 — "wait, I want more surfaces"
 Wave 2 — "the radar should be sicker"
   11   d3-force in a WebWorker             ← 7         ✅ shipped (2026-04-21)
   11.1 Fix zoom-scroll lag                 ← 7         ✅ shipped (2026-04-21)
-  12   IPC bridge nodes + boundary viz     ← 7, 11     🟡 5/5 coded — UAT pending on 12-05 checkpoint  ← next up
+  12   IPC bridge nodes + boundary viz     ← 7, 11     ✅ shipped (2026-04-22)
   13   4-level semantic zoom               ← 7, 11     ⏳ planning
   14   Multi-layer offscreen canvas        ← 7, 11     ⏳ planning
   15   Enhanced ATC overlay (TCAS)         ← 7, 14     ⏳ planning
   16   Typed edges + Louvain communities   ← 7, 12     ⏳ planning
 
 Wave 3 — "things you only find out by actually running this"
-  17   Conflict-triggered gate             ← 3, 8      🟡 6/6 coded — UAT pending on 17-06 checkpoint
+  17   Conflict-triggered gate             ← 3, 8      🟡 6/6 coded — UAT pending on 17-06 checkpoint  ← next up
   18   Fix passive-scan registry flooding  ← 3, 6      ✅ shipped (2026-04-21)
   19   Polish chat transcript rendering    ← 5, 10     🟡 4/4 coded — UAT pending on 19-HUMAN-UAT
   20   Diff-aware agent polling            ← 3, 10     ⏳ planning
   21   Polyglot IPC bridge extractor       ← 12        ⏳ planning
+  22   Bridge layer visual polish          ← 12        ⏳ planning
 ```
 
 **Status (as of 2026-04-22):**
 
 *Waves 0 + 1* shipped in full — six foundation phases closed by 2026-04-10, four surface-expansion phases (graph radar, PreToolUse hooks, Arsenal, Chat UI) closed by 2026-04-21.
 
-*Wave 2* — Phases 11 + 11.1 shipped (d3-force in a WebWorker plus the wheel-zoom rAF fix that surfaced during 11's UAT). Phase 12 is code-complete across all 5 plans and was mid-D-34-UAT when smoke on a "2 TS frontends + Python backend" repo caught the Tauri-only assumption baked into the boundary layer; quick-task `260422-dqu` shipped a runtime guard that cleanly hides the layer on non-Tauri repos, and the structural generalization got filed as Phase 21. Phases 13–16 still planning.
+*Wave 2* — Phases 11 + 11.1 + 12 shipped. Phase 12's D-34 UAT approved 2026-04-22; during UAT smoke on a "2 TS frontends + Python backend" repo caught the Tauri-only assumption baked into the boundary layer (quick-task `260422-dqu` shipped a runtime guard that cleanly hides the layer on non-Tauri repos), and the same UAT pass surfaced four visual-polish items (phantom aura under diamonds, folder hulls enveloping bridges, anchor-label contrast, dangling-vs-populated subtlety) — the structural polyglot generalization got filed as Phase 21, the four polish items as Phase 22. Phases 13–16 still planning.
 
-*Wave 3* is the reality-check dumping ground. Phase 17 (conflict-triggered gating) was added because the category-based gate shipped in Phase 8 felt wrong — approval should key off a conflict signal, not a tool name; all 6 plans coded, UAT pending. Phase 18 shipped because running four agents at once filled the registry in ten seconds. Phase 19 was added because the chat UI rendered triple-backticks literally, repeated text blocks, and hook-startup noise — all coded, UAT pending. Round-1 UAT on 2026-04-22 caught two gap-closures both landed same day: the first-pass tool-card polish used opacity modifiers faint enough the boxes blended into the chat bg (switched to solid `bg-surface-container-high` + solid `border-outline-variant`), and D-01's aggregator coalesce had no frontend subscription to `agent-assistant-delta` so progressive reveal went dark between turn start and `TurnComplete` (fixed with a per-agent streaming buffer + synthetic streaming row). Phase 20 was added because an inefficiency audit caught `fetchAgents()` re-rendering every subscriber every 2 seconds. Phase 21 was added because Phase 12's polyglot UAT exposed the hardcoded FE/BE labels as a Tauri-specific visualization dressed up as a general one.
+*Wave 3* is the reality-check dumping ground. Phase 17 (conflict-triggered gating) was added because the category-based gate shipped in Phase 8 felt wrong — approval should key off a conflict signal, not a tool name; all 6 plans coded, UAT pending. Phase 18 shipped because running four agents at once filled the registry in ten seconds. Phase 19 was added because the chat UI rendered triple-backticks literally, repeated text blocks, and hook-startup noise — all coded, UAT pending. Round-1 UAT on 2026-04-22 caught two gap-closures both landed same day: the first-pass tool-card polish used opacity modifiers faint enough the boxes blended into the chat bg (switched to solid `bg-surface-container-high` + solid `border-outline-variant`), and D-01's aggregator coalesce had no frontend subscription to `agent-assistant-delta` so progressive reveal went dark between turn start and `TurnComplete` (fixed with a per-agent streaming buffer + synthetic streaming row). Phase 20 was added because an inefficiency audit caught `fetchAgents()` re-rendering every subscriber every 2 seconds. Phase 21 was added because Phase 12's polyglot UAT exposed the hardcoded FE/BE labels as a Tauri-specific visualization dressed up as a general one. Phase 22 was added because the same Phase 12 UAT caught a phantom aura ring under the bridge diamonds (wrong render pass), folder hulls enveloping bridges at the boundary line (unfiltered hull cache), and anchor labels too dim against busy graph regions — none invalidate Phase 12's deliverable, all are additive polish.
 
-Totals: 13 of 22 entries shipped (counting 11.1). Three phases (12, 17, 19) are code-complete awaiting UAT. Six in planning (13, 14, 15, 16, 20, 21).
+Totals: 14 of 23 entries shipped (counting 11.1). Two phases (17, 19) are code-complete awaiting UAT. Seven in planning (13, 14, 15, 16, 20, 21, 22).
 
 Ground truth: [`.planning/STATE.md`](.planning/STATE.md) + [`.planning/ROADMAP.md`](.planning/ROADMAP.md). GSD updates them automatically. Please do not hand-edit the checkboxes, you will make me sad.
 
@@ -171,4 +172,4 @@ It runs, though. On my Linux machine at least. Mostly. And apparently on Windows
 
 I had this idea when I read [this LinkedIn post](https://www.linkedin.com/posts/dr-oliver-borchers-043a48b9_cursor-3-just-left-vs-code-completely-rewritten-share-7447171765312786433-3TO3) that suggested the logical progression for an IDE like Cursor was to move from being a "co-pilot" to an "air traffic control system". After discussing with [@Ethan-Chew](https://github.com/Ethan-Chew), it sounded like a pretty cool idea to implement over the weekend.
 
-Now it's twenty-one phases long (twenty-two if you count 11.1) so...
+Now it's twenty-two phases long (twenty-three if you count 11.1) so...
