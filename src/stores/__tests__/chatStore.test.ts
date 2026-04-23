@@ -162,6 +162,42 @@ describe('chatStore', () => {
     expect(mockInvoke).not.toHaveBeenCalled();
   });
 
+  // Phase 10 latent bug fix — selectAgent loads historical events on first
+  // select when eventsByAgent[id] is undefined. Chat transcript was empty
+  // after app restart despite rows existing in agent_events.
+  it('selectAgent loads historical events on first select', async () => {
+    mockInvoke.mockImplementation(async (cmd) => {
+      if (cmd === 'list_agent_events') return [mkUser(1, 'delivered')];
+      if (cmd === 'mark_agent_events_read') return undefined;
+      return undefined;
+    });
+    useChatStore.getState().selectAgent('claude-cc-001');
+    // Wait a tick for the fire-and-forget loadInitialEvents + markRead.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockInvoke).toHaveBeenCalledWith('list_agent_events', {
+      agentId: 'claude-cc-001',
+      beforeId: null,
+      limit: 50,
+    });
+    expect(
+      useChatStore.getState().eventsByAgent['claude-cc-001'] ?? [],
+    ).toHaveLength(1);
+  });
+
+  it('selectAgent does NOT re-fetch when eventsByAgent[id] is already loaded', async () => {
+    // Pre-populate so the guard triggers.
+    useChatStore.setState({
+      eventsByAgent: { 'claude-cc-001': [mkUser(1, 'delivered')] },
+    });
+    mockInvoke.mockImplementation(async () => undefined);
+    useChatStore.getState().selectAgent('claude-cc-001');
+    await new Promise((r) => setTimeout(r, 0));
+    // Only mark_agent_events_read should be invoked — NOT list_agent_events.
+    const calls = mockInvoke.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContain('list_agent_events');
+    expect(calls).toContain('mark_agent_events_read');
+  });
+
   it('sendMessage optimistic-appends the returned event', async () => {
     mockInvoke.mockResolvedValueOnce(mockUserEvent);
     await useChatStore.getState().sendMessage('claude-cc-001', 'hello');

@@ -151,6 +151,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   selectAgent: (id) => {
     set({ selectedAgentId: id });
     if (id !== null) {
+      // Fire-and-forget history fetch when this agent's events haven't been
+      // loaded yet. Post-load the live subscription keeps the array fresh, so
+      // re-selecting the same agent is a no-op on the DB. Latent bug from
+      // Phase 10 Plan 06 — channels populated via list_chat_channels but
+      // agent_events rows never pulled into the store on select.
+      if (get().eventsByAgent[id] === undefined) {
+        void get().loadInitialEvents(id);
+      }
       // Fire-and-forget markRead side-effect.
       void get().markRead(id);
     }
