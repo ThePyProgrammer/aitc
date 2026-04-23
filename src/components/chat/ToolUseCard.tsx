@@ -22,6 +22,7 @@ import {
   NotebookPen,
   Plug,
   Search,
+  Sparkles,
   Terminal,
   Wrench,
   type LucideIcon,
@@ -106,6 +107,11 @@ function deriveSummary(
       const prompt = String(toolInput.prompt ?? '');
       return { primary: prompt.slice(0, 60) };
     }
+    case 'Skill': {
+      // skill name lives in the label (SKILL[NAME]); primary surfaces args.
+      const args = toolInput.args as string | undefined;
+      return { primary: args ?? '' };
+    }
     default:
       return {
         primary: String(
@@ -138,6 +144,7 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   WebFetch: Download,
   WebSearch: Globe,
   Task: Bot,
+  Skill: Sparkles,
 };
 
 function toolIconFor(name: string | null | undefined): LucideIcon {
@@ -179,16 +186,26 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
   const summary = deriveSummary(toolName ?? undefined, payload.tool_input);
   const approvalId = event.approvalRequestId;
   const isAgent = toolName === 'Task';
-  // For Task we relabel TASK → AGENT[SUBAGENT_TYPE] so the row reads as a
-  // delegated sub-agent rather than an opaque tool. Falls back to plain
-  // "AGENT" if subagent_type is missing or non-string.
+  const isSkill = toolName === 'Skill';
+  // Special-cased labels:
+  //   Task  → AGENT[SUBAGENT_TYPE]   ("delegated sub-conversation")
+  //   Skill → SKILL[SKILL_NAME]      ("inline-loaded slash-command")
+  // Each falls back to a plain unparameterized label if the relevant
+  // identifier field is missing or non-string.
   const displayLabel = (() => {
-    if (!isAgent) return (toolName ?? 'UNKNOWN').toUpperCase();
-    const sub = toolInput.subagent_type;
-    if (typeof sub === 'string' && sub.length > 0) {
-      return `AGENT[${sub.toUpperCase()}]`;
+    if (isAgent) {
+      const sub = toolInput.subagent_type;
+      return typeof sub === 'string' && sub.length > 0
+        ? `AGENT[${sub.toUpperCase()}]`
+        : 'AGENT';
     }
-    return 'AGENT';
+    if (isSkill) {
+      const name = toolInput.skill;
+      return typeof name === 'string' && name.length > 0
+        ? `SKILL[${name.toUpperCase()}]`
+        : 'SKILL';
+    }
+    return (toolName ?? 'UNKNOWN').toUpperCase();
   })();
 
   // Phase 19 D-02.2 — pull the paired tool_result (if any) from the store.
@@ -287,7 +304,11 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
           >
             <div
               className={`px-5 pb-4 pt-4 bg-surface-container-lowest border-t border-outline${
-                isAgent ? ' border-l-2 border-l-secondary' : ''
+                isAgent
+                  ? ' border-l-2 border-l-secondary'
+                  : isSkill
+                  ? ' border-l-2 border-l-tertiary'
+                  : ''
               }`}
             >
               {approvalId != null && (
@@ -315,6 +336,7 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
                 />
               </section>
               {paired.toolResult &&
+                !isSkill &&
                 (isAgent ? (
                   <AgentResultSection event={paired.toolResult} />
                 ) : (
