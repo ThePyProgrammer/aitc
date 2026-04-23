@@ -162,41 +162,32 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
-        className="w-full flex items-center gap-2 px-4 py-1.5 text-left hover:bg-[#333333] transition-colors"
+        className="w-full flex items-center gap-3 px-4 py-1.5 text-left hover:bg-[#333333] transition-colors"
         aria-expanded={expanded}
       >
+        <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant shrink-0">
+          {(toolName ?? 'UNKNOWN').toUpperCase()}
+        </span>
+        <span className="text-on-surface-variant/40 shrink-0 font-mono text-xs">
+          ·
+        </span>
+        <span className="flex-1 truncate font-mono text-xs text-on-surface">
+          {summary.primary}
+          {summary.secondary && (
+            <>
+              {' · '}
+              <span className="text-on-surface-variant/60">
+                {summary.secondary}
+              </span>
+            </>
+          )}
+        </span>
         <span
           data-testid="tool-status-dot"
           data-status={dot.state}
           className={`shrink-0 w-2 h-2 rounded-full ${dot.color}`}
           aria-hidden="true"
         />
-        <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/50 shrink-0">
-          TOOL
-        </span>
-        <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant shrink-0">
-          {(toolName ?? 'UNKNOWN').toUpperCase()}
-        </span>
-        <span className="flex-1 truncate font-mono text-xs text-on-surface-variant/70">
-          {summary.primary}
-          {summary.secondary && (
-            <>
-              {' · '}
-              <span className="text-on-surface-variant/50">
-                {summary.secondary}
-              </span>
-            </>
-          )}
-        </span>
-        {approvalId != null && (
-          <button
-            type="button"
-            onClick={handleApprovalClick}
-            className="font-headline text-[10px] tracking-widest uppercase text-secondary hover:underline shrink-0"
-          >
-            → APPROVAL_{approvalId}
-          </button>
-        )}
         {expanded ? (
           <ChevronUp
             size={12}
@@ -222,13 +213,31 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
             transition={{ duration: 0.15 }}
             className="overflow-hidden"
           >
-            <div className="px-4 pb-3 pt-1 bg-surface-bright border-t border-outline">
-              <ToolPreview
-                toolName={toolName ?? ''}
-                toolInputJson={toolInput}
-                filePath={(toolInput.file_path as string | undefined) ?? null}
-                requestId={approvalId ?? 0}
-              />
+            <div className="px-4 pb-3 pt-3 bg-surface-bright border-t border-outline">
+              {approvalId != null && (
+                <div className="flex justify-end mb-3">
+                  <button
+                    type="button"
+                    onClick={handleApprovalClick}
+                    className="font-headline text-[10px] tracking-widest uppercase text-secondary hover:underline"
+                  >
+                    → APPROVAL_{approvalId}
+                  </button>
+                </div>
+              )}
+              <section className="mb-4">
+                <h4 className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/70 mb-2">
+                  INPUT
+                </h4>
+                <ToolPreview
+                  toolName={toolName ?? ''}
+                  toolInputJson={toolInput}
+                  filePath={
+                    (toolInput.file_path as string | undefined) ?? null
+                  }
+                  requestId={approvalId ?? 0}
+                />
+              </section>
               {paired.toolResult && (
                 <ToolResultSection event={paired.toolResult} />
               )}
@@ -240,11 +249,9 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
   );
 }
 
-// Inline RESULT section rendered inside the expanded ToolUseCard body when
-// a paired tool_result is available in the same transcript page. Mirrors
-// ToolResultCard's standalone rendering — same extractText + max-height +
-// is_error red tint — but sits visually under the ToolPreview input so the
-// INPUT → OUTPUT pair reads as one collapsible unit.
+// OUTPUT section rendered inside the expanded body when a paired
+// tool_result is available. Sectioned header with an inline status dot +
+// optional ERROR suffix; body is extractText'd, scrollable on overflow.
 function ToolResultSection({ event }: { event: AgentEvent }) {
   const payload =
     (event.payloadJson as {
@@ -254,22 +261,28 @@ function ToolResultSection({ event }: { event: AgentEvent }) {
   const body = extractText(payload.content);
   const isError = payload.is_error === true;
   return (
-    <div
-      data-testid="tool-result-section"
-      className={`mt-3 pt-3 border-t border-outline-variant font-mono text-xs ${
-        isError ? 'text-error' : 'text-on-surface-variant/70'
-      }`}
-    >
-      <div
-        className={`font-headline text-[10px] uppercase tracking-widest mb-1 ${
-          isError ? 'text-error' : 'text-on-surface-variant/50'
+    <section data-testid="tool-result-section">
+      <h4 className="flex items-center gap-2 font-headline text-[10px] uppercase tracking-widest mb-2">
+        <span
+          className={isError ? 'text-error' : 'text-on-surface-variant/70'}
+        >
+          OUTPUT
+        </span>
+        <span
+          className={`shrink-0 w-1.5 h-1.5 rounded-full ${
+            isError ? 'bg-error' : 'bg-primary'
+          }`}
+          aria-hidden="true"
+        />
+        {isError && <span className="text-error">ERROR</span>}
+      </h4>
+      <pre
+        className={`whitespace-pre-wrap max-h-[400px] overflow-y-auto max-w-full font-mono text-xs ${
+          isError ? 'text-error' : 'text-on-surface-variant/80'
         }`}
       >
-        {isError ? 'ERROR' : 'RESULT'}
-      </div>
-      <pre className="whitespace-pre-wrap max-h-[400px] overflow-y-auto max-w-full font-mono">
         {body}
       </pre>
-    </div>
+    </section>
   );
 }

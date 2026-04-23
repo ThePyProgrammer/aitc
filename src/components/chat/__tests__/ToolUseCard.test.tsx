@@ -80,14 +80,17 @@ beforeEach(() => {
 });
 
 describe('ToolUseCard', () => {
-  it('renders collapsed by default with TOOL label + tool name + summary + chevron', () => {
+  it('renders collapsed by default with tool name + summary + status dot + chevron (Option 3 — no TOOL prefix)', () => {
     renderWithRouter(<ToolUseCard event={mk()} />);
     const card = screen.getByTestId('tool-use-card');
     expect(card).toBeInTheDocument();
-    // Flat-row pattern: plain text labels instead of ToolBadge pill.
-    expect(card.textContent ?? '').toContain('TOOL');
+    // Option 3: dropped the redundant 'TOOL' label; tool name is the
+    // identity anchor, operation sits at full contrast next to it.
+    expect(card.textContent ?? '').not.toMatch(/\bTOOL\b/);
     expect(card.textContent ?? '').toContain('EDIT');
     expect(card.textContent ?? '').toContain('/tmp/a.txt');
+    // Status dot is present (now on the right status column, not leading).
+    expect(card.querySelector('[data-testid="tool-status-dot"]')).not.toBeNull();
     // Expanded body (ToolPreview) should NOT be rendered yet.
     expect(screen.queryByTestId('tool-preview-stub')).toBeNull();
   });
@@ -107,8 +110,14 @@ describe('ToolUseCard', () => {
     );
   });
 
-  it('renders APPROVAL_{id} pill when approvalRequestId is set', () => {
-    renderWithRouter(<ToolUseCard event={mk({ approvalRequestId: 42 })} />);
+  it('renders APPROVAL_{id} pill inside the expanded body header (Option 3 — hoisted from collapsed)', () => {
+    const { container } = renderWithRouter(
+      <ToolUseCard event={mk({ approvalRequestId: 42 })} />,
+    );
+    // Not visible when collapsed — the pill now lives in the expanded strip.
+    expect(screen.queryByText(/APPROVAL_42/)).toBeNull();
+    // Expand and confirm.
+    fireEvent.click(container.querySelector('button[aria-expanded]')!);
     expect(screen.getByText(/APPROVAL_42/)).toBeInTheDocument();
   });
 
@@ -269,8 +278,8 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     expect(dot?.getAttribute('data-status')).toBe('pending');
   });
 
-  // V-19-12 — py-1.5 on collapsed button AND dot precedes TOOL label.
-  it('collapsed button uses py-1.5 and status dot precedes TOOL label', () => {
+  // V-19-12 — py-1.5 on collapsed button + Option 3 layout: tool name → operation → status dot → chevron.
+  it('collapsed button uses py-1.5 and status dot sits in the right status column', () => {
     const event = mk({
       payloadJson: {
         tool_use_id: 'toolu_g',
@@ -284,13 +293,15 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     // Guard against "py-2" surviving as a literal class token on the button.
     expect(button?.className).not.toMatch(/\bpy-2\b/);
     const dot = container.querySelector('[data-testid="tool-status-dot"]');
-    const toolLabel = Array.from(container.querySelectorAll('span')).find(
-      (s) => s.textContent === 'TOOL',
+    const toolName = Array.from(container.querySelectorAll('span')).find(
+      (s) => s.textContent === 'EDIT',
     );
     expect(dot).not.toBeNull();
-    expect(toolLabel).not.toBeNull();
-    // Confirm DOM order: dot comes before TOOL label.
-    const pos = dot!.compareDocumentPosition(toolLabel!);
+    expect(toolName).not.toBeNull();
+    // Option 3: tool name leads the row; status dot sits on the right
+    // (between operation text and chevron). Confirm DOM order:
+    // tool name appears BEFORE the dot.
+    const pos = toolName!.compareDocumentPosition(dot!);
     expect(pos & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 
@@ -333,7 +344,7 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
       '[data-testid="tool-result-section"]',
     );
     expect(section).not.toBeNull();
-    expect(section?.textContent ?? '').toContain('RESULT');
+    expect(section?.textContent ?? '').toContain('OUTPUT');
     expect(section?.textContent ?? '').toContain('drwxr-xr-x');
   });
 
@@ -369,6 +380,9 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
       '[data-testid="tool-result-section"]',
     );
     expect(section?.textContent ?? '').toContain('ERROR');
-    expect(section?.className ?? '').toContain('text-error');
+    // Option 3 layout: text-error is applied to the OUTPUT header <span>
+    // and the <pre> output body (not the outer <section>). Check descendants.
+    const errorTinted = section?.querySelector('.text-error');
+    expect(errorTinted).not.toBeNull();
   });
 });
