@@ -9,6 +9,7 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import {
+  Bot,
   ChevronDown,
   ChevronUp,
   Download,
@@ -18,7 +19,6 @@ import {
   Files,
   FolderOpen,
   Globe,
-  ListChecks,
   NotebookPen,
   Plug,
   Search,
@@ -35,6 +35,7 @@ import {
 } from '../../stores/chatStore';
 import { ToolPreview } from '../../views/CommsHub/ToolPreview';
 import { extractText } from './ToolResultCard';
+import { MarkdownBody } from './MarkdownBody';
 
 export interface ToolUseCardProps {
   event: AgentEvent;
@@ -96,6 +97,15 @@ function deriveSummary(
         return { primary: url };
       }
     }
+    case 'Task': {
+      const description = toolInput.description as string | undefined;
+      if (description && description.length > 0) {
+        return { primary: description };
+      }
+      // Fallback: first ~60 chars of the brief so the row isn't empty.
+      const prompt = String(toolInput.prompt ?? '');
+      return { primary: prompt.slice(0, 60) };
+    }
     default:
       return {
         primary: String(
@@ -127,7 +137,7 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   Bash: Terminal,
   WebFetch: Download,
   WebSearch: Globe,
-  Task: ListChecks,
+  Task: Bot,
 };
 
 function toolIconFor(name: string | null | undefined): LucideIcon {
@@ -168,6 +178,18 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
   const toolInput = payload.tool_input ?? {};
   const summary = deriveSummary(toolName ?? undefined, payload.tool_input);
   const approvalId = event.approvalRequestId;
+  const isAgent = toolName === 'Task';
+  // For Task we relabel TASK → AGENT[SUBAGENT_TYPE] so the row reads as a
+  // delegated sub-agent rather than an opaque tool. Falls back to plain
+  // "AGENT" if subagent_type is missing or non-string.
+  const displayLabel = (() => {
+    if (!isAgent) return (toolName ?? 'UNKNOWN').toUpperCase();
+    const sub = toolInput.subagent_type;
+    if (typeof sub === 'string' && sub.length > 0) {
+      return `AGENT[${sub.toUpperCase()}]`;
+    }
+    return 'AGENT';
+  })();
 
   // Phase 19 D-02.2 — pull the paired tool_result (if any) from the store.
   // Events are partitioned per-agent, so the scan is bounded by the visible
@@ -216,7 +238,7 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
           aria-hidden="true"
         />
         <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant shrink-0">
-          {(toolName ?? 'UNKNOWN').toUpperCase()}
+          {displayLabel}
         </span>
         <span className="text-on-surface-variant/40 shrink-0 font-mono text-xs">
           ·
@@ -263,7 +285,11 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
             transition={{ duration: 0.15 }}
             className="overflow-hidden"
           >
-            <div className="px-5 pb-4 pt-4 bg-surface-container-lowest border-t border-outline">
+            <div
+              className={`px-5 pb-4 pt-4 bg-surface-container-lowest border-t border-outline${
+                isAgent ? ' border-l-2 border-l-secondary' : ''
+              }`}
+            >
               {approvalId != null && (
                 <div className="flex justify-end mb-3">
                   <button
@@ -288,14 +314,57 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
                   requestId={approvalId ?? 0}
                 />
               </section>
-              {paired.toolResult && (
-                <ToolResultSection event={paired.toolResult} />
-              )}
+              {paired.toolResult &&
+                (isAgent ? (
+                  <AgentResultSection event={paired.toolResult} />
+                ) : (
+                  <ToolResultSection event={paired.toolResult} />
+                ))}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+// OUTPUT section for delegated agent (Task) results. Same header chrome as
+// ToolResultSection but the body renders through MarkdownBody — agent
+// replies are prose-shaped (headings, lists, code refs) and a flat <pre>
+// destroys that. Cap is taller (640px) than the generic ToolResultSection
+// (200px) because agent reports legitimately run long.
+function AgentResultSection({ event }: { event: AgentEvent }) {
+  const payload =
+    (event.payloadJson as {
+      content?: unknown;
+      is_error?: boolean;
+    } | null) ?? {};
+  const body = extractText(payload.content);
+  const isError = payload.is_error === true;
+  return (
+    <section data-testid="tool-result-section" data-result-variant="agent">
+      <h4 className="flex items-center gap-2 font-headline text-[10px] uppercase tracking-widest mb-2">
+        <span
+          className={isError ? 'text-error' : 'text-on-surface-variant/70'}
+        >
+          OUTPUT
+        </span>
+        <span
+          className={`shrink-0 w-1.5 h-1.5 rounded-full ${
+            isError ? 'bg-error' : 'bg-primary'
+          }`}
+          aria-hidden="true"
+        />
+        {isError && <span className="text-error">ERROR</span>}
+      </h4>
+      <div
+        className={`max-h-[640px] overflow-y-auto max-w-full ${
+          isError ? 'text-error' : ''
+        }`}
+      >
+        <MarkdownBody content={body} />
+      </div>
+    </section>
   );
 }
 
