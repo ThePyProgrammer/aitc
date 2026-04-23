@@ -41,6 +41,17 @@ export const BOUNDARY_DANGER_ZONE = 100;
 export const BOUNDARY_WRONG_SIDE_MULT = 10;
 export const BOUNDARY_DANGER_ZONE_MULT = 3;
 
+// Hard lane clamp. The asymmetric multiplier above is still a soft force —
+// it can be overpowered in a single tick by cumulative pressure from
+// forceLink (invokes/handles edges to bridges at y=0) + forceCharge +
+// forceCenter, so nodes still cross. The clamp below makes the boundary a
+// hard geometric constraint: at the start of every tick we check if a node
+// is on the wrong side of y=0 and, if so, snap its position back to the
+// lane limit and zero its vy. Bridges (kind='bridge') already carry fy=0
+// and are skipped. File nodes keep a small BOUNDARY_LANE_MARGIN of
+// clearance from the line so they don't overlap the pinned bridge row.
+export const BOUNDARY_LANE_MARGIN = 10;
+
 export function forceBoundary(): BoundaryForce {
   let nodes: BoundaryNode[] = [];
   let strength = FORCE_BOUNDARY_BASE_STRENGTH;
@@ -75,6 +86,22 @@ export function forceBoundary(): BoundaryForce {
       // untyped fixtures) receive no boundary pull — they drift with the
       // other forces rather than being pushed to an arbitrary side.
       if (n.language !== 'ts' && n.language !== 'rust') continue;
+
+      // HARD LANE CLAMP — runs before the soft-pull math so the rest of this
+      // tick's soft pull operates on the snapped position. If the previous
+      // tick's integration pushed the node across y=0 (pressure from link
+      // force to boundary-pinned bridges is the usual culprit), snap y back
+      // to laneLimit and zero vy. Bridges are already skipped above; this
+      // clamp only applies to classified file nodes.
+      const laneLimit =
+        n.language === 'ts' ? -BOUNDARY_LANE_MARGIN : BOUNDARY_LANE_MARGIN;
+      const crossed =
+        (n.language === 'ts' && (n.y ?? 0) > laneLimit) ||
+        (n.language === 'rust' && (n.y ?? 0) < laneLimit);
+      if (crossed) {
+        n.y = laneLimit;
+        n.vy = 0;
+      }
 
       const targetY =
         n.language === 'ts'
