@@ -13,6 +13,10 @@
 // Public surface:
 //   - getHullCache(nodes, zoom, settledAt) → Map<dirKey, HullCacheEntry>
 //   - _resetHullCacheForTest() — test-only cache eviction
+//
+// Invariant: kind === 'bridge' nodes are excluded from hull membership.
+// Bridges are pinned on the y=0 boundary line and would drag folder centroids
+// toward it if included. Enforced inside the group-by-dirKey loop below.
 
 import { polygonHull, polygonCentroid } from 'd3-polygon';
 import { line, curveCatmullRomClosed } from 'd3-shape';
@@ -86,6 +90,7 @@ export function getHullCache(
   for (const n of nodes) {
     if (n.x === undefined || n.y === undefined) continue;
     if (n.dirKey === '') continue;
+    if (n.kind === 'bridge') continue;
     const arr = byDir.get(n.dirKey) ?? [];
     arr.push(n);
     byDir.set(n.dirKey, arr);

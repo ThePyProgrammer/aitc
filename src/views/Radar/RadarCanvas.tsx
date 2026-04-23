@@ -72,6 +72,17 @@ const CONFLICT_BADGE_OFFSET = 6;
 const CONFLICT_COLOR = '#ff7351';     // error token
 
 /**
+ * Phase 22 Fix 1 (D-01, D-02) — filter out bridge nodes before they reach
+ * drawNodes / drawFileLabels. Bridge nodes are rendered exclusively by
+ * drawBridgeNodes / drawBridgeLabels; feeding them to drawNodes produced
+ * a phantom 5px aura circle under every diamond. Pure function so it is
+ * unit-testable without mounting the React tree.
+ */
+export function filterRenderableFileNodes(nodes: GraphNode[]): GraphNode[] {
+  return nodes.filter((n) => n.kind !== 'bridge');
+}
+
+/**
  * Z-order step 12 — expanding ring from 1.0× → 2.5× node radius over 1.6s,
  * opacity 1.0 → 0 with a cubic-bezier(0,0,0.2,1) ease approximation
  * (`t * (2 - t)`). One stroke per contended node id, using the error token.
@@ -695,6 +706,9 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       // (steps 12-13), and screen-space anchor labels (steps 22-24) can all
       // share the same filter + gate on bridges-present.
       const bridgeNodes = liveNodes.filter((n) => n.kind === 'bridge');
+      // Phase 22 Fix 1 (D-01) — sibling to bridgeNodes so drawNodes + drawFileLabels
+      // render the file-node subset only, eliminating the aura-circle defect.
+      const fileNodes = filterRenderableFileNodes(liveNodes);
 
       // Phase 12 (D-18, D-31 z-order step 3): world-space boundary line at
       // y=0 — drawn BEFORE folder hulls so file-node hulls read as layered
@@ -723,7 +737,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       // Step 6: Nodes (heat-tint fill on demand).
       drawNodes(
         ctx,
-        liveNodes,
+        fileNodes,
         s.contentionScores,
         s.heatMapEnabled,
         s.hoveredNodeId,
@@ -734,7 +748,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         s.theme,
       );
       // Step 6b: File-name labels at high zoom (UI-SPEC §Progressive Detail ≥ 4×).
-      drawFileLabels(ctx, liveNodes, vp.zoom, vp, w, h, s.theme);
+      drawFileLabels(ctx, fileNodes, vp.zoom, vp, w, h, s.theme);
 
       // Phase 12 (D-17, D-31 z-order steps 12-13): bridge diamonds + labels.
       // Drawn AFTER file nodes/labels so diamonds read as layered atop the
