@@ -175,6 +175,7 @@ Recent decisions affecting current work:
 - Phase 18 added: Fix passive-scan registry flooding. AgentRegistry hits MAX_AGENTS=100 cap within seconds of boot because passive_bridge matches every claude/codex/opencode-named process on the machine (including unrelated CLI sessions + short-lived subprocess children). Surfaced during Phase 10 UAT — new KAGENT launches fail with "Registry at capacity (100)". Scope passive registration to self-registered PIDs or narrow cwd+cmdline matches; raise MAX_AGENTS as a safety net. Pre-existing bug from Phase 3/Phase 6; Phase 10's long-lived sessions amplified it.
 - Phase 19 added: Polish Phase 10 chat transcript rendering. Four UAT-surfaced gaps: (1) repeated assistant_text chunks (aggregator emits one row per content_block_delta flush — merge into one row per turn); (2) richer tool-use card summaries + diff/hunk/exit-code previews matching codey's details-summary aesthetic; (3) markdown rendering via react-markdown + remark-gfm + existing shiki highlighter for code fences / emphasis / lists; (4) filter SessionStart hook noise (4×[HOOK_STARTED] + 4×[HOOK_RESPONSE] per boot) in the parser or collapse to a single system_note. All UI/parser polish on the working Phase 10 pipeline; no schema changes.
 - Phase 20 added (2026-04-21): Diff-aware agent polling — replace the wholesale `set({ agents })` in `src/stores/agentStore.ts:89–93` `fetchAgents()` (2s poll) with a per-agent diff-emit (upsert changed, remove missing, keep untouched by reference) so Zustand's reference-equality selectors let unchanged subscribers (AgentChannelList, Tower, etc.) skip re-render. Currently 20+ agent sessions cause ~30 full-list re-renders per minute for a single state delta. Perf-only; no behavioral or schema change. Surfaced by 2026-04-21 inefficiency survey as highest-ROI frontend perf fix.
+- Phase 21 added (2026-04-22): Polyglot IPC bridge extractor — generalize Phase 12's bridge scaffold (today Tauri-only, parses tauri-specta `src/bindings.ts` + `#[tauri::command]`) to any cross-language API surface. Pluggable per-language extractors in a new `pipeline/ipc_bridges/extractors/` submodule for FastAPI/Flask/Django route decorators, tRPC routers, OpenAPI/Swagger specs, gRPC `.proto`, Express/Fastify route registrations, and Python↔TS message passing. Replaces the hardcoded "FRONTEND · TypeScript / BACKEND · Rust" boundary labels with per-repo auto-detected language groupings (detect the primary frontend/backend axis from file-type distribution + inferred cross-language dependency flow). Reuses Phase 12's IpcBridgeDto shape, get_ipc_bridges Tauri command, forceBoundary mechanic, and bridge diamond rendering — additive, not breaking. Surfaced during Phase 12 UAT on a "2 TS frontends + Python backend" repo where the hardcoded Tauri binary split was misleading. Quick-task 260422-dqu shipped a runtime no-bridges guard as short-term fix; Phase 21 is the structural generalization.
 
 ### Pending Todos
 
@@ -197,11 +198,12 @@ None yet.
 | 260415-07f | Repo-relative paths from get_tree_index (radar) | 2026-04-15 | 66181eb, bbafa5a, 4670a23 |
 | 260421-igz | Rename top bar title AI_CONTROL_CENTRE → AI_CMD_CENTRE | 2026-04-21 | 236b46e |
 | 260421-fast | Rename top bar title AI_CMD_CENTRE → AI_CONTROL_CENTRE | 2026-04-21 | 3cffd8b |
+| 260422-dqu | Gate Phase 12 boundary layer on bridges-present (polyglot-repo UAT fix) | 2026-04-22 | 6b9f1bb, e7fe5b8 |
 
 ## Session Continuity
 
-Last session: 2026-04-21T14:12:34Z
-Stopped at: Phase 12 Plan 05 (Wave 4 canvas + UI + D-34 checkpoint) complete — awaiting manual UAT via 12-05-CHECKPOINT.md
+Last session: 2026-04-22T01:55:00Z
+Stopped at: Quick task 260422-dqu complete — Phase 12 boundary layer now gated on bridges-present so polyglot (non-Tauri) repos cleanly hide the FE/BE visualization. Phase 12 UAT re-smoke pending.
 Resume file: .planning/phases/12-add-ipc-bridge-nodes-and-cross-language-boundary-visualizati/12-05-CHECKPOINT.md
 Active debug sessions:
 

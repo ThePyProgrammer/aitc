@@ -41,15 +41,22 @@ function step(nodes: BoundaryNode[]): void {
 
 describe('forceBoundary', () => {
   it('V-12-17: converges TS-path nodes to negative y (y<-50) over 30 ticks at strength 0.15', () => {
+    // quick/260422-dqu fixture amendment — the activation gate now requires
+    // EITHER a bridge OR both ts+rust files present. Prepend a single rust
+    // anchor (pinned via the language-filter, NOT a position) so the force
+    // activates; the TS-convergence assertion skips the rust anchor.
     const rng = mulberry32(42);
-    const nodes: BoundaryNode[] = Array.from({ length: 10 }, () => ({
-      kind: 'file',
-      language: 'ts',
-      x: (rng() - 0.5) * 200,
-      y: (rng() - 0.5) * 200,
-      vx: 0,
-      vy: 0,
-    }));
+    const nodes: BoundaryNode[] = [
+      { kind: 'file', language: 'rust', x: 0, y: 100, vx: 0, vy: 0 }, // anchor
+      ...Array.from({ length: 10 }, () => ({
+        kind: 'file' as const,
+        language: 'ts' as const,
+        x: (rng() - 0.5) * 200,
+        y: (rng() - 0.5) * 200,
+        vx: 0,
+        vy: 0,
+      })),
+    ];
     const f = forceBoundary();
     f.initialize(nodes);
     f.strength(0.15);
@@ -58,20 +65,26 @@ describe('forceBoundary', () => {
       step(nodes);
     }
     for (const n of nodes) {
+      if (n.language !== 'ts') continue; // skip the rust anchor
       expect(n.y).toBeLessThan(-50);
     }
   });
 
   it('V-12-18: converges Rust-path nodes to positive y (y>50) over 30 ticks', () => {
+    // quick/260422-dqu fixture amendment — see V-12-17 note. Prepend a single
+    // TS anchor so the force activates.
     const rng = mulberry32(7);
-    const nodes: BoundaryNode[] = Array.from({ length: 10 }, () => ({
-      kind: 'file',
-      language: 'rust',
-      x: (rng() - 0.5) * 200,
-      y: (rng() - 0.5) * 200,
-      vx: 0,
-      vy: 0,
-    }));
+    const nodes: BoundaryNode[] = [
+      { kind: 'file', language: 'ts', x: 0, y: -100, vx: 0, vy: 0 }, // anchor
+      ...Array.from({ length: 10 }, () => ({
+        kind: 'file' as const,
+        language: 'rust' as const,
+        x: (rng() - 0.5) * 200,
+        y: (rng() - 0.5) * 200,
+        vx: 0,
+        vy: 0,
+      })),
+    ];
     const f = forceBoundary();
     f.initialize(nodes);
     f.strength(0.15);
@@ -80,6 +93,7 @@ describe('forceBoundary', () => {
       step(nodes);
     }
     for (const n of nodes) {
+      if (n.language !== 'rust') continue; // skip the ts anchor
       expect(n.y).toBeGreaterThan(50);
     }
   });
@@ -145,19 +159,27 @@ describe('forceBoundary', () => {
     // deadband to be around the TARGET, which matches the semantic intent
     // (prevent jitter at steady-state) without blocking convergence. See
     // 12-04-SUMMARY.md Deviations for rationale.
-    const n: BoundaryNode = {
-      kind: 'file',
-      language: 'ts',
-      x: 0,
-      y: -BOUNDARY_TARGET_Y_MAGNITUDE + (BOUNDARY_DEADBAND - 1), // inside deadband of target
-      vx: 0,
-      vy: 0,
-    };
+    //
+    // quick/260422-dqu amendment — prepend a single rust anchor so the
+    // activation gate fires (ts+rust → force active). Without the anchor the
+    // assertion would still hold but via the inactive-gate path rather than
+    // the deadband gate — we want to exercise the deadband specifically.
+    const nodes: BoundaryNode[] = [
+      { kind: 'file', language: 'rust', x: 0, y: 100, vx: 0, vy: 0 }, // anchor — activates the force
+      {
+        kind: 'file',
+        language: 'ts',
+        x: 0,
+        y: -BOUNDARY_TARGET_Y_MAGNITUDE + (BOUNDARY_DEADBAND - 1), // inside deadband of target
+        vx: 0,
+        vy: 0,
+      },
+    ];
     const f = forceBoundary();
-    f.initialize([n]);
+    f.initialize(nodes);
     f.strength(0.15);
     f(1);
-    expect(n.vy).toBe(0);
+    expect(nodes[1].vy).toBe(0);
   });
 
   it('strength getter/setter round-trips', () => {
@@ -169,6 +191,86 @@ describe('forceBoundary', () => {
     const ret = f.strength(0.5);
     expect(typeof ret).toBe('function');
     expect(ret.strength()).toBe(0.5);
+  });
+});
+
+describe('forceBoundary — classifiable-nodes gate (quick/260422-dqu)', () => {
+  it('is a no-op when node set contains only bridges (bridges-only pathological case)', () => {
+    // Bridges without files — vy must never be written because there's
+    // nothing to pull on either side of the boundary. Bridges themselves
+    // are skipped by the per-node `kind === bridge` short-circuit (V-12-19)
+    // but the activation gate also fires first so even the loop entry
+    // is skipped.
+    const nodes: BoundaryNode[] = [
+      { kind: 'bridge', x: 0, y: 0, vx: 0, vy: 0, fx: 0, fy: 0 },
+    ];
+    const f = forceBoundary();
+    f.initialize(nodes);
+    f.strength(0.15);
+    f(1);
+    expect(nodes[0].vy).toBe(0);
+  });
+
+  it('is a no-op when only TS files are present (no bridges, no rust counterpart)', () => {
+    // The UAT scenario: TS + Python repo. Python files have language=undefined
+    // and TS files have language=ts. Without a rust counterpart OR a bridge,
+    // pulling TS files to y=-300 would create a confusing half-visualization.
+    const nodes: BoundaryNode[] = [
+      { kind: 'file', language: 'ts', x: 0, y: 100, vx: 0, vy: 0 },
+      { kind: 'file', language: 'ts', x: 0, y: 100, vx: 0, vy: 0 },
+      { kind: 'file', x: 0, y: 100, vx: 0, vy: 0 }, // simulates a Python file (undefined language)
+    ];
+    const f = forceBoundary();
+    f.initialize(nodes);
+    f.strength(0.15);
+    f(1);
+    for (const n of nodes) {
+      expect(n.vy).toBe(0);
+    }
+  });
+
+  it('is a no-op when only Rust files are present (inverse of above)', () => {
+    const nodes: BoundaryNode[] = [
+      { kind: 'file', language: 'rust', x: 0, y: 100, vx: 0, vy: 0 },
+      { kind: 'file', language: 'rust', x: 0, y: -100, vx: 0, vy: 0 },
+    ];
+    const f = forceBoundary();
+    f.initialize(nodes);
+    f.strength(0.15);
+    f(1);
+    for (const n of nodes) {
+      expect(n.vy).toBe(0);
+    }
+  });
+
+  it('activates when at least one bridge is present (Tauri repo — V-12-17..V-12-19 regression guard)', () => {
+    const nodes: BoundaryNode[] = [
+      { kind: 'bridge', x: 0, y: 0, vx: 0, vy: 0, fx: 0, fy: 0 },
+      { kind: 'file', language: 'ts', x: 0, y: 100, vx: 0, vy: 0 },
+    ];
+    const f = forceBoundary();
+    f.initialize(nodes);
+    f.strength(0.15);
+    f(1);
+    // Bridge stays untouched (V-12-19 contract); TS file is pulled.
+    expect(nodes[0].vy).toBe(0);
+    expect(nodes[1].vy).not.toBe(0);
+    expect(nodes[1].vy!).toBeLessThan(0); // pulled toward y=-300
+  });
+
+  it('activates when both TS and Rust files are present (polyglot Rust+TS, no Tauri)', () => {
+    const nodes: BoundaryNode[] = [
+      { kind: 'file', language: 'ts', x: 0, y: 100, vx: 0, vy: 0 },
+      { kind: 'file', language: 'rust', x: 0, y: -100, vx: 0, vy: 0 },
+    ];
+    const f = forceBoundary();
+    f.initialize(nodes);
+    f.strength(0.15);
+    f(1);
+    expect(nodes[0].vy).not.toBe(0);
+    expect(nodes[0].vy!).toBeLessThan(0);
+    expect(nodes[1].vy).not.toBe(0);
+    expect(nodes[1].vy!).toBeGreaterThan(0);
   });
 });
 

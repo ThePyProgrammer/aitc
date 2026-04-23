@@ -33,8 +33,22 @@ export const FORCE_BOUNDARY_BASE_STRENGTH = 0.15;
 export function forceBoundary(): BoundaryForce {
   let nodes: BoundaryNode[] = [];
   let strength = FORCE_BOUNDARY_BASE_STRENGTH;
+  // Phase 12 fix (quick/260422-dqu) — gate on presence of a meaningful FE/BE
+  // divide. Three activation modes (computed once in initialize, not per-tick):
+  //   (a) at least one bridge is present (Tauri IPC surface → boundary line
+  //       + labels + slider all rendered per Task 1's gate);
+  //   (b) at least one ts-classified AND one rust-classified file are
+  //       present (pure polyglot Rust+TS repo with no Tauri binding, e.g. a
+  //       standalone Rust crate + web frontend).
+  // If only one side is classifiable (TS+Python, Rust+Go) OR the node set
+  // contains only bridges, the force becomes a pure no-op — otherwise TS-
+  // classified files on a repo with no Rust counterpart would float up
+  // toward y=-300 while Python files (no classification) stayed near y=0,
+  // producing the confusing half-visualization reported in 12-05 UAT.
+  let inactive = false;
 
   const force = ((alpha: number) => {
+    if (inactive) return;
     const k = strength * alpha;
     // RESEARCH §Pitfall 7 — zero-strength early-return. Avoids O(N) work
     // when the slider is dragged to 0 or when the simulation is in a
@@ -73,6 +87,23 @@ export function forceBoundary(): BoundaryForce {
 
   force.initialize = (n: BoundaryNode[]) => {
     nodes = n;
+    // quick/260422-dqu — compute activation once per node-set change.
+    // Requires EITHER a bridge (Tauri IPC surface) OR both ts+rust files
+    // present. Short-circuits as soon as a matching configuration is found.
+    let hasBridge = false;
+    let hasTs = false;
+    let hasRust = false;
+    for (const x of n) {
+      if (x.kind === 'bridge') {
+        hasBridge = true;
+      } else if (x.language === 'ts') {
+        hasTs = true;
+      } else if (x.language === 'rust') {
+        hasRust = true;
+      }
+      if (hasBridge || (hasTs && hasRust)) break;
+    }
+    inactive = !(hasBridge || (hasTs && hasRust));
   };
   force.strength = ((v?: number) => {
     if (v === undefined) return strength;

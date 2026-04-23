@@ -59,6 +59,13 @@ export interface SessionEndedPayload {
 
 export interface ChatStore {
   eventsByAgent: Record<string, AgentEvent[]>;
+  // Phase 19 gap closure (D-01 follow-up) — progressive-reveal buffer.
+  // The aggregator coalesces a turn into a single assistant_text DB row at
+  // TurnComplete (D-01.2), so the UI loses per-delta visibility unless it
+  // listens to the `agent-assistant-delta` Tauri emit. We accumulate the
+  // per-agent streaming text here; ChatTranscript renders it as a synthetic
+  // trailing row until the authoritative assistant_text event lands.
+  streamingByAgent: Record<string, string>;
   channels: ChatChannel[];
   selectedAgentId: string | null;
   unreadByAgent: Record<string, number>;
@@ -82,6 +89,7 @@ const INITIAL_LIMIT = 50;
 
 export const useChatStore = create<ChatStore>((set, get) => ({
   eventsByAgent: {},
+  streamingByAgent: {},
   channels: [],
   selectedAgentId: null,
   unreadByAgent: {},
@@ -209,9 +217,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       un7,
       un8,
       un9,
+      un10,
     ] = await Promise.all([
       // 1. agent-event-appended — append to agent array, dedupe by id,
       //    increment unread only when agent is NOT selected-and-visible.
+      //    When an assistant_text row lands, also clear the streaming buffer
+      //    (D-01 final row is authoritative; drop the synthetic stream).
       listen<AgentEvent>('agent-event-appended', (ev) => {
         const payload = ev.payload;
         const state = get();
@@ -221,11 +232,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           typeof document !== 'undefined' &&
           document.visibilityState === 'visible';
         const active = state.selectedAgentId === payload.agentId && focused;
+        const nextStreaming = { ...state.streamingByAgent };
+        if (payload.eventType === 'assistant_text') {
+          delete nextStreaming[payload.agentId];
+        }
         set({
           eventsByAgent: {
             ...state.eventsByAgent,
             [payload.agentId]: [...existing, payload],
           },
+          streamingByAgent: nextStreaming,
           unreadByAgent: active
             ? state.unreadByAgent
             : {
@@ -251,6 +267,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       //    delivered user_text to deliveryStatus:'consumed'.
       listen<TurnCompletePayload>('agent-turn-complete', (ev) => {
         const agentId = ev.payload.agentId;
+        // Safety net — clear any lingering streaming buffer for this agent
+        // even on tool-only turns that never produce an assistant_text row
+        // (the event-appended listener won't run for those).
+        set((s) => {
+          if (s.streamingByAgent[agentId] === undefined) return s;
+          const next = { ...s.streamingByAgent };
+          delete next[agentId];
+          return { streamingByAgent: next };
+        });
         set((s) => {
           const arr = s.eventsByAgent[agentId];
           if (!arr || arr.length === 0) return s;
@@ -332,13 +357,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         });
       }),
 
-      // 7. agent-thread-cleared — clear local events for that agent.
+      // 7. agent-thread-cleared — clear local events for that agent
+      //    (and drop any mid-stream buffer).
       listen<string>('agent-thread-cleared', (ev) => {
         const agentId = ev.payload;
-        set((s) => ({
-          eventsByAgent: { ...s.eventsByAgent, [agentId]: [] },
-          unreadByAgent: { ...s.unreadByAgent, [agentId]: 0 },
-        }));
+        set((s) => {
+          const nextStreaming = { ...s.streamingByAgent };
+          delete nextStreaming[agentId];
+          return {
+            eventsByAgent: { ...s.eventsByAgent, [agentId]: [] },
+            unreadByAgent: { ...s.unreadByAgent, [agentId]: 0 },
+            streamingByAgent: nextStreaming,
+          };
+        });
       }),
 
       // 8. agent-events-marked-read — backend-initiated read reset
@@ -359,6 +390,25 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           ),
         }));
       }),
+
+      // 10. agent-assistant-delta (Phase 19 gap) — append per-token delta
+      //     into the per-agent streaming buffer so ChatTranscript can render
+      //     a synthetic trailing row between turn start and TurnComplete.
+      //     Cleared in listeners #1 (assistant_text row lands) and #3
+      //     (TurnComplete safety net for tool-only turns).
+      listen<{ agentId: string; delta: string }>(
+        'agent-assistant-delta',
+        (ev) => {
+          const { agentId, delta } = ev.payload;
+          if (!delta) return;
+          set((s) => ({
+            streamingByAgent: {
+              ...s.streamingByAgent,
+              [agentId]: (s.streamingByAgent[agentId] ?? '') + delta,
+            },
+          }));
+        },
+      ),
     ]);
 
     return () => {
@@ -371,6 +421,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       un7();
       un8();
       un9();
+      un10();
     };
   },
 
@@ -382,6 +433,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   reset: () =>
     set({
       eventsByAgent: {},
+      streamingByAgent: {},
       channels: [],
       selectedAgentId: null,
       unreadByAgent: {},

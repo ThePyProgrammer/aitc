@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useChatStore, type AgentEvent } from '../../stores/chatStore';
 import { EventCard } from './EventCard';
+import { MarkdownBody } from './MarkdownBody';
 
 const EMPTY_EVENTS: AgentEvent[] = [];
 const BOTTOM_THRESHOLD_PX = 24;
@@ -21,6 +22,13 @@ export interface ChatTranscriptProps {
 export function ChatTranscript({ agentId }: ChatTranscriptProps) {
   const events = useChatStore((s) =>
     agentId ? s.eventsByAgent[agentId] ?? EMPTY_EVENTS : EMPTY_EVENTS,
+  );
+  // Phase 19 gap closure — per-agent mid-turn streaming buffer fed by
+  // agent-assistant-delta. Renders below the virtualized list as a
+  // synthetic assistant row; cleared by the store when the final
+  // assistant_text row lands (or on TurnComplete for tool-only turns).
+  const streamingContent = useChatStore((s) =>
+    agentId ? s.streamingByAgent[agentId] ?? '' : '',
   );
   const loadOlder = useChatStore((s) => s.loadOlder);
   const channels = useChatStore((s) => s.channels);
@@ -71,6 +79,16 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
     prevLengthRef.current = curr;
   }, [events.length, atBottom]);
 
+  // Streaming-row auto-scroll: when the mid-turn buffer grows and the user
+  // is already at the bottom, keep them pinned. Does NOT bump
+  // newMessageCount — an in-progress turn isn't a new message yet.
+  useEffect(() => {
+    if (!atBottom) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight });
+  }, [streamingContent.length, atBottom]);
+
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -102,7 +120,7 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
     );
   }
 
-  if (events.length === 0) {
+  if (events.length === 0 && streamingContent === '') {
     if (isArchived) {
       return (
         <div
@@ -169,6 +187,17 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
             );
           })}
         </div>
+        {streamingContent !== '' && (
+          <div
+            data-testid="streaming-assistant-row"
+            className="w-full px-5 py-3 border-t border-outline-variant/10"
+          >
+            <div className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/70 mb-1">
+              CLAUDE
+            </div>
+            <MarkdownBody content={streamingContent} streaming />
+          </div>
+        )}
       </div>
       {newMessageCount > 0 && (
         <button
