@@ -7,6 +7,7 @@
  *   - NotebookEdit                 → NotebookPreview (like Write + cell header)
  *   - Bash                         → BashPreview (DESCRIPTION/COMMAND/METADATA)
  *   - Task                         → AgentPreview (collapsible markdown brief)
+ *   - Skill                        → SkillPreview (ARGS row)
  *   - Read/LS/Grep/Glob/WebFetch/WebSearch → ProtectedPathPreview (KV table)
  *   - mcp__* / anything else       → UnknownToolPreview (UNVERIFIED_TOOL banner)
  *
@@ -20,6 +21,7 @@ import { BashPreview } from './BashPreview';
 import { NotebookPreview } from './NotebookPreview';
 import { ProtectedPathPreview } from './ProtectedPathPreview';
 import { AgentPreview } from './AgentPreview';
+import { SkillPreview } from './SkillPreview';
 import { UnknownToolPreview } from './UnknownToolPreview';
 
 export interface ToolPreviewProps {
@@ -38,6 +40,7 @@ const RENDERERS: Record<string, ToolRenderer> = {
   NotebookEdit: NotebookPreview,
   Bash: BashPreview,
   Task: AgentPreview,
+  Skill: SkillPreview,
   Read: ProtectedPathPreview,
   LS: ProtectedPathPreview,
   Grep: ProtectedPathPreview,
