@@ -187,6 +187,64 @@ describe('ChatTranscript', () => {
     expect(screen.getByTestId('streaming-assistant-row')).toBeInTheDocument();
   });
 
+  // Phase 19 follow-up — paired tool_result cards are filtered from the
+  // virtualized list (they render inside the parent ToolUseCard's expanded
+  // body). Orphan tool_results (no parent on page) still render.
+  it('filters tool_result events whose parent tool_use is on the same page', () => {
+    useChatStore.setState({
+      eventsByAgent: {
+        a: [
+          mkEvent({
+            id: 10,
+            eventType: 'tool_use',
+            payloadJson: {
+              tool_use_id: 'toolu_xx',
+              tool_name: 'Bash',
+              tool_input: { command: 'ls' },
+            },
+          }),
+          mkEvent({
+            id: 11,
+            eventType: 'tool_result',
+            payloadJson: { tool_use_id: 'toolu_xx', content: 'total 42' },
+          }),
+        ],
+      },
+    });
+    renderT(<ChatTranscript agentId="a" />);
+    // The paired tool_result's standalone card is filtered — only one
+    // tool-use-card renders for the pair. No tool-result-card sibling.
+    expect(
+      document.querySelectorAll('[data-testid="tool-use-card"]').length,
+    ).toBe(1);
+    expect(
+      document.querySelector('[data-testid="tool-result-card"]'),
+    ).toBeNull();
+  });
+
+  it('renders orphan tool_result when its parent tool_use is not on the page', () => {
+    useChatStore.setState({
+      eventsByAgent: {
+        a: [
+          mkEvent({
+            id: 20,
+            eventType: 'tool_result',
+            payloadJson: {
+              tool_use_id: 'toolu_orphan',
+              content: 'orphaned output',
+            },
+          }),
+        ],
+      },
+    });
+    renderT(<ChatTranscript agentId="a" />);
+    // No parent tool_use on the page → orphan renders as a standalone
+    // ToolResultCard so the user isn't missing data.
+    expect(
+      document.querySelector('[data-testid="tool-result-card"]'),
+    ).not.toBeNull();
+  });
+
   it('new-messages pill appears when scrolled up and a new event arrives', () => {
     useChatStore.setState({
       eventsByAgent: { a: [mkEvent()] },

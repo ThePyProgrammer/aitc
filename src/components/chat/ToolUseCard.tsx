@@ -17,6 +17,7 @@ import {
   selectToolUseWithResult,
 } from '../../stores/chatStore';
 import { ToolPreview } from '../../views/CommsHub/ToolPreview';
+import { extractText } from './ToolResultCard';
 
 export interface ToolUseCardProps {
   event: AgentEvent;
@@ -228,10 +229,47 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
                 filePath={(toolInput.file_path as string | undefined) ?? null}
                 requestId={approvalId ?? 0}
               />
+              {paired.toolResult && (
+                <ToolResultSection event={paired.toolResult} />
+              )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+// Inline RESULT section rendered inside the expanded ToolUseCard body when
+// a paired tool_result is available in the same transcript page. Mirrors
+// ToolResultCard's standalone rendering — same extractText + max-height +
+// is_error red tint — but sits visually under the ToolPreview input so the
+// INPUT → OUTPUT pair reads as one collapsible unit.
+function ToolResultSection({ event }: { event: AgentEvent }) {
+  const payload =
+    (event.payloadJson as {
+      content?: unknown;
+      is_error?: boolean;
+    } | null) ?? {};
+  const body = extractText(payload.content);
+  const isError = payload.is_error === true;
+  return (
+    <div
+      data-testid="tool-result-section"
+      className={`mt-3 pt-3 border-t border-outline-variant font-mono text-xs ${
+        isError ? 'text-error' : 'text-on-surface-variant/70'
+      }`}
+    >
+      <div
+        className={`font-headline text-[10px] uppercase tracking-widest mb-1 ${
+          isError ? 'text-error' : 'text-on-surface-variant/50'
+        }`}
+      >
+        {isError ? 'ERROR' : 'RESULT'}
+      </div>
+      <pre className="whitespace-pre-wrap max-h-[400px] overflow-y-auto max-w-full font-mono">
+        {body}
+      </pre>
+    </div>
   );
 }

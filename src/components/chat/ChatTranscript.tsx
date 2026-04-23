@@ -5,7 +5,7 @@
 // Scroll-to-top (or near-top) dispatches loadOlder(agentId) for D-18 upward
 // infinite-scroll.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useChatStore, type AgentEvent } from '../../stores/chatStore';
 import { EventCard } from './EventCard';
@@ -20,9 +20,33 @@ export interface ChatTranscriptProps {
 }
 
 export function ChatTranscript({ agentId }: ChatTranscriptProps) {
-  const events = useChatStore((s) =>
+  const rawEvents = useChatStore((s) =>
     agentId ? s.eventsByAgent[agentId] ?? EMPTY_EVENTS : EMPTY_EVENTS,
   );
+  // Phase 19 follow-up — tool_result events whose paired tool_use is on
+  // the same transcript page are rendered INSIDE the parent ToolUseCard's
+  // expanded body (see ToolResultSection). Filter them out of the
+  // virtualized list so they don't double-render as standalone cards.
+  // Orphan tool_result events (parent paginated off) still render via
+  // ToolResultCard — defensive fallback.
+  const events = useMemo(() => {
+    const toolUseIds = new Set<string>();
+    for (const e of rawEvents) {
+      if (e.eventType === 'tool_use') {
+        const id = (e.payloadJson as { tool_use_id?: string } | null)
+          ?.tool_use_id;
+        if (id) toolUseIds.add(id);
+      }
+    }
+    if (toolUseIds.size === 0) return rawEvents;
+    return rawEvents.filter((e) => {
+      if (e.eventType !== 'tool_result') return true;
+      const id = (e.payloadJson as { tool_use_id?: string } | null)
+        ?.tool_use_id;
+      return !id || !toolUseIds.has(id);
+    });
+  }, [rawEvents]);
+
   // Phase 19 gap closure — per-agent mid-turn streaming buffer fed by
   // agent-assistant-delta. Renders below the virtualized list as a
   // synthetic assistant row; cleared by the store when the final

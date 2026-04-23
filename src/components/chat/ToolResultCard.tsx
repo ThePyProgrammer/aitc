@@ -17,7 +17,7 @@ export interface ToolResultCardProps {
 // content blocks (usually `{type: "text", text: "..."}`, occasionally other
 // types we don't special-case). Flatten to a newline-joined string so
 // `whitespace-pre-wrap` can render the full body faithfully.
-function extractText(content: unknown): string {
+export function extractText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     return content

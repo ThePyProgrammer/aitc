@@ -293,4 +293,82 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     const pos = dot!.compareDocumentPosition(toolLabel!);
     expect(pos & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
+
+  // Phase 19 follow-up — paired tool_result renders inside the expanded body.
+  it('renders paired tool_result content inside the expanded body', () => {
+    selectToolUseWithResultMock.mockReturnValue({
+      toolUse: null,
+      toolResult: {
+        id: 200,
+        agentId: 'a',
+        sessionId: null,
+        eventType: 'tool_result',
+        payloadJson: {
+          tool_use_id: 'toolu_res',
+          content: 'total 42\ndrwxr-xr-x  5 user  staff  160 Apr 22 10:00 .',
+          is_error: false,
+        },
+        approvalRequestId: null,
+        sequenceNumber: null,
+        createdAt: '2026-04-22T12:00:00Z',
+        deliveryStatus: null,
+      },
+    });
+    const event = mk({
+      payloadJson: {
+        tool_use_id: 'toolu_res',
+        tool_name: 'Bash',
+        tool_input: { command: 'ls -la' },
+      },
+    });
+    const { container } = renderWithRouter(<ToolUseCard event={event} />);
+    // Not rendered when collapsed.
+    expect(
+      container.querySelector('[data-testid="tool-result-section"]'),
+    ).toBeNull();
+    // Expand.
+    const toggle = container.querySelector('button[aria-expanded]');
+    fireEvent.click(toggle!);
+    const section = container.querySelector(
+      '[data-testid="tool-result-section"]',
+    );
+    expect(section).not.toBeNull();
+    expect(section?.textContent ?? '').toContain('RESULT');
+    expect(section?.textContent ?? '').toContain('drwxr-xr-x');
+  });
+
+  it('renders ERROR label + red tint when paired tool_result.is_error is true', () => {
+    selectToolUseWithResultMock.mockReturnValue({
+      toolUse: null,
+      toolResult: {
+        id: 201,
+        agentId: 'a',
+        sessionId: null,
+        eventType: 'tool_result',
+        payloadJson: {
+          tool_use_id: 'toolu_err',
+          content: 'ls: cannot access /nope: No such file or directory',
+          is_error: true,
+        },
+        approvalRequestId: null,
+        sequenceNumber: null,
+        createdAt: '2026-04-22T12:00:00Z',
+        deliveryStatus: null,
+      },
+    });
+    const event = mk({
+      payloadJson: {
+        tool_use_id: 'toolu_err',
+        tool_name: 'Bash',
+        tool_input: { command: 'ls /nope' },
+      },
+    });
+    const { container } = renderWithRouter(<ToolUseCard event={event} />);
+    fireEvent.click(container.querySelector('button[aria-expanded]')!);
+    const section = container.querySelector(
+      '[data-testid="tool-result-section"]',
+    );
+    expect(section?.textContent ?? '').toContain('ERROR');
+    expect(section?.className ?? '').toContain('text-error');
+  });
 });
