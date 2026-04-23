@@ -29,7 +29,7 @@ export function AgentPreview({ toolInputJson }: ToolPreviewProps) {
   const [shown, setShown] = useState(false);
   const words = useMemo(() => countWords(prompt), [prompt]);
 
-  if (prompt === '') {
+  if (prompt.trim() === '') {
     return (
       <section role="region" aria-label="Agent brief" data-tool-preview="agent">
         <p className="font-mono text-xs text-on-surface-variant/60">NO_BRIEF</p>
