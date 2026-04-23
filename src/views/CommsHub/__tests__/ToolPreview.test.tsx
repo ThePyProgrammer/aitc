@@ -8,6 +8,7 @@ import { BashPreview } from '../ToolPreview/BashPreview';
 import { NotebookPreview } from '../ToolPreview/NotebookPreview';
 import { ProtectedPathPreview } from '../ToolPreview/ProtectedPathPreview';
 import { AgentPreview } from '../ToolPreview/AgentPreview';
+import { SkillPreview } from '../ToolPreview/SkillPreview';
 import { UnknownToolPreview } from '../ToolPreview/UnknownToolPreview';
 
 vi.mock('../../../hooks/useSyntaxHighlight', () => ({
@@ -59,6 +60,10 @@ describe('ToolPreview registry — Phase 8 Plan 05 real renderers', () => {
 
   it('resolveRenderer returns AgentPreview for Task', () => {
     expect(resolveRenderer('Task')).toBe(AgentPreview);
+  });
+
+  it('resolveRenderer returns SkillPreview for Skill', () => {
+    expect(resolveRenderer('Skill')).toBe(SkillPreview);
   });
 
   it('falls back to UnknownToolPreview for mcp__* tools', () => {

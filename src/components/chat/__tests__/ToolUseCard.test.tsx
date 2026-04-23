@@ -550,4 +550,91 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     const errorTinted = section?.querySelector('.text-error');
     expect(errorTinted).not.toBeNull();
   });
+
+  // ---------------------------------------------------------------------
+  // Skill-path coverage — inline-loaded skills get their own chrome.
+  // ---------------------------------------------------------------------
+
+  it('Skill collapsed row renders SKILL[NAME] label + args as primary', () => {
+    const event = mk({
+      payloadJson: {
+        tool_use_id: 'toolu_skill_1',
+        tool_name: 'Skill',
+        tool_input: {
+          skill: 'gsd-ui-review',
+          args: 'Tower, Arsenal, Communications Hub',
+        },
+      },
+    });
+    renderWithRouter(<ToolUseCard event={event} />);
+    const card = screen.getByTestId('tool-use-card');
+    expect(card.textContent ?? '').toContain('SKILL[GSD-UI-REVIEW]');
+    expect(card.textContent ?? '').toContain('Tower, Arsenal');
+  });
+
+  it('Skill collapsed row falls back to plain SKILL when name missing', () => {
+    const event = mk({
+      payloadJson: {
+        tool_use_id: 'toolu_skill_2',
+        tool_name: 'Skill',
+        tool_input: { args: 'whatever' },
+      },
+    });
+    renderWithRouter(<ToolUseCard event={event} />);
+    const card = screen.getByTestId('tool-use-card');
+    expect(card.textContent ?? '').toContain('SKILL');
+    expect(card.textContent ?? '').not.toContain('SKILL[');
+  });
+
+  it('Skill expanded body has amber (tertiary) left-border accent — NOT cyan', () => {
+    const event = mk({
+      payloadJson: {
+        tool_use_id: 'toolu_skill_3',
+        tool_name: 'Skill',
+        tool_input: { skill: 'x', args: 'y' },
+      },
+    });
+    const { container } = renderWithRouter(<ToolUseCard event={event} />);
+    fireEvent.click(container.querySelector('button[aria-expanded]')!);
+    const expandedBody = container.querySelector('.border-l-tertiary');
+    expect(expandedBody).not.toBeNull();
+    expect(expandedBody?.className).toContain('border-l-2');
+    // Skill must not borrow Agent's cyan.
+    expect(container.querySelector('.border-l-secondary')).toBeNull();
+  });
+
+  it('Skill OUTPUT section is suppressed even when a tool_result is paired', () => {
+    selectToolUseWithResultMock.mockReturnValue({
+      toolUse: null,
+      toolResult: {
+        id: 400,
+        agentId: 'a',
+        sessionId: null,
+        eventType: 'tool_result',
+        payloadJson: {
+          tool_use_id: 'toolu_skill_out',
+          content: 'Launching skill: gsd-ui-review',
+          is_error: false,
+        },
+        approvalRequestId: null,
+        sequenceNumber: null,
+        createdAt: '2026-04-23T12:00:00Z',
+        deliveryStatus: null,
+      },
+    });
+    const event = mk({
+      payloadJson: {
+        tool_use_id: 'toolu_skill_out',
+        tool_name: 'Skill',
+        tool_input: { skill: 'gsd-ui-review', args: 'x' },
+      },
+    });
+    const { container } = renderWithRouter(<ToolUseCard event={event} />);
+    fireEvent.click(container.querySelector('button[aria-expanded]')!);
+    expect(
+      container.querySelector('[data-testid="tool-result-section"]'),
+    ).toBeNull();
+    // Confirm the noise content is not surfaced anywhere.
+    expect(container.textContent ?? '').not.toContain('Launching skill');
+  });
 });
