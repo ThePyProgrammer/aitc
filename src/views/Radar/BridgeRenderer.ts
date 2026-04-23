@@ -38,7 +38,12 @@ export const BRIDGE_SELECTED_RING_OFFSET = 3;
 export const BRIDGE_LABEL_OFFSET = 6;
 /** Zoom threshold beyond which bridge labels render (matches file labels). */
 export const BRIDGE_LABEL_ZOOM_THRESHOLD = 4;
-/** setLineDash pattern for dangling bridges (no handler OR no callers — D-09). */
+/**
+ * Retained for optional future stroke-pattern decoration; dangling bridges
+ * now carry colour (theme.nodeFill) as the primary signal per Phase 22 Fix 4.
+ * Deletion tracked as a cleanup-pass follow-up.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const BRIDGE_DASH_PATTERN: [number, number] = [4, 3];
 /** Global alpha for the world-space boundary line. */
 export const BOUNDARY_LINE_OPACITY = 0.6;
@@ -125,11 +130,20 @@ export function drawBridgeNodes(
     ctx.lineTo(b.x, b.y + d);
     ctx.lineTo(b.x - d, b.y);
     ctx.closePath();
-    ctx.fillStyle = isSelected ? theme.nodeFillHover ?? baseFill : baseFill;
+    // Three-way fill: selected wins, then dangling uses theme.nodeFill
+    // (color as primary dangling signal), populated retains the cyan
+    // baseFill (edgeGlow ?? arrowFill ?? '#00cffc').
+    ctx.fillStyle = isSelected
+      ? theme.nodeFillHover ?? baseFill
+      : isDangling
+        ? theme.nodeFill
+        : baseFill;
     ctx.fill();
     ctx.strokeStyle = theme.nodeStroke;
     ctx.lineWidth = 1 / zoom;
-    if (isDangling) ctx.setLineDash(BRIDGE_DASH_PATTERN);
+    // Dashed-stroke dangling signal dropped; colour (theme.nodeFill above)
+    // is the primary signal. Retain the defensive setLineDash([]) reset in
+    // case an upstream caller left the dash-state dirty.
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
