@@ -185,8 +185,9 @@ describe('drawBridgeNodes', () => {
     expect(moveChannel).toBe(moveNoChannel + 1);
   });
 
-  it('V-12-21: dangling bridge (callerCount=0) applies BRIDGE_DASH_PATTERN', () => {
+  it('W-22-06: dangling (callerCount=0) uses theme.nodeFill and does NOT call setLineDash(BRIDGE_DASH_PATTERN)', () => {
     const ctx = makeMockCtx();
+    const theme = THEMES['phosphor-classic'];
     drawBridgeNodes(
       ctx,
       [makeBridge({ callerCount: 0 })],
@@ -196,17 +197,22 @@ describe('drawBridgeNodes', () => {
       { zoom: 1, panX: 0, panY: 0 },
       800,
       600,
+      theme,
     );
+    // D-13: dangling fill resolves to theme.nodeFill.
+    expect(ctx._assignments.fillStyle).toContain(theme.nodeFill);
+    // D-14: no setLineDash call with BRIDGE_DASH_PATTERN as first arg (call-log assertion
+    // per RESEARCH §6.3 — simpler than modelling getLineDash state).
     const dashCalls = ctx._calls.filter((c: Call) => c.fn === 'setLineDash');
-    const dashedApplied = dashCalls.some(
-      (c: Call) =>
-        JSON.stringify(c.args[0]) === JSON.stringify(BRIDGE_DASH_PATTERN),
+    const appliedDashed = dashCalls.some(
+      (c: Call) => JSON.stringify(c.args[0]) === JSON.stringify(BRIDGE_DASH_PATTERN),
     );
-    expect(dashedApplied).toBe(true);
+    expect(appliedDashed).toBe(false);
   });
 
-  it('V-12-21: dangling bridge (handlerFile="") applies BRIDGE_DASH_PATTERN', () => {
+  it('W-22-06: dangling (handlerFile="") uses theme.nodeFill and does NOT call setLineDash(BRIDGE_DASH_PATTERN)', () => {
     const ctx = makeMockCtx();
+    const theme = THEMES['phosphor-classic'];
     drawBridgeNodes(
       ctx,
       [makeBridge({ handlerFile: '', callerCount: 2 })],
@@ -216,13 +222,95 @@ describe('drawBridgeNodes', () => {
       { zoom: 1, panX: 0, panY: 0 },
       800,
       600,
+      theme,
     );
+    expect(ctx._assignments.fillStyle).toContain(theme.nodeFill);
     const dashCalls = ctx._calls.filter((c: Call) => c.fn === 'setLineDash');
-    const dashedApplied = dashCalls.some(
-      (c: Call) =>
-        JSON.stringify(c.args[0]) === JSON.stringify(BRIDGE_DASH_PATTERN),
+    expect(
+      dashCalls.some(
+        (c: Call) => JSON.stringify(c.args[0]) === JSON.stringify(BRIDGE_DASH_PATTERN),
+      ),
+    ).toBe(false);
+  });
+
+  it('W-22-06: populated bridge retains edgeGlow/arrowFill/#00cffc fallback chain (regression)', () => {
+    // Fix 4 does NOT touch the populated-fill path. Mirrors the Phase 12 V-12-21
+    // bare-theme pattern: the chain `theme.edgeGlow ?? theme.arrowFill ?? '#00cffc'`
+    // is exercised across all three rungs.
+
+    // Rung 1: edgeGlow present → wins.
+    const ctx1 = makeMockCtx();
+    const themeWithEdgeGlow: any = {
+      id: 't1', name: 't1',
+      nodeStroke: '#000', arrowFill: '#deadbe', edgeGlow: '#00cffc',
+      hullStroke: '#000', folderLabelColor: '#000', fileLabelColor: '#000',
+      canvasBackground: '#000', nodeFill: '#0f1a0e',
+      nodeFillHover: '#000', nodeFillHighest: '#000',
+      edgeStroke: '#000', hullFill: '#000', heatRampStart: '#000',
+    };
+    drawBridgeNodes(
+      ctx1,
+      [makeBridge({ callerCount: 3 })],
+      null, null, 1,
+      { zoom: 1, panX: 0, panY: 0 }, 800, 600,
+      themeWithEdgeGlow,
     );
-    expect(dashedApplied).toBe(true);
+    expect(ctx1._assignments.fillStyle).toContain('#00cffc');
+
+    // Rung 3: neither edgeGlow nor arrowFill → hardcoded '#00cffc' literal.
+    const ctx2 = makeMockCtx();
+    const themeBare: any = {
+      id: 't2', name: 't2',
+      nodeStroke: '#000',
+      hullStroke: '#000', folderLabelColor: '#000', fileLabelColor: '#000',
+      canvasBackground: '#000', nodeFill: '#0f1a0e',
+      nodeFillHover: '#000', nodeFillHighest: '#000',
+      edgeStroke: '#000', hullFill: '#000', heatRampStart: '#000',
+    };
+    drawBridgeNodes(
+      ctx2,
+      [makeBridge({ callerCount: 3 })],
+      null, null, 1,
+      { zoom: 1, panX: 0, panY: 0 }, 800, 600,
+      themeBare,
+    );
+    expect(ctx2._assignments.fillStyle).toContain('#00cffc');
+  });
+
+  it('W-22-07: channel double-stroke geometry identical across dangling AND populated (Phase 12 D-17 regression)', () => {
+    // D-15 regression witness: Fix 4 must not perturb the channel-ring code path.
+    // Inner diamond contributes 1 moveTo + 3 lineTo; channel ring adds 1 moveTo + 3 lineTo.
+    // Total moveTo: 2. Total lineTo: 6.
+    const ctxDangling = makeMockCtx();
+    drawBridgeNodes(
+      ctxDangling,
+      [makeBridge({ hasChannelArg: true, callerCount: 0 })],
+      null,
+      null,
+      1,
+      { zoom: 1, panX: 0, panY: 0 },
+      800,
+      600,
+    );
+    const ctxPopulated = makeMockCtx();
+    drawBridgeNodes(
+      ctxPopulated,
+      [makeBridge({ hasChannelArg: true, callerCount: 3 })],
+      null,
+      null,
+      1,
+      { zoom: 1, panX: 0, panY: 0 },
+      800,
+      600,
+    );
+    const movesDangling = ctxDangling._calls.filter((c: Call) => c.fn === 'moveTo').length;
+    const movesPopulated = ctxPopulated._calls.filter((c: Call) => c.fn === 'moveTo').length;
+    const linesDangling = ctxDangling._calls.filter((c: Call) => c.fn === 'lineTo').length;
+    const linesPopulated = ctxPopulated._calls.filter((c: Call) => c.fn === 'lineTo').length;
+    expect(movesDangling).toBe(movesPopulated);
+    expect(linesDangling).toBe(linesPopulated);
+    expect(movesDangling).toBe(2);
+    expect(linesDangling).toBe(6);
   });
 
   it('V-12-21: selected bridge draws white 80%-alpha outer ring', () => {
