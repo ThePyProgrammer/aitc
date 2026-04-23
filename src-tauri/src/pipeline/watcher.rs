@@ -25,6 +25,7 @@ use crate::claude_resources::routing::{
 use crate::claude_resources::scan::scan_scope;
 use crate::claude_resources::write_fence::WriteFence;
 use crate::pipeline::events::{Attribution, FileEvent, FileEventBatch, FileEventKind};
+use crate::pipeline::commands::strip_unc;
 use crate::pipeline::ignore_filter::HARDCODED_EXCLUDES;
 use crate::pipeline::tree_index::{build_tree_index, FileNode};
 use notify_debouncer_full::{
@@ -72,8 +73,14 @@ pub fn spawn_watcher(
     repo_root: &Path,
     out_tx: tokio::sync::mpsc::Sender<FileEventBatch>,
 ) -> Result<WatcherOutput, String> {
+    // strip_unc: drop the Windows `\\?\` verbatim prefix that `canonicalize`
+    // re-adds on Windows. Without this, the walker populates tree_index with
+    // UNC-prefixed keys while `active.repo_root` (set by the caller via
+    // `start_watch`) is stored in stripped form, making `serialize_tree_index`
+    // and `get_dependency_graph`'s `strip_prefix` checks fail component-wise.
     let repo_root = repo_root
         .canonicalize()
+        .map(strip_unc)
         .map_err(|e| format!("canonicalize repo root: {e}"))?;
 
     // Build the initial tree index synchronously.
@@ -207,8 +214,10 @@ pub fn spawn_watcher_multi(
     resources_tx: tokio::sync::mpsc::Sender<ResourceEventBatch>,
     fence: WriteFence,
 ) -> Result<MultiWatcherOutput, String> {
+    // See `spawn_watcher` above for why `strip_unc` is applied here.
     let repo_root = repo_root
         .canonicalize()
+        .map(strip_unc)
         .map_err(|e| format!("canonicalize repo root: {e}"))?;
 
     // Build the initial pipeline tree index synchronously.

@@ -49,7 +49,7 @@ const PIPELINE_MPSC_CAPACITY: usize = 1024;
 /// match the forward-slash repo roots that `detect_git_root` returns to the
 /// frontend. Without this, `tree_index` keys and frontend `activeRepo`
 /// compare unequal for the same directory.
-fn strip_unc(p: PathBuf) -> PathBuf {
+pub(crate) fn strip_unc(p: PathBuf) -> PathBuf {
     #[cfg(windows)]
     {
         let s = p.to_string_lossy();
