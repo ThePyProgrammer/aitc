@@ -3,11 +3,13 @@
 // overscan=10). ARCHIVED is collapsible (default collapsed per UI-SPEC).
 // Most-recent-activity descending sort.
 
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, Rocket } from 'lucide-react';
 import { useChatStore, type ChatChannel } from '../../stores/chatStore';
 import { AgentChannelRow } from './AgentChannelRow';
+import { Button } from '../ui/Button';
+import { DeployDialog } from '../../views/TowerControl/DeployDialog';
 
 function sortByRecency(channels: ChatChannel[]): ChatChannel[] {
   const copy = [...channels];
@@ -29,6 +31,10 @@ export function AgentChannelList() {
   const setArchivedCollapsed = useChatStore((s) => s.setArchivedCollapsed);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const selectAgent = useChatStore((s) => s.selectAgent);
+  // Duplicate of the Tower Control deploy button — same DeployDialog
+  // modal, independent open state per mount. So the user can spawn a
+  // new agent without leaving the CommsHub chat tab.
+  const [deployOpen, setDeployOpen] = useState(false);
 
   const { active, archived } = useMemo(() => {
     const sorted = sortByRecency(channels);
@@ -48,16 +54,37 @@ export function AgentChannelList() {
 
   if (channels.length === 0) {
     return (
-      <div
-        data-testid="agent-channel-list"
-        className="flex flex-col items-center justify-center p-4 font-headline text-[10px] uppercase tracking-widest text-on-surface-variant"
-      >
-        NO_AGENT_CHANNELS
-      </div>
+      <>
+        <div
+          data-testid="agent-channel-list"
+          className="flex flex-col h-full bg-surface-container-low"
+        >
+          <div className="px-3 pt-4 pb-2">
+            <h3 className="font-headline text-sm font-bold uppercase tracking-widest text-on-surface">
+              AGENT_CHANNELS
+            </h3>
+          </div>
+          <div className="px-3 pb-3">
+            <Button
+              variant="primary"
+              className="w-full flex items-center justify-center gap-2"
+              onClick={() => setDeployOpen(true)}
+            >
+              <Rocket size={16} strokeWidth={1.5} />
+              DEPLOY_AGENT
+            </Button>
+          </div>
+          <div className="flex-1 flex items-center justify-center font-headline text-[10px] uppercase tracking-widest text-on-surface-variant">
+            NO_AGENT_CHANNELS
+          </div>
+        </div>
+        <DeployDialog open={deployOpen} onClose={() => setDeployOpen(false)} />
+      </>
     );
   }
 
   return (
+    <>
     <div
       data-testid="agent-channel-list"
       className="flex flex-col h-full bg-surface-container-low"
@@ -66,6 +93,19 @@ export function AgentChannelList() {
         <h3 className="font-headline text-sm font-bold uppercase tracking-widest text-on-surface">
           AGENT_CHANNELS
         </h3>
+      </div>
+
+      {/* Deploy button — duplicate of Tower Control's primary action so
+          the user can spawn a new agent without leaving the chat tab. */}
+      <div className="px-3 pb-3">
+        <Button
+          variant="primary"
+          className="w-full flex items-center justify-center gap-2"
+          onClick={() => setDeployOpen(true)}
+        >
+          <Rocket size={16} strokeWidth={1.5} />
+          DEPLOY_AGENT
+        </Button>
       </div>
 
       {/* ACTIVE section */}
@@ -146,5 +186,7 @@ export function AgentChannelList() {
         </>
       )}
     </div>
+    <DeployDialog open={deployOpen} onClose={() => setDeployOpen(false)} />
+    </>
   );
 }
