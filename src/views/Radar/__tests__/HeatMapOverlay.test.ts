@@ -6,8 +6,8 @@ import { heatTintForNode, heatTintIfActive } from '../HeatMapOverlay';
 import { heatColor } from '../GraphRenderer';
 
 describe('HeatMapOverlay (graph node tint) — Plan 06', () => {
-  it('heatTintForNode(0) returns the default surface-container color (#1a1919)', () => {
-    expect(heatTintForNode(0)).toBe('#1a1919');
+  it('heatTintForNode(0) returns the default surface-container color (#0f1a0e)', () => {
+    expect(heatTintForNode(0)).toBe('#0f1a0e');
   });
 
   it('heatTintForNode(0.5) equals GraphRenderer.heatColor(0.5) (delegation verified)', () => {
@@ -18,12 +18,12 @@ describe('HeatMapOverlay (graph node tint) — Plan 06', () => {
     expect(heatTintForNode(1)).toBe('#ff7351');
   });
 
-  it('heatTintIfActive returns baseline #1a1919 when heat map disabled, regardless of score', () => {
-    expect(heatTintIfActive(0.9, false)).toBe('#1a1919');
+  it('heatTintIfActive returns baseline #0f1a0e when heat map disabled, regardless of score', () => {
+    expect(heatTintIfActive(0.9, false)).toBe('#0f1a0e');
   });
 
-  it('heatTintIfActive returns baseline #1a1919 when score is 0 even if enabled', () => {
-    expect(heatTintIfActive(0, true)).toBe('#1a1919');
+  it('heatTintIfActive returns baseline #0f1a0e when score is 0 even if enabled', () => {
+    expect(heatTintIfActive(0, true)).toBe('#0f1a0e');
   });
 
   it('heatTintIfActive returns the heat blend when enabled and score > 0', () => {

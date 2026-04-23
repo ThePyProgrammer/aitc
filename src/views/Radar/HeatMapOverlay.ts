@@ -12,9 +12,11 @@ import { heatColor } from './GraphRenderer';
 
 /**
  * Default node fill (UI-SPEC §Color surface-container). Exported so callers
- * can branch to the baseline without re-hardcoding the hex.
+ * can branch to the baseline without re-hardcoding the hex. Kept in sync
+ * with `themes.ts` / `GraphRenderer.heatColor(0)` — RadarMinimap compares
+ * against this value to render a dimmed rgba for baseline nodes.
  */
-export const HEAT_BASELINE = '#1a1919';
+export const HEAT_BASELINE = '#0f1a0e';
 
 /**
  * Returns the heat-blended fill color for a contention score in [0, 1].
