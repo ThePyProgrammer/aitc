@@ -488,18 +488,22 @@ pub fn spawn_event_aggregator<R: tauri::Runtime>(
     tokio::spawn(run_event_aggregator(rx, agent_id, pool, sessions, app_handle))
 }
 
-/// D-01: one assistant_text DB row per assistant turn. Buffer accumulates
-/// partial deltas (idle-flush) + the whole-turn envelope; flushes once on
-/// TurnComplete (or StdoutClosed if the turn was interrupted).
+/// D-01 (revised): one assistant_text DB row per assistant **text block**.
+/// A turn can contain N text blocks interleaved with tool_use calls (the
+/// natural Anthropic-API message shape: `[text, tool_use, text, tool_use,
+/// text]`). The original rollup into a single row on TurnComplete silently
+/// dropped all but the last text block; now each whole-block envelope
+/// (`AssistantText { model: Some(_) }`) persists inline so the transcript
+/// preserves the text → tool → text ordering.
+///
+/// `idle_flush_pending` is the interrupted-turn safety net. Reader-side
+/// idle-flush (`AssistantText { model: None }`, from the 250ms timer)
+/// lands here and is either superseded by the authoritative envelope or
+/// persisted as a final interrupted row on `StdoutClosed` (D-01.4).
 ///
 /// Local variable — NOT a HashMap. `run_event_aggregator` runs one-per-agent
 /// (see `spawn_event_aggregator` call site in `agents/commands.rs`), so a
 /// per-agent bucket is unnecessary and would invite cross-agent contamination.
-struct TurnBuffer {
-    content: String,
-    model: Option<String>,
-}
-
 async fn run_event_aggregator<R: tauri::Runtime>(
     mut rx: mpsc::Receiver<StreamEvent>,
     agent_id: String,
@@ -509,7 +513,7 @@ async fn run_event_aggregator<R: tauri::Runtime>(
 ) {
     use tauri::Emitter;
 
-    let mut turn_buffer: Option<TurnBuffer> = None;
+    let mut idle_flush_pending: Option<String> = None;
 
     while let Some(event) = rx.recv().await {
         match event {
@@ -539,11 +543,11 @@ async fn run_event_aggregator<R: tauri::Runtime>(
             }
             StreamEvent::AssistantText { content, model } => {
                 // D-23: word-bounded @user check fires on EVERY AssistantText
-                // event (every idle-flush + the whole-turn envelope). Pitfall 1
-                // defender — do NOT move this into the flush path, or
-                // notification latency regresses to TurnComplete boundaries.
-                // catch_unwind inside dispatch_chat_notification makes this
-                // safe even in tests using mock_app.
+                // event (idle-flush partials + whole-block envelopes). Pitfall
+                // 1 defender — notification latency stays at delta granularity,
+                // not turn boundaries. catch_unwind inside
+                // dispatch_chat_notification makes this safe even in tests
+                // using mock_app.
                 if is_awaiting_user_mention(&content) {
                     super::notifications::dispatch_chat_notification(
                         &app_handle,
@@ -552,20 +556,60 @@ async fn run_event_aggregator<R: tauri::Runtime>(
                         Some(&agent_id),
                     );
                 }
-                // D-01.5: whole-turn envelope (model is Some, emitted by
-                // dispatch_assistant after accumulated_text.clear()) REPLACES
-                // the running buffer — the envelope is authoritative.
-                // D-01.3: idle-flush partials (model is None) — keep their
-                // content; preserve any previously-seen model from a prior
-                // envelope within the same turn (Pitfall 7).
-                // D-01.2/D-01.3: NO DB write here. Flush happens in
-                // TurnComplete / StdoutClosed arms.
-                let merged_model = model
-                    .or_else(|| turn_buffer.as_ref().and_then(|b| b.model.clone()));
-                turn_buffer = Some(TurnBuffer {
-                    content,
-                    model: merged_model,
-                });
+
+                if model.is_some() {
+                    // Whole-block envelope from dispatch_assistant —
+                    // authoritative content for this text block. Persist
+                    // immediately so it slots into the transcript BEFORE any
+                    // subsequent tool_use rows in the same turn. Clears the
+                    // idle-flush buffer since the envelope supersedes it.
+                    idle_flush_pending = None;
+                    let session_id = sessions.session_id_for(&agent_id).await;
+                    let payload = serde_json::json!({
+                        "content": content,
+                        "model": model,
+                    });
+                    match crate::db::events::insert_agent_event(
+                        &pool,
+                        &agent_id,
+                        session_id.as_deref(),
+                        "assistant_text",
+                        &payload,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(row) => {
+                            if let Err(e) =
+                                app_handle.emit("agent-event-appended", &row)
+                            {
+                                tracing::debug!(
+                                    agent_id = %agent_id,
+                                    err = %e,
+                                    "event-appended emit (assistant_text)"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                agent_id = %agent_id,
+                                err = %e,
+                                "assistant_text insert"
+                            );
+                        }
+                    }
+                } else {
+                    // Idle-flush partial (reader's 250ms timer fired mid-block,
+                    // or EOF flushed accumulated deltas). Buffer only; the
+                    // authoritative envelope will supersede, or StdoutClosed
+                    // will persist it as the interrupted-turn row (D-01.4).
+                    // Latest partial wins — it strictly contains earlier ones
+                    // since the reader's accumulator cleared on each flush and
+                    // refilled from fresh deltas.
+                    idle_flush_pending = Some(content);
+                }
             }
             StreamEvent::ToolUse {
                 tool_name,
@@ -635,46 +679,11 @@ async fn run_event_aggregator<R: tauri::Runtime>(
                 is_error,
             } => {
                 let session_id = sessions.session_id_for(&agent_id).await;
-                // D-01.2: flush buffered assistant text as ONE row BEFORE the
-                // turn-complete emit — frontend reducer expects the coalesced
-                // row before the streaming-flag flip.
-                if let Some(buf) = turn_buffer.take() {
-                    let payload = serde_json::json!({
-                        "content": buf.content,
-                        "model": buf.model,
-                    });
-                    match crate::db::events::insert_agent_event(
-                        &pool,
-                        &agent_id,
-                        session_id.as_deref(),
-                        "assistant_text",
-                        &payload,
-                        None,
-                        None,
-                        None,
-                    )
-                    .await
-                    {
-                        Ok(row) => {
-                            if let Err(e) =
-                                app_handle.emit("agent-event-appended", &row)
-                            {
-                                tracing::debug!(
-                                    agent_id = %agent_id,
-                                    err = %e,
-                                    "event-appended emit (flush)"
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                agent_id = %agent_id,
-                                err = %e,
-                                "assistant_text flush insert"
-                            );
-                        }
-                    }
-                }
+                // Each text block already persisted inline via its envelope.
+                // Drop any lingering idle-flush partial — a clean TurnComplete
+                // implies the stream's content blocks all closed with their
+                // authoritative envelopes.
+                idle_flush_pending = None;
                 // Flip the most recent user_text row's delivery_status to
                 // "consumed" — the turn that just ended was the assistant's
                 // response to that message.
@@ -771,15 +780,16 @@ async fn run_event_aggregator<R: tauri::Runtime>(
                 }
             }
             StreamEvent::StdoutClosed => {
-                // D-01.4: if the turn never reached TurnComplete, flush
-                // buffered assistant text as an interrupted row + synthesize
-                // agent-turn-complete so the frontend's streaming flag flips
-                // off (Pitfall 3 — orphaned streaming flag).
-                if let Some(buf) = turn_buffer.take() {
+                // D-01.4: if the turn never reached TurnComplete, persist any
+                // idle-flush partial that the reader handed us (deltas flushed
+                // without a following envelope) as an interrupted row +
+                // synthesize agent-turn-complete so the frontend's streaming
+                // flag flips off (Pitfall 3 — orphaned streaming flag).
+                if let Some(content) = idle_flush_pending.take() {
                     let session_id = sessions.session_id_for(&agent_id).await;
                     let payload = serde_json::json!({
-                        "content": buf.content,
-                        "model": buf.model,
+                        "content": content,
+                        "model": serde_json::Value::Null,
                     });
                     match crate::db::events::insert_agent_event(
                         &pool,
@@ -1351,6 +1361,84 @@ mod tests {
             asst_rows.len(),
             0,
             "no DB row written on AssistantText alone — proves aggregator does not gate @user notification on a DB write"
+        );
+    }
+
+    #[tokio::test]
+    async fn aggregator_writes_row_per_text_block_in_multiblock_turn() {
+        // Regression guard for the original D-01 rollup bug: a turn whose
+        // Anthropic message content is [text, tool_use, text] must produce
+        // TWO assistant_text rows — one before, one after the tool_use —
+        // not a single row containing only the last block. Ordering matters:
+        // the transcript renders rows by id, so the first text block must
+        // slot BEFORE the tool_use row and the second AFTER.
+        let events = vec![
+            StreamEvent::SessionStarted {
+                session_id: "sess-1".to_string(),
+            },
+            StreamEvent::AssistantText {
+                content: "Let me conduct an audit.".to_string(),
+                model: Some("claude-opus-4-7".to_string()),
+            },
+            StreamEvent::ToolUse {
+                tool_name: "Grep".to_string(),
+                tool_input: serde_json::json!({"pattern": "foo"}),
+                tool_use_id: "toolu_1".to_string(),
+                approval_request_id: None,
+            },
+            StreamEvent::ToolResult {
+                tool_use_id: "toolu_1".to_string(),
+                content: serde_json::json!("match.rs:1: foo"),
+                is_error: false,
+            },
+            StreamEvent::AssistantText {
+                content: "Here's the audit of style consistency.".to_string(),
+                model: Some("claude-opus-4-7".to_string()),
+            },
+            StreamEvent::TurnComplete {
+                terminal_reason: "completed".to_string(),
+                is_error: false,
+            },
+        ];
+        let pool = run_aggregator_with_events("A-1", events).await;
+        let rows = crate::db::events::list_events_for_agent(&pool, "A-1", None, 20)
+            .await
+            .expect("list_events_for_agent");
+        // list_events_for_agent returns newest-first; reverse for insertion
+        // order so we can assert the interleave.
+        let mut by_insert_order = rows.clone();
+        by_insert_order.reverse();
+        let shape: Vec<&str> = by_insert_order
+            .iter()
+            .map(|r| r.event_type.as_str())
+            .collect();
+        assert_eq!(
+            shape,
+            vec!["assistant_text", "tool_use", "tool_result", "assistant_text"],
+            "text blocks must persist inline around tool_use — \
+             got {:?}",
+            shape
+        );
+        let asst_rows: Vec<_> = by_insert_order
+            .iter()
+            .filter(|e| e.event_type == "assistant_text")
+            .collect();
+        assert_eq!(asst_rows.len(), 2, "one row per text block");
+        assert_eq!(
+            asst_rows[0]
+                .payload_json
+                .get("content")
+                .and_then(|v| v.as_str()),
+            Some("Let me conduct an audit."),
+            "first row preserves first text block (pre-tool)"
+        );
+        assert_eq!(
+            asst_rows[1]
+                .payload_json
+                .get("content")
+                .and_then(|v| v.as_str()),
+            Some("Here's the audit of style consistency."),
+            "second row preserves second text block (post-tool)"
         );
     }
 }
