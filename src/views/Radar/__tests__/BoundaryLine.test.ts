@@ -47,6 +47,8 @@ function makeMockCtx() {
     save: record('save'),
     restore: record('restore'),
     fillText: record('fillText'),
+    fillRect: record('fillRect'),                                // Phase 22 Fix 3 (W-22-05) — backdrop pill
+    measureText: (t: string) => ({ width: t.length * 6 }),       // Phase 22 Fix 3 — pill width stub
   };
   for (const prop of [
     'fillStyle',
@@ -168,7 +170,7 @@ describe('drawBoundaryAnchorLabels', () => {
     expect(backend!.args[2]).toBe(600 - 24 + 18);
   });
 
-  it('V-12-22: uses theme.folderLabelColor for fills', () => {
+  it('W-22-04: uses theme.fileLabelColor (not folderLabelColor) for label fills; bold alpha 1.0, thin alpha 0.85', () => {
     const ctx = makeMockCtx();
     const theme = THEMES['phosphor-classic'];
     drawBoundaryAnchorLabels(
@@ -179,7 +181,50 @@ describe('drawBoundaryAnchorLabels', () => {
       600,
       theme,
     );
-    expect(ctx._assignments.fillStyle).toContain(theme.folderLabelColor);
+    // D-07: token swap folderLabelColor → fileLabelColor.
+    expect(ctx._assignments.fillStyle).toContain(theme.fileLabelColor);
+    expect(ctx._assignments.fillStyle).not.toContain(theme.folderLabelColor);
+    // D-08: bold globalAlpha raised 0.8 → 1.0; thin raised 0.55 → 0.85.
+    expect(ctx._assignments.globalAlpha).toContain(1.0);
+    expect(ctx._assignments.globalAlpha).toContain(0.85);
+    expect(ctx._assignments.globalAlpha).not.toContain(0.55);
+  });
+
+  it('W-22-05: emits one zero-radius fillRect backdrop pill per label stack BEFORE each fillText; pill fill = canvasBackground@80%', () => {
+    const ctx = makeMockCtx();
+    const theme = THEMES['phosphor-classic'];
+    drawBoundaryAnchorLabels(
+      ctx,
+      BRIDGES_FIXTURE,
+      { zoom: 1, panX: 0, panY: 300 },
+      800,
+      600,
+      theme,
+    );
+    // D-09: two pills — one for FRONTEND+TypeScript stack, one for BACKEND+Rust stack.
+    const fillRects = ctx._calls.filter((c: Call) => c.fn === 'fillRect');
+    expect(fillRects.length).toBeGreaterThanOrEqual(2);
+
+    // D-10: each pill's fillRect must precede the first fillText of its stack.
+    const firstFrontend = ctx._calls.findIndex(
+      (c: Call) => c.fn === 'fillText' && c.args[0] === 'FRONTEND',
+    );
+    const firstBackend = ctx._calls.findIndex(
+      (c: Call) => c.fn === 'fillText' && c.args[0] === 'BACKEND',
+    );
+    expect(firstFrontend).toBeGreaterThan(-1);
+    expect(firstBackend).toBeGreaterThan(-1);
+    const fillRectIdxs = ctx._calls
+      .map((c: Call, i: number) => (c.fn === 'fillRect' ? i : -1))
+      .filter((i: number) => i >= 0);
+    // At least one fillRect before FRONTEND text.
+    expect(fillRectIdxs.some((i: number) => i < firstFrontend)).toBe(true);
+    // At least one fillRect between FRONTEND and BACKEND (the BACKEND stack pill).
+    expect(fillRectIdxs.some((i: number) => i > firstFrontend && i < firstBackend)).toBe(true);
+
+    // D-11: pill fillStyle = canvasBackground + 'cc' (hex+80% alpha suffix).
+    const expectedPillFill = `${theme.canvasBackground}cc`;
+    expect(ctx._assignments.fillStyle).toContain(expectedPillFill);
   });
 });
 

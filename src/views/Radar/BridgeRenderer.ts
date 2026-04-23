@@ -38,7 +38,12 @@ export const BRIDGE_SELECTED_RING_OFFSET = 3;
 export const BRIDGE_LABEL_OFFSET = 6;
 /** Zoom threshold beyond which bridge labels render (matches file labels). */
 export const BRIDGE_LABEL_ZOOM_THRESHOLD = 4;
-/** setLineDash pattern for dangling bridges (no handler OR no callers — D-09). */
+/**
+ * Retained for optional future stroke-pattern decoration; dangling bridges
+ * now carry colour (theme.nodeFill) as the primary signal per Phase 22 Fix 4.
+ * Deletion tracked as a cleanup-pass follow-up.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const BRIDGE_DASH_PATTERN: [number, number] = [4, 3];
 /** Global alpha for the world-space boundary line. */
 export const BOUNDARY_LINE_OPACITY = 0.6;
@@ -125,11 +130,20 @@ export function drawBridgeNodes(
     ctx.lineTo(b.x, b.y + d);
     ctx.lineTo(b.x - d, b.y);
     ctx.closePath();
-    ctx.fillStyle = isSelected ? theme.nodeFillHover ?? baseFill : baseFill;
+    // Three-way fill: selected wins, then dangling uses theme.nodeFill
+    // (color as primary dangling signal), populated retains the cyan
+    // baseFill (edgeGlow ?? arrowFill ?? '#00cffc').
+    ctx.fillStyle = isSelected
+      ? theme.nodeFillHover ?? baseFill
+      : isDangling
+        ? theme.nodeFill
+        : baseFill;
     ctx.fill();
     ctx.strokeStyle = theme.nodeStroke;
     ctx.lineWidth = 1 / zoom;
-    if (isDangling) ctx.setLineDash(BRIDGE_DASH_PATTERN);
+    // Dashed-stroke dangling signal dropped; colour (theme.nodeFill above)
+    // is the primary signal. Retain the defensive setLineDash([]) reset in
+    // case an upstream caller left the dash-state dirty.
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
@@ -206,6 +220,17 @@ export function drawBridgeLabels(
 
 // ───── drawBoundaryAnchorLabels (UI-SPEC §Layout screen-space labels) ─────
 /**
+ * Compose an 80%-alpha backdrop fill from a theme's canvasBackground token.
+ * All THEMES ship canvasBackground as a 6-char hex string; the `+ 'cc'`
+ * suffix is the hex-alpha form of 80% (0xCC / 0xFF ≈ 0.8). Defensive regex
+ * fallback: if a future theme authors rgba/hsl, return the raw value —
+ * callers absorb the slight alpha mismatch rather than emit an invalid fill.
+ */
+function composeBackdropFill(canvasBg: string): string {
+  return /^#[0-9a-f]{6}$/i.test(canvasBg) ? `${canvasBg}cc` : canvasBg;
+}
+
+/**
  * Screen-space (identity-transform) FRONTEND / TypeScript (above) and
  * BACKEND / Rust (below) anchor labels at leftX=12. Caller MUST wrap this
  * function with `ctx.save(); ctx.setTransform(1,0,0,1,0,0); … ctx.restore();`
@@ -229,27 +254,68 @@ export function drawBoundaryAnchorLabels(
   if (boundaryScreenY < 24) boundaryScreenY = 24;
   if (boundaryScreenY > canvasHeight - 24) boundaryScreenY = canvasHeight - 24;
   const leftX = 12;
-  const labelColor = theme.folderLabelColor ?? theme.nodeStroke;
+  // Swap folderLabelColor → fileLabelColor so the FE/BE axis labels read as
+  // markers (not chrome). fileLabelColor is tuned for legibility against
+  // busy graph regions in every theme.
+  const labelColor = theme.fileLabelColor ?? theme.nodeStroke;
+  // 80%-alpha backdrop pill per label stack.
+  const pillFill = composeBackdropFill(theme.canvasBackground);
 
   ctx.save();
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = labelColor;
 
-  // FRONTEND stack (above boundary).
+  // Measure widest glyph per stack to size each pill. Fonts are set locally
+  // per row; measure each row's text with its own font to get accurate widths.
   ctx.font = `700 10px "Space Grotesk", sans-serif`;
-  ctx.globalAlpha = 0.8;
+  const frontendW = ctx.measureText('FRONTEND').width;
+  const backendW = ctx.measureText('BACKEND').width;
+  ctx.font = `400 10px "JetBrains Mono", monospace`;
+  const typescriptW = ctx.measureText('TypeScript').width;
+  const rustW = ctx.measureText('Rust').width;
+
+  const PAD_X = 8; // horizontal padding.
+  const PAD_Y = 4; // vertical padding.
+
+  const feStackW = Math.max(frontendW, typescriptW);
+  const beStackW = Math.max(backendW, rustW);
+
+  // FRONTEND stack (above boundary) — pill first, then bold + thin text.
+  // Bold baseline y = boundaryScreenY - 18; thin baseline y = boundaryScreenY - 8.
+  // Approximate 10px ascent; stack vertical extents:
+  //   top    = (boundaryScreenY - 18) - 10 - PAD_Y
+  //   bottom = (boundaryScreenY - 8) + PAD_Y
+  const fePillX = leftX - PAD_X / 2;
+  const fePillY = boundaryScreenY - 18 - 10 - PAD_Y;
+  const fePillW = feStackW + PAD_X;
+  const fePillH = 18 - 8 + 10 + PAD_Y * 2; // = 10 + 10 + 8 = 28
+  ctx.fillStyle = pillFill;
+  ctx.fillRect(fePillX, fePillY, fePillW, fePillH);
+
+  ctx.fillStyle = labelColor;
+  ctx.font = `700 10px "Space Grotesk", sans-serif`;
+  ctx.globalAlpha = 1.0; // bold raised 0.8 → 1.0.
   ctx.fillText('FRONTEND', leftX, boundaryScreenY - 18);
   ctx.font = `400 10px "JetBrains Mono", monospace`;
-  ctx.globalAlpha = 0.55;
+  ctx.globalAlpha = 0.85; // thin raised 0.55 → 0.85.
   ctx.fillText('TypeScript', leftX, boundaryScreenY - 8);
 
   // BACKEND stack (below boundary).
+  // Bold baseline y = boundaryScreenY + 18; thin baseline y = boundaryScreenY + 8.
+  // Thin sits ABOVE bold in this stack.
+  const bePillX = leftX - PAD_X / 2;
+  const bePillY = boundaryScreenY + 8 - 10 - PAD_Y;
+  const bePillW = beStackW + PAD_X;
+  const bePillH = 18 - 8 + 10 + PAD_Y * 2; // = 28
+  ctx.fillStyle = pillFill;
+  ctx.fillRect(bePillX, bePillY, bePillW, bePillH);
+
+  ctx.fillStyle = labelColor;
   ctx.font = `700 10px "Space Grotesk", sans-serif`;
-  ctx.globalAlpha = 0.8;
+  ctx.globalAlpha = 1.0;
   ctx.fillText('BACKEND', leftX, boundaryScreenY + 18);
   ctx.font = `400 10px "JetBrains Mono", monospace`;
-  ctx.globalAlpha = 0.55;
+  ctx.globalAlpha = 0.85;
   ctx.fillText('Rust', leftX, boundaryScreenY + 8);
 
   ctx.restore();
