@@ -4,11 +4,32 @@ plan: 05
 checkpoint: human-verify
 gate: blocking
 decision: D-34
-status: awaiting-uat
+status: approved
 created: 2026-04-21
+approved: 2026-04-22
 ---
 
 # Phase 12 Plan 05 — Human-Verify Checkpoint (D-34)
+
+## ✓ APPROVED 2026-04-22 — "phase 12 approved, polish tracked in Phase 22"
+
+User smoke confirmed the Phase 12 deliverable:
+
+- ✓ Bridge diamonds visible on the boundary line
+- ✓ BOUNDARY slider responsive (note: "relatively responsive, could have been better" — deferred-items candidate for Phase 22 if still feels off)
+- ✓ No layout shift when `BridgeDetailPanel` appears on selection
+- ✓ FRONTEND/BACKEND anchor labels scale correctly with zoom
+
+Four **visual-polish findings** surfaced during smoke that **do not invalidate the Phase 12 deliverable** and have been filed as Phase 22 instead of blocking closure here:
+
+1. **Aura bug** — `RadarCanvas:726` passes `liveNodes` unfiltered to `drawNodes`, so every bridge gets drawn as a file-node circle underneath the diamond; aura inverts across zoom due to different scaling math between `drawNodes` (fixed world-space radius) and `drawBridgeNodes` (BRIDGE_HALF_DIAG/zoom). Fix: filter `liveNodes.filter(n => n.kind !== 'bridge')` before passing to `drawNodes` + `drawFileLabels`.
+2. **Folder hulls envelop bridges** — `hullCache.ts:86` groups by `dirKey` without a `kind` filter, so bridges carrying their handler file's dirKey pull folder hull centroids toward y=0. Fix: skip `n.kind === 'bridge'` in the group-by-dirKey loop.
+3. **FE/BE label contrast too low** — currently drawn with `theme.onSurfaceVariant` (same token as folder labels); reads as chrome, not axis markers. Fix: swap to `theme.onSurface` at full opacity + add a `theme.surface/80` padded backdrop pill.
+4. **Dangling vs populated bridge distinction too subtle** — 1px `[4, 3]` dashed stroke on an 8-unit diamond is hard to see. Fix: change dangling from "cyan fill + dashed stroke" to "transparent/grey fill + solid stroke" (color as primary signal).
+
+All four are scoped to Phase 22 per 2026-04-22 roadmap entry. Phase 12 closes on current code state. Post-ship follow-up `260422-dqu` (commits `6b9f1bb` / `e7fe5b8`) already shipped the runtime no-bridges guard so non-Tauri repos cleanly hide the boundary layer (structural polyglot generalization tracked as Phase 21).
+
+---
 
 ## What Was Built
 

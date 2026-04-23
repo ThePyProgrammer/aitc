@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: awaiting-uat
-stopped_at: Phase 17 Plan 06 (Wave 4 frontend + UAT checkpoint) complete — code-complete; developer sign-off pending on 17-06-CHECKPOINT.md
-last_updated: "2026-04-22T00:00:00Z"
-last_activity: 2026-04-22 -- Phase 17 Plans 01..06 all shipped (6/6); 12+2 new phase17 tests green; UAT pending
+stopped_at: Phase 12 UAT approved (2026-04-22); 4 visual-polish items tracked as Phase 22. Phase 17 still awaits developer sign-off on 17-06-CHECKPOINT.md.
+last_updated: "2026-04-22T13:00:00Z"
+last_activity: 2026-04-22 -- Phase 12 closed (all 5 plans + D-34 UAT approved); Phase 22 filed for visual polish; next actionable Phase 22 plan or Phase 17 UAT
 progress:
-  total_phases: 21
-  completed_phases: 14
+  total_phases: 22
+  completed_phases: 15
   total_plans: 80
-  completed_plans: 74
-  percent: 93
+  completed_plans: 79
+  percent: 95
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-07)
 
 **Core value:** A developer can see exactly what every AI agent is doing across their codebase in real time, prevent destructive conflicts between concurrent agents, and approve/deny agent actions from a single command center.
-**Current focus:** Phase 17 — conflict-triggered-pretooluse-gating-replace-tool-category-g (code-complete; UAT pending). Phase 12 also AWAITING UAT (D-34 checkpoint).
+**Current focus:** Phase 12 closed 2026-04-22 (D-34 UAT approved; visual polish → Phase 22). Phase 17 still AWAITING UAT (17-06-CHECKPOINT). Next actionable: `/gsd-plan-phase 22` or complete Phase 17 UAT.
 
 ## Current Position
 
-Phase: 17 (conflict-triggered-pretooluse-gating) — AWAITING UAT
-Plan: 6 of 6 (all waves merged to main at `1c28f37`; 12 new phase17 tests green — 7 hook-handler integration + 5 engine query; 2 opt-in `#[ignore]` perf stubs; lock-wait p99 measured at 6.259µs vs 10ms budget; 17-06-CHECKPOINT.md awaits developer sign-off on 6 manual UAT scenarios from VALIDATION.md)
-Status: Awaiting Phase 17 UAT — 6 scenarios blocking: two-agent conflict gate, solo-session noise regression, protected-path OR preservation, bash safelist, bash actual-conflict trigger, OS-notification deep-link
-Last activity: 2026-04-22 -- Phase 17 Plan 06 (Wave 4 bindings regen + ApprovalRequestCard D-22 conditional render + vitest + UAT checkpoint) shipped; phase code-complete
+Phase: Phase 12 shipped 2026-04-22. Phase 17 awaiting UAT. Phase 22 filed, not planned.
+Plan: Phase 12 5/5 complete + D-34 approved; Phase 17 6/6 coded, 6 UAT scenarios outstanding
+Status: Phase 12 UAT approved with four visual-polish findings tracked as Phase 22 (aura bug, hulls envelop bridges, FE/BE label contrast, dangling-vs-populated distinction). Post-ship quick-task 260422-dqu already shipped the polyglot runtime guard. Phase 17 UAT still blocking: two-agent conflict gate, solo-session noise regression, protected-path OR preservation, bash safelist, bash actual-conflict trigger, OS-notification deep-link.
+Last activity: 2026-04-22 -- Phase 12 closed; Phase 22 filed as follow-up polish phase; ROADMAP verification status updated
 
 Progress: [██████████] 100%
 
