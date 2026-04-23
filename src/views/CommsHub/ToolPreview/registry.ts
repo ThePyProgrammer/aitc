@@ -6,7 +6,8 @@
  *   - Write                        → WritePreview (shiki-highlighted code block)
  *   - NotebookEdit                 → NotebookPreview (like Write + cell header)
  *   - Bash                         → BashPreview (DESCRIPTION/COMMAND/METADATA)
- *   - Read/LS/Grep/Glob/WebFetch/WebSearch/Task → ProtectedPathPreview (KV table)
+ *   - Task                         → AgentPreview (collapsible markdown brief)
+ *   - Read/LS/Grep/Glob/WebFetch/WebSearch → ProtectedPathPreview (KV table)
  *   - mcp__* / anything else       → UnknownToolPreview (UNVERIFIED_TOOL banner)
  *
  * Interface shape is FROZEN by Plan 01 contract-lock tests. Do NOT change
@@ -18,6 +19,7 @@ import { WritePreview } from './WritePreview';
 import { BashPreview } from './BashPreview';
 import { NotebookPreview } from './NotebookPreview';
 import { ProtectedPathPreview } from './ProtectedPathPreview';
+import { AgentPreview } from './AgentPreview';
 import { UnknownToolPreview } from './UnknownToolPreview';
 
 export interface ToolPreviewProps {
@@ -35,13 +37,13 @@ const RENDERERS: Record<string, ToolRenderer> = {
   Write: WritePreview,
   NotebookEdit: NotebookPreview,
   Bash: BashPreview,
+  Task: AgentPreview,
   Read: ProtectedPathPreview,
   LS: ProtectedPathPreview,
   Grep: ProtectedPathPreview,
   Glob: ProtectedPathPreview,
   WebFetch: ProtectedPathPreview,
   WebSearch: ProtectedPathPreview,
-  Task: ProtectedPathPreview,
 };
 
 /** Resolve a renderer for the given tool_name. MCP tools (`mcp__*`) and
