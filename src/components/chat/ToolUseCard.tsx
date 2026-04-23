@@ -277,7 +277,7 @@ function ToolResultSection({ event }: { event: AgentEvent }) {
         {isError && <span className="text-error">ERROR</span>}
       </h4>
       <pre
-        className={`whitespace-pre-wrap max-h-[400px] overflow-y-auto max-w-full font-mono text-xs ${
+        className={`whitespace-pre-wrap max-h-[200px] overflow-y-auto max-w-full font-mono text-xs ${
           isError ? 'text-error' : 'text-on-surface-variant/80'
         }`}
       >

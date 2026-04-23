@@ -3,7 +3,7 @@
 //
 // Renders full tool output (no truncation). Handles both stream-json
 // content shapes — plain string OR Array<{type: "text", text: string}>.
-// Long outputs scroll inside the card (max-h-[400px]) so a 10k-line Bash
+// Long outputs scroll inside the card (max-h-[200px]) so a 10k-line Bash
 // dump can't hijack the transcript scroller. `is_error: true` rows tint
 // red and relabel as `ERROR` so failed tool calls read distinct.
 
@@ -57,7 +57,7 @@ export function ToolResultCard({ event }: ToolResultCardProps) {
       >
         {isError ? 'ERROR' : 'RESULT'}
       </span>
-      <pre className="inline-block align-top whitespace-pre-wrap max-h-[400px] overflow-y-auto font-mono max-w-full">
+      <pre className="inline-block align-top whitespace-pre-wrap max-h-[200px] overflow-y-auto font-mono max-w-full">
         {body}
       </pre>
     </div>
