@@ -372,5 +372,5 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 22-01-PLAN.md — Render-layer composition fixes (Fix 1 aura removal in RadarCanvas + Fix 2 bridge exclusion in hullCache) — W-22-01..W-22-03
-- [ ] 22-02-PLAN.md — BridgeRenderer visual tokens (Fix 3 FE/BE anchor label contrast + Fix 4 dangling bridge color signal) — W-22-04..W-22-07
+- [x] 22-01-PLAN.md — Render-layer composition fixes (Fix 1 aura removal in RadarCanvas + Fix 2 bridge exclusion in hullCache) — W-22-01..W-22-03
+- [x] 22-02-PLAN.md — BridgeRenderer visual tokens (Fix 3 FE/BE anchor label contrast + Fix 4 dangling bridge color signal) — W-22-04..W-22-07
