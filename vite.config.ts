@@ -26,8 +26,20 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri` and test files —
+      //    tests import app source, so Vite would otherwise invalidate the
+      //    module graph on every test save and fall back to a full-page
+      //    reload of the Tauri webview (looks like the app restarting).
+      //    vitest runs in its own process with its own watcher, so
+      //    ignoring tests here doesn't affect the test feedback loop.
+      ignored: [
+        "**/src-tauri/**",
+        "**/__tests__/**",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.spec.ts",
+        "**/*.spec.tsx",
+      ],
     },
   },
 }));
