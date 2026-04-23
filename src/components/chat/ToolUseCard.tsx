@@ -156,13 +156,13 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
     <motion.div
       layout
       data-testid="tool-use-card"
-      className="border border-outline bg-surface-bright rounded-sm mx-5 my-1.5"
+      className="border border-outline bg-surface-container-lowest rounded-sm mx-5 my-1.5"
       transition={{ duration: 0.12, ease: 'easeOut' }}
     >
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
-        className="w-full flex items-center gap-3 px-4 py-1.5 text-left hover:bg-[#333333] transition-colors"
+        className="w-full flex items-center gap-3 px-4 py-1.5 text-left hover:bg-surface-container-low transition-colors"
         aria-expanded={expanded}
       >
         <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant shrink-0">
@@ -213,7 +213,7 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
             transition={{ duration: 0.15 }}
             className="overflow-hidden"
           >
-            <div className="px-4 pb-3 pt-3 bg-surface-bright border-t border-outline">
+            <div className="px-4 pb-3 pt-3 bg-surface-container-lowest border-t border-outline">
               {approvalId != null && (
                 <div className="flex justify-end mb-3">
                   <button
