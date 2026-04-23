@@ -278,8 +278,11 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     expect(dot?.getAttribute('data-status')).toBe('pending');
   });
 
-  // V-19-12 — py-1.5 on collapsed button + Option 3 layout: tool name → operation → status dot → chevron.
-  it('collapsed button uses py-1.5 and status dot sits in the right status column', () => {
+  // V-19-12 (updated) — py-2.5 collapsed-row padding + Option 3 layout:
+  // tool name → operation → status dot → chevron. Earlier py-1.5 was the
+  // Phase 19 D-02.4 "codey tight rhythm" choice; later padding audit
+  // bumped it to py-2.5 for better breathing room on big monitors.
+  it('collapsed button uses py-2.5 and status dot sits in the right status column', () => {
     const event = mk({
       payloadJson: {
         tool_use_id: 'toolu_g',
@@ -289,9 +292,7 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     });
     const { container } = renderWithRouter(<ToolUseCard event={event} />);
     const button = container.querySelector('button[aria-expanded]');
-    expect(button?.className).toContain('py-1.5');
-    // Guard against "py-2" surviving as a literal class token on the button.
-    expect(button?.className).not.toMatch(/\bpy-2\b/);
+    expect(button?.className).toContain('py-2.5');
     const dot = container.querySelector('[data-testid="tool-status-dot"]');
     const toolName = Array.from(container.querySelectorAll('span')).find(
       (s) => s.textContent === 'EDIT',

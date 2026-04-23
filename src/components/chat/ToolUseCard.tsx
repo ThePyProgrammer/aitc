@@ -162,7 +162,7 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
-        className="w-full flex items-center gap-3 px-4 py-1.5 text-left hover:bg-surface-container-low transition-colors"
+        className="w-full flex items-center gap-3 px-5 py-2.5 text-left hover:bg-surface-container-low transition-colors"
         aria-expanded={expanded}
       >
         <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant shrink-0">
@@ -213,7 +213,7 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
             transition={{ duration: 0.15 }}
             className="overflow-hidden"
           >
-            <div className="px-4 pb-3 pt-3 bg-surface-container-lowest border-t border-outline">
+            <div className="px-5 pb-4 pt-4 bg-surface-container-lowest border-t border-outline">
               {approvalId != null && (
                 <div className="flex justify-end mb-3">
                   <button
@@ -225,7 +225,7 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
                   </button>
                 </div>
               )}
-              <section className="mb-4">
+              <section className="mb-5">
                 <h4 className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/70 mb-2">
                   INPUT
                 </h4>
@@ -277,7 +277,7 @@ function ToolResultSection({ event }: { event: AgentEvent }) {
         {isError && <span className="text-error">ERROR</span>}
       </h4>
       <pre
-        className={`whitespace-pre-wrap max-h-[200px] overflow-y-auto max-w-full font-mono text-xs ${
+        className={`whitespace-pre-wrap max-h-[200px] overflow-y-auto max-w-full py-1 font-mono text-xs ${
           isError ? 'text-error' : 'text-on-surface-variant/80'
         }`}
       >
