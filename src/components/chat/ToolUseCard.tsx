@@ -8,7 +8,24 @@
 // don't visually compete with assistant/user text.
 
 import { useState, useCallback, useMemo } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Eye,
+  FilePen,
+  FilePlus,
+  Files,
+  FolderOpen,
+  Globe,
+  ListChecks,
+  NotebookPen,
+  Plug,
+  Search,
+  Terminal,
+  Wrench,
+  type LucideIcon,
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import type { AgentEvent } from '../../stores/chatStore';
@@ -93,6 +110,32 @@ function deriveSummary(
 }
 
 // Phase 19 D-02.2 / D-02.4 — map a paired tool_result to a status-dot
+// Per-tool Lucide icon so users can scan the transcript without reading
+// the small-caps tool-name label. Core Claude Code tools mapped to
+// their semantic analog; `mcp__*` tools → Plug (integration indicator);
+// everything else (unknown / malformed / null) → Wrench as a neutral
+// "some tool" fallback.
+const TOOL_ICONS: Record<string, LucideIcon> = {
+  Edit: FilePen,
+  MultiEdit: Files,
+  Write: FilePlus,
+  NotebookEdit: NotebookPen,
+  Read: Eye,
+  LS: FolderOpen,
+  Grep: Search,
+  Glob: FolderOpen,
+  Bash: Terminal,
+  WebFetch: Download,
+  WebSearch: Globe,
+  Task: ListChecks,
+};
+
+function toolIconFor(name: string | null | undefined): LucideIcon {
+  if (!name) return Wrench;
+  if (name.startsWith('mcp__')) return Plug;
+  return TOOL_ICONS[name] ?? Wrench;
+}
+
 // color + state keyword. No paired result yet → grey (pending); is_error
 // true → red; anything else → green (success). is_error narrowing is
 // strict-boolean so malformed payloads fall through as success rather
@@ -141,6 +184,7 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
     [agentEvents, toolUseId],
   );
   const dot = statusDotClass(paired.toolResult);
+  const Icon = toolIconFor(toolName);
 
   const handleApprovalClick = useCallback(
     (e: React.MouseEvent) => {
@@ -165,6 +209,12 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
         className="w-full flex items-center gap-3 px-5 py-2.5 text-left hover:bg-surface-container-low transition-colors"
         aria-expanded={expanded}
       >
+        <Icon
+          size={14}
+          strokeWidth={1.5}
+          className="text-on-surface-variant shrink-0"
+          aria-hidden="true"
+        />
         <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant shrink-0">
           {(toolName ?? 'UNKNOWN').toUpperCase()}
         </span>
