@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { useAgentStore } from '../../stores/agentStore';
 import { useRepoStore } from '../../stores/repoStore';
@@ -44,6 +45,7 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
   const [availableTypes, setAvailableTypes] = useState<string[] | null>(null);
   const launchAgent = useAgentStore((s) => s.launchAgent);
   const activeRepo = useRepoStore((s) => s.activeRepo);
+  const navigate = useNavigate();
 
   // Refresh the installed-CLI list each time the dialog opens so PATH changes
   // (e.g. installing `codex` without restarting AITC) are picked up.
@@ -101,7 +103,7 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
         selectedType === 'claude-code'
           ? { acceptEdits, dangerouslySkipPermissions: skipPermissions }
           : undefined;
-      await launchAgent(
+      const launched = await launchAgent(
         selectedType,
         resolvedCwd,
         intent.trim() || undefined,
@@ -114,6 +116,11 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
       setSkipPermissions(false);
       setSelectedType('claude-code');
       onClose();
+      // Redirect to the CommsHub chat tab with the newly-deployed agent
+      // preselected. ChatView's useEffect watches `channels` and auto-
+      // selects when the id appears — launchAgent already kicked a
+      // fetchChannels() so the new row will land momentarily.
+      navigate(`/comms?tab=chat&agent=${launched.id}`);
     } catch (e) {
       setError(`LAUNCH_FAILED: ${String(e)}`);
     } finally {
