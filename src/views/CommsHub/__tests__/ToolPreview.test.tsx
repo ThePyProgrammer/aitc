@@ -7,6 +7,7 @@ import { WritePreview } from '../ToolPreview/WritePreview';
 import { BashPreview } from '../ToolPreview/BashPreview';
 import { NotebookPreview } from '../ToolPreview/NotebookPreview';
 import { ProtectedPathPreview } from '../ToolPreview/ProtectedPathPreview';
+import { AgentPreview } from '../ToolPreview/AgentPreview';
 import { UnknownToolPreview } from '../ToolPreview/UnknownToolPreview';
 
 vi.mock('../../../hooks/useSyntaxHighlight', () => ({
@@ -49,12 +50,16 @@ describe('ToolPreview registry — Phase 8 Plan 05 real renderers', () => {
     expect(resolveRenderer('NotebookEdit')).toBe(NotebookPreview);
   });
 
-  it.each(['Read', 'LS', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'Task'])(
+  it.each(['Read', 'LS', 'Grep', 'Glob', 'WebFetch', 'WebSearch'])(
     'resolveRenderer returns ProtectedPathPreview for %s',
     (tool) => {
       expect(resolveRenderer(tool)).toBe(ProtectedPathPreview);
     },
   );
+
+  it('resolveRenderer returns AgentPreview for Task', () => {
+    expect(resolveRenderer('Task')).toBe(AgentPreview);
+  });
 
   it('falls back to UnknownToolPreview for mcp__* tools', () => {
     expect(resolveRenderer('mcp__github__create_issue')).toBe(UnknownToolPreview);

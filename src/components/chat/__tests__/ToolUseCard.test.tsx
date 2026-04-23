@@ -34,6 +34,15 @@ vi.mock('../../../views/CommsHub/ToolPreview', () => ({
   ),
 }));
 
+// MarkdownBody pulls in react-markdown + shiki — neither matters for these
+// tests. Stub it so we can assert that the agent-variant OUTPUT path piped
+// the result body into MarkdownBody (vs the regular <pre> path).
+vi.mock('../MarkdownBody', () => ({
+  MarkdownBody: ({ content }: { content: string }) => (
+    <div data-testid="markdown-body">{content}</div>
+  ),
+}));
+
 // Phase 19 D-02.2 — mock the chatStore module so ToolUseCard's selector
 // returns a controllable paired tool_result. Tests override the mock's
 // return value per-case to exercise the green/red/grey dot states.
@@ -347,6 +356,161 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     expect(section).not.toBeNull();
     expect(section?.textContent ?? '').toContain('OUTPUT');
     expect(section?.textContent ?? '').toContain('drwxr-xr-x');
+  });
+
+  // ---------------------------------------------------------------------
+  // Task-path coverage — agent-aware rendering for Task tool calls.
+  // ---------------------------------------------------------------------
+
+  it('Task collapsed row renders AGENT[SUBAGENT_TYPE] label + description as primary', () => {
+    const event = mk({
+      payloadJson: {
+        tool_use_id: 'toolu_task_1',
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'Explore',
+          description: 'Style consistency audit',
+          prompt: 'Audit five pages for style drift...',
+        },
+      },
+    });
+    const { container } = renderWithRouter(<ToolUseCard event={event} />);
+    const card = screen.getByTestId('tool-use-card');
+    expect(card.textContent ?? '').toContain('AGENT[EXPLORE]');
+    expect(card.textContent ?? '').toContain('Style consistency audit');
+    // The plain "TASK" label must not leak through.
+    expect(card.textContent ?? '').not.toMatch(/\bTASK\b/);
+    // Sanity: collapsed body — the ToolPreview stub should not yet render.
+    expect(container.querySelector('[data-testid="tool-preview-stub"]')).toBeNull();
+  });
+
+  it('Task collapsed row falls back to plain AGENT when subagent_type is missing', () => {
+    const event = mk({
+      payloadJson: {
+        tool_use_id: 'toolu_task_2',
+        tool_name: 'Task',
+        tool_input: { description: 'no subagent', prompt: 'brief' },
+      },
+    });
+    renderWithRouter(<ToolUseCard event={event} />);
+    const card = screen.getByTestId('tool-use-card');
+    expect(card.textContent ?? '').toContain('AGENT');
+    expect(card.textContent ?? '').not.toContain('AGENT[');
+  });
+
+  it('Task expanded body has cyan left-border accent', () => {
+    const event = mk({
+      payloadJson: {
+        tool_use_id: 'toolu_task_3',
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'Explore',
+          description: 'audit',
+          prompt: 'brief',
+        },
+      },
+    });
+    const { container } = renderWithRouter(<ToolUseCard event={event} />);
+    fireEvent.click(container.querySelector('button[aria-expanded]')!);
+    // The accent class lives on the same div as the ToolPreview stub's
+    // ancestor; query the expanded body wrapper.
+    const expandedBody = container.querySelector('.border-l-secondary');
+    expect(expandedBody).not.toBeNull();
+    expect(expandedBody?.className).toContain('border-l-2');
+  });
+
+  it('non-Task expanded body has NO accent border (regression guard)', () => {
+    const event = mk({
+      payloadJson: {
+        tool_use_id: 'toolu_bash_3',
+        tool_name: 'Bash',
+        tool_input: { command: 'ls' },
+      },
+    });
+    const { container } = renderWithRouter(<ToolUseCard event={event} />);
+    fireEvent.click(container.querySelector('button[aria-expanded]')!);
+    expect(container.querySelector('.border-l-secondary')).toBeNull();
+  });
+
+  it('Task OUTPUT renders through the agent-variant section (markdown-rendered)', () => {
+    selectToolUseWithResultMock.mockReturnValue({
+      toolUse: null,
+      toolResult: {
+        id: 300,
+        agentId: 'a',
+        sessionId: null,
+        eventType: 'tool_result',
+        payloadJson: {
+          tool_use_id: 'toolu_task_out',
+          content: '# Report\n\n- finding 1\n- finding 2',
+          is_error: false,
+        },
+        approvalRequestId: null,
+        sequenceNumber: null,
+        createdAt: '2026-04-22T12:00:00Z',
+        deliveryStatus: null,
+      },
+    });
+    const event = mk({
+      payloadJson: {
+        tool_use_id: 'toolu_task_out',
+        tool_name: 'Task',
+        tool_input: {
+          subagent_type: 'Explore',
+          description: 'audit',
+          prompt: 'brief',
+        },
+      },
+    });
+    const { container } = renderWithRouter(<ToolUseCard event={event} />);
+    fireEvent.click(container.querySelector('button[aria-expanded]')!);
+    const section = container.querySelector(
+      '[data-testid="tool-result-section"]',
+    );
+    expect(section).not.toBeNull();
+    expect(section?.getAttribute('data-result-variant')).toBe('agent');
+    // Real ToolResultSection uses <pre>; agent variant uses <div> wrapping
+    // MarkdownBody. Confirm no <pre> in the OUTPUT body.
+    expect(section?.querySelector('pre')).toBeNull();
+    // Heading / list content should still reach the DOM (react-markdown
+    // is real here — no mock at this layer).
+    expect(container.textContent ?? '').toContain('Report');
+    expect(container.textContent ?? '').toContain('finding 1');
+  });
+
+  it('non-Task OUTPUT still uses the <pre> path (regression guard)', () => {
+    selectToolUseWithResultMock.mockReturnValue({
+      toolUse: null,
+      toolResult: {
+        id: 301,
+        agentId: 'a',
+        sessionId: null,
+        eventType: 'tool_result',
+        payloadJson: {
+          tool_use_id: 'toolu_bash_out',
+          content: 'plain bytes\nfrom bash',
+          is_error: false,
+        },
+        approvalRequestId: null,
+        sequenceNumber: null,
+        createdAt: '2026-04-22T12:00:00Z',
+        deliveryStatus: null,
+      },
+    });
+    const event = mk({
+      payloadJson: {
+        tool_use_id: 'toolu_bash_out',
+        tool_name: 'Bash',
+        tool_input: { command: 'ls' },
+      },
+    });
+    const { container } = renderWithRouter(<ToolUseCard event={event} />);
+    fireEvent.click(container.querySelector('button[aria-expanded]')!);
+    const section = container.querySelector(
+      '[data-testid="tool-result-section"]',
+    );
+    expect(section?.getAttribute('data-result-variant')).toBeNull();
+    expect(section?.querySelector('pre')).not.toBeNull();
   });
 
   it('renders ERROR label + red tint when paired tool_result.is_error is true', () => {
