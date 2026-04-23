@@ -19,6 +19,20 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Emitter;
 
+/// Inline clone of `pipeline::commands::strip_unc` — drops the Windows `\\?\`
+/// verbatim prefix emitted by `std::fs::canonicalize` so path comparisons line
+/// up with `active.repo_root`, which `start_watch` stores in stripped form.
+fn strip_unc(p: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = p.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    p
+}
+
 /// List all currently tracked agents.
 #[tauri::command]
 #[specta::specta]
@@ -116,10 +130,14 @@ pub(crate) async fn launch_agent_inner<R: tauri::Runtime>(
     app_handle: tauri::AppHandle<R>,
 ) -> Result<AgentInfo, String> {
     // T-03-05: Validate cwd -- canonicalize to resolve symlinks and `..` components,
-    // preventing path traversal attacks.
-    let cwd_path = PathBuf::from(&cwd)
-        .canonicalize()
-        .map_err(|e| format!("cwd is invalid or inaccessible: {e}"))?;
+    // preventing path traversal attacks. Strip Windows `\\?\` (verbatim) prefix so
+    // the downstream `starts_with(&active.repo_root)` check matches — repo_root is
+    // stored in stripped form by `start_watch` (pipeline/commands.rs `strip_unc`).
+    let cwd_path = strip_unc(
+        PathBuf::from(&cwd)
+            .canonicalize()
+            .map_err(|e| format!("cwd is invalid or inaccessible: {e}"))?,
+    );
     if !cwd_path.is_dir() {
         return Err(format!("cwd is not a directory: {}", cwd_path.display()));
     }
