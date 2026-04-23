@@ -156,7 +156,7 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
     <motion.div
       layout
       data-testid="tool-use-card"
-      className="border border-outline bg-surface-container-lowest rounded-sm mx-5 my-1.5"
+      className="bg-surface-container-lowest rounded-sm mx-5 my-1.5"
       transition={{ duration: 0.12, ease: 'easeOut' }}
     >
       <button
