@@ -1,7 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { ReactElement } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { AgentChannelList } from '../AgentChannelList';
 import { useChatStore, type ChatChannel } from '../../../stores/chatStore';
+
+// AgentChannelList renders DeployDialog, which calls useNavigate(). A Router
+// ancestor is required even when the dialog is closed because the hook
+// resolves at render time. MemoryRouter works for tests — the real app uses
+// createMemoryRouter in App.tsx.
+const renderWithRouter = (ui: ReactElement) =>
+  render(<MemoryRouter>{ui}</MemoryRouter>);
 
 // TanStack Virtual renders zero items in jsdom (containers have 0 height).
 // Mock to render every item linearly so row content is testable.
@@ -41,14 +50,14 @@ describe('AgentChannelList', () => {
   });
 
   it('renders empty state when no channels are present', () => {
-    render(<AgentChannelList />);
+    renderWithRouter(<AgentChannelList />);
     const list = screen.getByTestId('agent-channel-list');
     expect(list.textContent ?? '').toContain('NO_AGENT_CHANNELS');
   });
 
   it('renders the AGENT_CHANNELS header', () => {
     useChatStore.setState({ channels: [mkChannel()] });
-    render(<AgentChannelList />);
+    renderWithRouter(<AgentChannelList />);
     expect(screen.getByText('AGENT_CHANNELS')).toBeInTheDocument();
   });
 
@@ -59,7 +68,7 @@ describe('AgentChannelList', () => {
       channels: [active, archived],
       archivedCollapsed: false,
     });
-    render(<AgentChannelList />);
+    renderWithRouter(<AgentChannelList />);
     expect(screen.getByText('ACTIVE')).toBeInTheDocument();
     expect(screen.getByText(/ARCHIVED/)).toBeInTheDocument();
   });
@@ -67,7 +76,7 @@ describe('AgentChannelList', () => {
   it('ARCHIVED section is collapsed by default (archived rows hidden)', () => {
     const archived = mkChannel({ agentId: 'zz-archived', archived: true });
     useChatStore.setState({ channels: [archived], archivedCollapsed: true });
-    render(<AgentChannelList />);
+    renderWithRouter(<AgentChannelList />);
     expect(screen.getByText(/ARCHIVED/)).toBeInTheDocument();
     // Row should NOT be visible when archived section is collapsed.
     expect(screen.queryByText('zz-archived')).toBeNull();
@@ -76,7 +85,7 @@ describe('AgentChannelList', () => {
   it('clicking ARCHIVED header toggles expansion', () => {
     const archived = mkChannel({ agentId: 'zz-archived', archived: true });
     useChatStore.setState({ channels: [archived], archivedCollapsed: true });
-    render(<AgentChannelList />);
+    renderWithRouter(<AgentChannelList />);
     const header = screen.getByTestId('archived-section-header');
     fireEvent.click(header);
     expect(useChatStore.getState().archivedCollapsed).toBe(false);
@@ -88,7 +97,7 @@ describe('AgentChannelList', () => {
       channels: [mkChannel({ agentId: 'a-1' })],
       selectAgent: selectSpy,
     });
-    render(<AgentChannelList />);
+    renderWithRouter(<AgentChannelList />);
     const row = screen.getByText('a-1').closest('[data-testid="agent-channel-row"]');
     expect(row).toBeTruthy();
     fireEvent.click(row!);
@@ -100,7 +109,7 @@ describe('AgentChannelList', () => {
       channels: [mkChannel({ agentId: 'a-1' })],
       selectedAgentId: 'a-1',
     });
-    render(<AgentChannelList />);
+    renderWithRouter(<AgentChannelList />);
     const row = screen.getByText('a-1').closest('[data-testid="agent-channel-row"]');
     expect(row!.className).toContain('border-l-2');
     expect(row!.className).toContain('border-primary');
