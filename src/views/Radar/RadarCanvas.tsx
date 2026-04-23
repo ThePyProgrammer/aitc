@@ -38,7 +38,7 @@ import { useConflictStore } from '../../stores/conflictStore';
 import { useCanvasZoomPan } from '../../hooks/useCanvasZoomPan';
 import { useGraphLayout } from '../../hooks/useGraphLayout';
 import {
-  drawFolderHulls,
+  drawFolderLabels,
   drawEdges,
   drawArrowHeads,
   drawNodes,
@@ -720,8 +720,9 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         drawBoundaryLine(ctx, bridgeNodes, vp, w, h, s.theme);
       }
 
-      // Steps 2-3: Folder hulls (fill/stroke + label).
-      drawFolderHulls(
+      // Step 3 only: Folder labels (shapes dropped per option-2 spike — the
+      // hullCache still computes centroids that the labels anchor on).
+      drawFolderLabels(
         ctx,
         liveNodes,
         vp.zoom,

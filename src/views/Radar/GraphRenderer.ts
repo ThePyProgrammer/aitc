@@ -165,30 +165,22 @@ export function shouldRenderHullAtZoom(dirDepth: number, zoom: number): boolean 
   return true;
 }
 
-// ───── drawFolderHulls (UI-SPEC §Component Inventory z-order steps 2-3) ─────
+// ───── drawFolderHullShapes (Option 2 spike — shape-only split) ─────
 /**
- * Groups nodes by dirKey and for each group renders either:
- *   - a convex hull (≥3 points) via d3-polygon, or
- *   - a circle fallback centered on the centroid (<3 points).
- * Then places an UPPERCASE label at the centroid with progressive detail
- * (top-level = 12px bold 60%, nested = 10px regular 40%) per UI-SPEC §Color.
+ * Renders JUST the hull geometry (convex hull OR circle fallback) for each
+ * folder group. Extracted from the original drawFolderHulls so the render
+ * loop can skip shapes while still drawing labels at folder centroids.
  */
-export function drawFolderHulls(
+export function drawFolderHullShapes(
   ctx: CanvasRenderingContext2D,
   nodes: GraphNode[],
   zoom: number,
   settledAt: number | null,
-  parentChildMap: Map<string, Set<string>>,
-  dirsWithOwnFiles: Set<string>,
   theme: GraphTheme = FALLBACK_THEME,
 ): void {
-  // Phase 11.1 (D-08..D-11): hull bundles are cached per (settledAt,
-  // zoom-bucket). The cache does the expensive work (convex hull +
-  // closed spline + Path2D construction + centroid) only when the
-  // composite epoch key changes.
   const entries = getHullCache(nodes, zoom, settledAt);
   const lineW = 1 / zoom;
-  for (const [dirKey, entry] of entries) {
+  for (const [, entry] of entries) {
     if (!shouldRenderHullAtZoom(entry.dirDepth, zoom)) continue;
     ctx.strokeStyle = theme.hullStroke;
     ctx.fillStyle = theme.hullFill;
@@ -205,20 +197,56 @@ export function drawFolderHulls(
       ctx.fill();
       ctx.stroke();
     }
+  }
+}
 
-    // Label (collapsed-chain) — top-level depth 0/1 = 12px/zoom full alpha,
-    // depth ≥2 = 10px/zoom dimmed via globalAlpha (keeps the theme color
-    // intact so we don't have to parse/rewrite rgba strings).
+// ───── drawFolderLabels (Option 2 spike — label-only split) ─────
+/**
+ * Renders JUST the folder labels at cached centroids. Survives the hull
+ * shape removal — labels still anchor on hullCache centroids, which are
+ * computed from the same grouped-by-dirKey nodes.
+ */
+export function drawFolderLabels(
+  ctx: CanvasRenderingContext2D,
+  nodes: GraphNode[],
+  zoom: number,
+  settledAt: number | null,
+  parentChildMap: Map<string, Set<string>>,
+  dirsWithOwnFiles: Set<string>,
+  theme: GraphTheme = FALLBACK_THEME,
+): void {
+  const entries = getHullCache(nodes, zoom, settledAt);
+  for (const [dirKey, entry] of entries) {
+    if (!shouldRenderHullAtZoom(entry.dirDepth, zoom)) continue;
     const label = collapseSingleChildChain(dirKey, dirsWithOwnFiles, parentChildMap);
     const isTop = entry.dirDepth <= 1;
     const fontSize = (isTop ? 12 : 10) / zoom;
     ctx.font = `${isTop ? 'bold ' : ''}${fontSize}px "Space Grotesk", sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillStyle = theme.folderLabelColor;
-    if (!isTop) ctx.globalAlpha = 0.67; // nested labels dimmed 40/60 of base.
+    if (!isTop) ctx.globalAlpha = 0.67;
     ctx.fillText(label.toUpperCase(), entry.cx, entry.cy - 6 / zoom);
     if (!isTop) ctx.globalAlpha = 1;
   }
+}
+
+// ───── drawFolderHulls (UI-SPEC §Component Inventory z-order steps 2-3) ─────
+/**
+ * Combined draw — shapes + labels. Retained for backward compatibility with
+ * existing tests (GraphRenderer.test.ts). RadarCanvas no longer calls this
+ * after the Option 2 spike; it calls drawFolderLabels only.
+ */
+export function drawFolderHulls(
+  ctx: CanvasRenderingContext2D,
+  nodes: GraphNode[],
+  zoom: number,
+  settledAt: number | null,
+  parentChildMap: Map<string, Set<string>>,
+  dirsWithOwnFiles: Set<string>,
+  theme: GraphTheme = FALLBACK_THEME,
+): void {
+  drawFolderHullShapes(ctx, nodes, zoom, settledAt, theme);
+  drawFolderLabels(ctx, nodes, zoom, settledAt, parentChildMap, dirsWithOwnFiles, theme);
 }
 
 // ───── drawEdges (UI-SPEC z-order step 4) ─────
