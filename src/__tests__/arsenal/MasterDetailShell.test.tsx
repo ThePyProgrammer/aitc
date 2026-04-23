@@ -24,7 +24,7 @@ describe('MasterDetailShell', () => {
     expect(screen.getByTestId('detail-slot')).toBeInTheDocument();
   });
 
-  it('rail region has w-[220px] shrink-0 classes', () => {
+  it('rail region has 220px width (inline style) + shrink-0', () => {
     render(
       <MasterDetailShell
         rail={<div>r</div>}
@@ -33,11 +33,13 @@ describe('MasterDetailShell', () => {
       />,
     );
     const rail = screen.getByTestId('rail');
-    expect(rail.className).toMatch(/w-\[220px\]/);
+    // Phase 10 Plan 01 moved the rail width to an inline style so it can be
+    // overridden via the `railWidth` prop (CHAT tab uses 280px).
+    expect(rail.style.width).toBe('220px');
     expect(rail.className).toMatch(/shrink-0/);
   });
 
-  it('detail region has 2xl:w-[520px] xl:w-[480px] shrink-0 classes', () => {
+  it('detail region has 520px width (inline style) + shrink-0', () => {
     render(
       <MasterDetailShell
         rail={<div>r</div>}
@@ -46,8 +48,10 @@ describe('MasterDetailShell', () => {
       />,
     );
     const detail = screen.getByTestId('detail');
-    expect(detail.className).toMatch(/2xl:w-\[520px\]/);
-    expect(detail.className).toMatch(/xl:w-\[480px\]/);
+    // Phase 10 Plan 01 moved the detail width to an inline style driven by
+    // the `detailWidth` prop (number or 'flex' to omit). The old 2xl/xl
+    // responsive classes were dropped — width is now a fixed px value.
+    expect(detail.style.width).toBe('520px');
     expect(detail.className).toMatch(/shrink-0/);
   });
 
