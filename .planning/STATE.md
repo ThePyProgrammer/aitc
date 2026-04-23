@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: awaiting-uat
-stopped_at: Phase 22 planned (2026-04-23, --auto mode); 2 plans (22-01 composition, 22-02 visual tokens) verified. Phase 17 still awaits developer sign-off on 17-06-CHECKPOINT.md.
-last_updated: "2026-04-23T01:00:00Z"
-last_activity: 2026-04-23 -- Phase 22 CONTEXT + RESEARCH + VALIDATION + PATTERNS + 2 PLAN.md all written via /gsd-plan-phase --auto; plan-checker PASSED; auto-advancing to /gsd-execute-phase 22
+stopped_at: Phase 22 shipped 2026-04-23 (--auto chain); all 4 visual-polish fixes green (W-22-01..W-22-07 passing, Phase 12 V-12-15..V-12-24 preserved). Phase 17 still awaits developer sign-off on 17-06-CHECKPOINT.md.
+last_updated: "2026-04-23T07:00:00Z"
+last_activity: 2026-04-23 -- Phase 22 executed and verified via /gsd-execute-phase --auto; 2 plans shipped in parallel worktrees; verifier PASSED 9/9 must-haves; post-merge suite 652/665 green (4 failures all pre-existing Phase 12 deferred-items.md D-01)
 progress:
   total_phases: 22
-  completed_phases: 15
+  completed_phases: 16
   total_plans: 82
-  completed_plans: 79
-  percent: 95
+  completed_plans: 81
+  percent: 99
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-07)
 
 **Core value:** A developer can see exactly what every AI agent is doing across their codebase in real time, prevent destructive conflicts between concurrent agents, and approve/deny agent actions from a single command center.
-**Current focus:** Phase 22 planned 2026-04-23 (--auto mode; 2 plans 22-01/22-02, verified). Phase 17 still AWAITING UAT (17-06-CHECKPOINT). Next actionable: `/gsd-execute-phase 22` (auto-advancing) or complete Phase 17 UAT.
+**Current focus:** Phase 22 shipped 2026-04-23 (--auto chain end-to-end: discuss → plan → execute → verify). Phase 17 still AWAITING UAT (17-06-CHECKPOINT). Next actionable: complete Phase 17 UAT or plan remaining phases (13-16, 20, 21).
 
 ## Current Position
 
-Phase: Phase 12 shipped 2026-04-22. Phase 17 awaiting UAT. Phase 22 filed, not planned.
-Plan: Phase 12 5/5 complete + D-34 approved; Phase 17 6/6 coded, 6 UAT scenarios outstanding
-Status: Phase 12 UAT approved with four visual-polish findings tracked as Phase 22 (aura bug, hulls envelop bridges, FE/BE label contrast, dangling-vs-populated distinction). Post-ship quick-task 260422-dqu already shipped the polyglot runtime guard. Phase 17 UAT still blocking: two-agent conflict gate, solo-session noise regression, protected-path OR preservation, bash safelist, bash actual-conflict trigger, OS-notification deep-link.
-Last activity: 2026-04-22 -- Phase 12 closed; Phase 22 filed as follow-up polish phase; ROADMAP verification status updated
+Phase: Phase 22 shipped 2026-04-23. Phase 17 awaiting UAT. 16/22 phases complete (counting 11.1).
+Plan: Phase 22 2/2 plans shipped via parallel worktrees — 22-01 render-layer composition (aura + hulls), 22-02 BridgeRenderer visual tokens (FE/BE labels + dangling signal)
+Status: Phase 22's four visual-polish fixes all green. W-22-01..W-22-07 witnesses passing (33/33 scoped). Phase 12 V-12-15..V-12-24 preserved. Post-merge full suite 652/665 green — 4 failures are exactly the 4 pre-existing deferred items from Phase 12 deferred-items.md D-01 (HeatMapOverlay drift, 2× MasterDetailShell Tailwind v4 drift, useGraphLayout worker flake) and remain out of scope per "only fix own bugs" rule. Phase 17 UAT still blocking: two-agent conflict gate, solo-session noise regression, protected-path OR preservation, bash safelist, bash actual-conflict trigger, OS-notification deep-link.
+Last activity: 2026-04-23 -- Phase 22 executed end-to-end via --auto chain; verifier 9/9 PASSED
 
 Progress: [██████████] 100%
 
