@@ -10,6 +10,9 @@ import {
   BOUNDARY_TARGET_Y_MAGNITUDE,
   BOUNDARY_DEADBAND,
   FORCE_BOUNDARY_BASE_STRENGTH,
+  BOUNDARY_DANGER_ZONE,
+  BOUNDARY_WRONG_SIDE_MULT,
+  BOUNDARY_DANGER_ZONE_MULT,
 } from '../../../workers/forces/forceBoundary';
 
 // Seeded RNG so the convergence tests are byte-deterministic across runs.
@@ -274,6 +277,87 @@ describe('forceBoundary — classifiable-nodes gate (quick/260422-dqu)', () => {
   });
 });
 
+describe('forceBoundary — asymmetric lane-guard multiplier (spike)', () => {
+  it('wrong-side TS file gets WRONG_SIDE_MULT× the natural in-lane pull', () => {
+    // Wrong-side: TS file at y=+50 (in backend territory). dy = -350,
+    // clamped to BOUNDARY_TARGET_Y_MAGNITUDE=300 by the min-clamp.
+    // Expected vy = -10 × 0.15 × 1 × 300 = -450.
+    //
+    // In-lane reference: TS file at y=-200 (solidly in frontend lane,
+    // outside the danger zone). dy = -100. No multiplier (1×).
+    // Expected vy = -1 × 0.15 × 1 × 100 = -15.
+    //
+    // Ratio: wrong-side impulse / in-lane impulse = 450/15 = 30, which
+    // exactly equals the asymmetry (10× × clamp-advantage 3).
+    const nodes: BoundaryNode[] = [
+      { kind: 'file', language: 'rust', x: 0, y: 100, vx: 0, vy: 0 }, // activation anchor
+      { kind: 'file', language: 'ts', x: 0, y: 50, vx: 0, vy: 0 }, // WRONG side
+      { kind: 'file', language: 'ts', x: 0, y: -200, vx: 0, vy: 0 }, // in-lane
+    ];
+    const f = forceBoundary();
+    f.initialize(nodes);
+    f.strength(0.15);
+    f(1);
+
+    const wrongSideVy = nodes[1].vy!;
+    const inLaneVy = nodes[2].vy!;
+    expect(wrongSideVy).toBeLessThan(0); // pulled toward -300
+    expect(inLaneVy).toBeLessThan(0); // pulled toward -300
+    // Wrong-side impulse is much stronger than natural in-lane.
+    expect(Math.abs(wrongSideVy)).toBeGreaterThan(
+      Math.abs(inLaneVy) * BOUNDARY_WRONG_SIDE_MULT,
+    );
+  });
+
+  it('danger-zone TS file (same side, near y=0) gets DANGER_ZONE_MULT× the in-lane pull', () => {
+    // Danger zone: TS file at y=-50 (correct side, |y| < BOUNDARY_DANGER_ZONE=100).
+    // dy = -250. Expected vy = -3 × 0.15 × 1 × 250 = -112.5.
+    //
+    // In-lane reference: TS file at y=-200 (outside danger zone). dy = -100.
+    // Expected vy = -1 × 0.15 × 1 × 100 = -15.
+    //
+    // Ratio ≈ 7.5× because the larger |dy| (250 vs 100) amplifies on top of
+    // the 3× multiplier. Asymmetry alone is 3×.
+    const nodes: BoundaryNode[] = [
+      { kind: 'file', language: 'rust', x: 0, y: 100, vx: 0, vy: 0 }, // activation anchor
+      { kind: 'file', language: 'ts', x: 0, y: -50, vx: 0, vy: 0 }, // danger zone
+      { kind: 'file', language: 'ts', x: 0, y: -200, vx: 0, vy: 0 }, // in-lane
+    ];
+    const f = forceBoundary();
+    f.initialize(nodes);
+    f.strength(0.15);
+    f(1);
+
+    const dangerVy = nodes[1].vy!;
+    const inLaneVy = nodes[2].vy!;
+    // Danger-zone impulse must be at least DANGER_ZONE_MULT× larger than
+    // an in-lane impulse at the same |dy|. Here |dy| differs (250 vs 100),
+    // so the asymmetry is even greater, but we assert the floor.
+    expect(Math.abs(dangerVy)).toBeGreaterThan(
+      Math.abs(inLaneVy) * BOUNDARY_DANGER_ZONE_MULT,
+    );
+  });
+
+  it('wrong-side pull is stronger than danger-zone pull at identical |y|', () => {
+    // Symmetric positions around y=0: y=+50 (wrong side) vs y=-50 (danger zone).
+    // Both TS files; wrong-side gets 10× multiplier, danger-zone gets 3×.
+    // The |dy| values differ (350 clamped to 300 vs 250), but the wrong-side
+    // impulse should still win by roughly the 10/3 ratio adjusted for clamp.
+    const nodes: BoundaryNode[] = [
+      { kind: 'file', language: 'rust', x: 0, y: 100, vx: 0, vy: 0 }, // activation
+      { kind: 'file', language: 'ts', x: 0, y: 50, vx: 0, vy: 0 }, // wrong
+      { kind: 'file', language: 'ts', x: 0, y: -50, vx: 0, vy: 0 }, // danger
+    ];
+    const f = forceBoundary();
+    f.initialize(nodes);
+    f.strength(0.15);
+    f(1);
+
+    expect(Math.abs(nodes[1].vy!)).toBeGreaterThan(Math.abs(nodes[2].vy!));
+  });
+});
+
 // Exercise the exported constants so noUnusedLocals is satisfied without
 // dummy `void` guards.
 void BOUNDARY_TARGET_Y_MAGNITUDE;
+void BOUNDARY_DANGER_ZONE;

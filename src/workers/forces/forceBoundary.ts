@@ -30,6 +30,17 @@ export const BOUNDARY_TARGET_Y_MAGNITUDE = 300;
 export const BOUNDARY_DEADBAND = 5;
 export const FORCE_BOUNDARY_BASE_STRENGTH = 0.15;
 
+// Asymmetric lane-guard spike. File nodes that cross into the wrong half-plane
+// get a strong corrective pull; nodes that are in their own lane but hovering
+// near the y=0 boundary get a moderate pull; nodes solidly inside their lane
+// keep the natural 1x strength so forceCluster/forceLink can still group them.
+// Without this, boundaryStrength=0.15 loses the tug-of-war against the link
+// force carried by invokes/handles edges (bridges pinned at y=0 yank callers
+// and handlers toward the line) and nodes drift across lanes.
+export const BOUNDARY_DANGER_ZONE = 100;
+export const BOUNDARY_WRONG_SIDE_MULT = 10;
+export const BOUNDARY_DANGER_ZONE_MULT = 3;
+
 export function forceBoundary(): BoundaryForce {
   let nodes: BoundaryNode[] = [];
   let strength = FORCE_BOUNDARY_BASE_STRENGTH;
@@ -76,12 +87,26 @@ export function forceBoundary(): BoundaryForce {
       // (the force would otherwise perpetually nudge the node past the
       // target and back as vy oscillates).
       if (Math.abs(dy) < BOUNDARY_DEADBAND) continue;
-      // Spring pull: accelerate vy toward the target, scaled by k (strength×alpha).
+      // Asymmetric lane-guard multiplier: the farther a node is from its
+      // correct half-plane, the harder the force pulls it back. A file node
+      // that has drifted across y=0 into the wrong territory gets 10x pull;
+      // a file node sitting on the correct side but too close to the
+      // boundary gets 3x; a file node comfortably in its lane gets 1x so
+      // forceCluster can still group siblings freely.
+      const wrongSide =
+        (n.language === 'ts' && y > 0) || (n.language === 'rust' && y < 0);
+      const inDangerZone = !wrongSide && Math.abs(y) < BOUNDARY_DANGER_ZONE;
+      const kNode = wrongSide
+        ? k * BOUNDARY_WRONG_SIDE_MULT
+        : inDangerZone
+          ? k * BOUNDARY_DANGER_ZONE_MULT
+          : k;
+      // Spring pull: accelerate vy toward the target, scaled by kNode.
       // Min-clamp the distance so very-far nodes don't produce explosive
       // impulses in the first few chaotic ticks.
       n.vy =
         (n.vy ?? 0) +
-        Math.sign(dy) * k * Math.min(Math.abs(dy), BOUNDARY_TARGET_Y_MAGNITUDE);
+        Math.sign(dy) * kNode * Math.min(Math.abs(dy), BOUNDARY_TARGET_Y_MAGNITUDE);
     }
   }) as BoundaryForce;
 
