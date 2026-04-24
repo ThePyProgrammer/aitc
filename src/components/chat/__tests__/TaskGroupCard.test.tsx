@@ -1,7 +1,57 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { TaskGroupCard } from '../TaskGroupCard';
 import type { AgentEvent } from '../../../stores/chatStore';
+
+// motion/react mock — strips motion props so the wrapper renders as a plain
+// element (matches the pattern other chat tests use).
+vi.mock('motion/react', () => ({
+  motion: {
+    div: ({ children, ...props }: Record<string, unknown>) => {
+      const {
+        initial: _i,
+        animate: _a,
+        exit: _e,
+        transition: _t,
+        layout: _l,
+        ...rest
+      } = props;
+      const Children = children as React.ReactNode;
+      return <div {...(rest as Record<string, unknown>)}>{Children}</div>;
+    },
+    span: ({ children, ...props }: Record<string, unknown>) => {
+      const { initial: _i, animate: _a, exit: _e, transition: _t, ...rest } = props;
+      return <span {...(rest as Record<string, unknown>)}>{children as React.ReactNode}</span>;
+    },
+  },
+  AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+// Stub the ToolPreview registry pulled in transitively by ToolUseCard so we
+// don't have to wire its dependencies for these grouping tests.
+vi.mock('../../../views/CommsHub/ToolPreview', () => ({
+  ToolPreview: (props: Record<string, unknown>) => (
+    <div data-testid="tool-preview-stub" data-tool-name={props.toolName as string} />
+  ),
+}));
+
+// MarkdownBody is also reachable via ToolUseCard for Agent OUTPUT — stub it.
+vi.mock('../MarkdownBody', () => ({
+  MarkdownBody: ({ content }: { content: string }) => (
+    <div data-testid="markdown-body">{content}</div>
+  ),
+}));
+
+// chatStore mock — ToolUseCard subscribes via useChatStore and looks up
+// paired tool_results via selectToolUseWithResult. Return empty so the
+// grouping-test focus stays on rendering, not result-pairing.
+vi.mock('../../../stores/chatStore', () => ({
+  useChatStore: (
+    selector: (s: { eventsByAgent: Record<string, AgentEvent[]> }) => unknown,
+  ) => selector({ eventsByAgent: {} }),
+  selectToolUseWithResult: () => ({ toolUse: null, toolResult: null }),
+}));
 
 function mkNote(
   id: number,
@@ -148,5 +198,100 @@ describe('TaskGroupCard', () => {
     );
     const card = screen.getByTestId('task-group-card');
     expect(card.textContent).toContain('task abc123de');
+  });
+
+  // Phase 19.2 — sub-agent tool_use rows render as nested ToolUseCards
+  // inside the PROGRESS section.
+  it('renders sub-agent tool_use children as nested ToolUseCards', () => {
+    const subToolUse: AgentEvent = {
+      id: 5,
+      agentId: 'claude-cc-001',
+      sessionId: 'sess-1',
+      eventType: 'tool_use',
+      payloadJson: {
+        tool_name: 'Bash',
+        tool_use_id: 'tu-sub-1',
+        tool_input: { command: 'ls -la' },
+      },
+      approvalRequestId: null,
+      sequenceNumber: 5,
+      createdAt: '2026-04-24T00:00:00Z',
+      deliveryStatus: null,
+    };
+    const subToolResult: AgentEvent = {
+      id: 6,
+      agentId: 'claude-cc-001',
+      sessionId: 'sess-1',
+      eventType: 'tool_result',
+      payloadJson: { tool_use_id: 'tu-sub-1', content: 'output' },
+      approvalRequestId: null,
+      sequenceNumber: 6,
+      createdAt: '2026-04-24T00:00:00Z',
+      deliveryStatus: null,
+    };
+    render(
+      <MemoryRouter>
+        <TaskGroupCard
+          taskId="task-A"
+          header={header}
+          children={[child1, subToolUse, subToolResult, child2]}
+          footer={footerCompleted}
+        />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+    // Nested tool_use renders.
+    const nested = screen.getAllByTestId('task-nested-tool-use');
+    expect(nested).toHaveLength(1);
+    // Both progress rows still render — they're separate from tool_use.
+    const progressRows = screen.getAllByTestId('task-progress-row');
+    expect(progressRows).toHaveLength(2);
+    // tool_result is intentionally not surfaced (already paired in its
+    // tool_use's expanded body via the per-agent events lookup).
+    expect(
+      screen.queryByText((c) => c.includes('output')),
+    ).toBeNull();
+  });
+
+  it('counts only progress notes + tool_use rows in the step count (skips tool_result)', () => {
+    const tu: AgentEvent = {
+      id: 5,
+      agentId: 'claude-cc-001',
+      sessionId: 'sess-1',
+      eventType: 'tool_use',
+      payloadJson: {
+        tool_name: 'Bash',
+        tool_use_id: 'tu-1',
+        tool_input: {},
+      },
+      approvalRequestId: null,
+      sequenceNumber: 5,
+      createdAt: '2026-04-24T00:00:00Z',
+      deliveryStatus: null,
+    };
+    const tr: AgentEvent = {
+      id: 6,
+      agentId: 'claude-cc-001',
+      sessionId: 'sess-1',
+      eventType: 'tool_result',
+      payloadJson: { tool_use_id: 'tu-1', content: 'x' },
+      approvalRequestId: null,
+      sequenceNumber: 6,
+      createdAt: '2026-04-24T00:00:00Z',
+      deliveryStatus: null,
+    };
+    render(
+      <MemoryRouter>
+        <TaskGroupCard
+          taskId="task-A"
+          header={header}
+          children={[child1, tu, tr]}
+          footer={null}
+        />
+      </MemoryRouter>,
+    );
+    const card = screen.getByTestId('task-group-card');
+    // 1 progress note + 1 tool_use = 2 steps; tool_result excluded.
+    expect(card.textContent).toContain('2 steps');
   });
 });

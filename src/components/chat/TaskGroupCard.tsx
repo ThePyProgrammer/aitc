@@ -1,14 +1,22 @@
-// Phase 19.1 — collapsible Task-tool (subagent) group.
+// Phase 19.1 — collapsible Agent-tool (subagent) group.
 // Renders the bracket formed by system/task_started … system/task_notification
 // plus all intervening task_progress events as a single card. Visual language
 // matches ToolUseCard's AGENT[TYPE] variant (left-secondary border when
 // expanded) so a delegated subagent reads the same whether the user sees it
 // via the parent tool_use row or via the lifecycle rollup.
+//
+// Phase 19.2 — children may now also include the sub-agent's tool_use rows
+// (and orphan tool_result rows). The PROGRESS section renders them in
+// chronological order: task_progress notes as compact "→ description" rows,
+// tool_use events as nested ToolUseCards. tool_result rows are skipped — they
+// already render inside their paired ToolUseCard's expanded body via the
+// per-agent event lookup.
 
 import { useMemo, useState } from 'react';
 import { Bot, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { AgentEvent } from '../../stores/chatStore';
+import { ToolUseCard } from './ToolUseCard';
 
 export interface TaskGroupCardProps {
   taskId: string;
@@ -95,7 +103,16 @@ export function TaskGroupCard({
     headerData?.description && headerData.description.length > 0
       ? headerData.description
       : footerData?.summary ?? `task ${taskId.slice(0, 8)}`;
-  const childCount = children.length;
+  // Step count = progress notes + sub-agent tool_uses. tool_result rows are
+  // bookkeeping and don't add a user-visible step.
+  const childCount = useMemo(
+    () =>
+      children.filter(
+        (c) =>
+          c.eventType === 'system_note' || c.eventType === 'tool_use',
+      ).length,
+    [children],
+  );
 
   return (
     <motion.div
@@ -188,19 +205,41 @@ export function TaskGroupCard({
                 </section>
               )}
 
-              {children.length > 0 && (
+              {childCount > 0 && (
                 <section data-testid="task-progress-section">
                   <h4 className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/70 mb-2">
                     PROGRESS
                   </h4>
-                  <ul className="font-mono text-xs text-on-surface-variant/80 space-y-1">
+                  <div className="font-mono text-xs text-on-surface-variant/80 space-y-1 -mx-5">
                     {children.map((c) => {
+                      // Sub-agent tool calls — render as a nested ToolUseCard
+                      // so the user sees the same chrome inside the group as
+                      // outside. ToolUseCard pairs its result via the per-agent
+                      // events lookup, which still finds the row regardless of
+                      // grouping. The wrapping `-mx-5` on the parent counters
+                      // the section's px-5 so the card's own `mx-5 my-1.5`
+                      // produces normal spacing rather than double-inset.
+                      if (c.eventType === 'tool_use') {
+                        return (
+                          <div
+                            key={c.id}
+                            data-testid="task-nested-tool-use"
+                          >
+                            <ToolUseCard event={c} />
+                          </div>
+                        );
+                      }
+                      // tool_results are bookkeeping — already paired in their
+                      // tool_use's expanded body. Skip from visible render.
+                      if (c.eventType === 'tool_result') return null;
+                      // task_progress note → compact arrow row, restored to
+                      // section-content alignment via px-5.
                       const d = readData<TaskProgressData>(c);
                       return (
-                        <li
+                        <div
                           key={c.id}
                           data-testid="task-progress-row"
-                          className="flex items-center gap-2"
+                          className="flex items-center gap-2 px-5"
                         >
                           <span className="text-on-surface-variant/40 shrink-0">
                             →
@@ -218,10 +257,10 @@ export function TaskGroupCard({
                               · {d.usage.total_tokens} tok
                             </span>
                           )}
-                        </li>
+                        </div>
                       );
                     })}
-                  </ul>
+                  </div>
                 </section>
               )}
 

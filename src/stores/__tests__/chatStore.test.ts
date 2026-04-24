@@ -731,4 +731,102 @@ describe('selectTranscriptItems', () => {
     expect(items).toHaveLength(1);
     expect(items[0].kind).toBe('event');
   });
+
+  // Phase 19.2 — sub-agent tool_use rows nest into the open task group.
+
+  function mkToolUse(id: number, toolName: string, toolUseId: string): AgentEvent {
+    return {
+      id,
+      agentId: 'claude-cc-001',
+      sessionId: 'sess-1',
+      eventType: 'tool_use',
+      payloadJson: { tool_name: toolName, tool_use_id: toolUseId, tool_input: {} },
+      approvalRequestId: null,
+      sequenceNumber: id,
+      createdAt: '2026-04-24T00:00:00Z',
+      deliveryStatus: null,
+    };
+  }
+
+  function mkToolResult(id: number, toolUseId: string): AgentEvent {
+    return {
+      id,
+      agentId: 'claude-cc-001',
+      sessionId: 'sess-1',
+      eventType: 'tool_result',
+      payloadJson: { tool_use_id: toolUseId, content: 'out' },
+      approvalRequestId: null,
+      sequenceNumber: id,
+      createdAt: '2026-04-24T00:00:00Z',
+      deliveryStatus: null,
+    };
+  }
+
+  it('nests sub-agent tool_use events into the open task group', () => {
+    const events: AgentEvent[] = [
+      mkToolUse(1, 'Agent', 'tu-parent'), // parent Agent dispatch (top-level)
+      mkSystemNote(2, 'task_started', 'task-A', { tool_use_id: 'tu-parent' }),
+      mkToolUse(3, 'Bash', 'tu-sub-1'), // sub-agent's first tool call
+      mkToolResult(4, 'tu-sub-1'),
+      mkSystemNote(5, 'task_progress', 'task-A'),
+      mkToolUse(6, 'Read', 'tu-sub-2'),
+      mkSystemNote(7, 'task_notification', 'task-A', { status: 'completed' }),
+      mkToolUse(8, 'Edit', 'tu-after'), // parent's next tool, after group closes
+    ];
+    const items = selectTranscriptItems(events);
+    expect(items.map((i) => i.kind)).toEqual([
+      'event', // parent Agent tool_use
+      'taskGroup', // SUBAGENT_TASK
+      'event', // tu-after (back at parent level)
+    ]);
+    const group = items[1];
+    if (group.kind !== 'taskGroup') throw new Error('expected taskGroup');
+    // Children, in insertion order: tool_use(3), tool_result(4), progress(5),
+    // tool_use(6). The footer (notification) lands in `footer`, not children.
+    expect(group.children.map((c) => c.id)).toEqual([3, 4, 5, 6]);
+    expect(group.footer?.id).toBe(7);
+    // Top-level event ids: parent tool_use + the post-group tool_use.
+    const topEvents = items.filter((i) => i.kind === 'event');
+    expect(topEvents).toHaveLength(2);
+  });
+
+  it('routes nested tool_use to the innermost open group when tasks are nested', () => {
+    const events: AgentEvent[] = [
+      mkSystemNote(1, 'task_started', 'task-outer'),
+      mkToolUse(2, 'Bash', 'tu-1'), // belongs to outer
+      mkSystemNote(3, 'task_started', 'task-inner'),
+      mkToolUse(4, 'Read', 'tu-2'), // belongs to inner (innermost wins)
+      mkSystemNote(5, 'task_notification', 'task-inner', { status: 'completed' }),
+      mkToolUse(6, 'Grep', 'tu-3'), // back to outer
+      mkSystemNote(7, 'task_notification', 'task-outer', { status: 'completed' }),
+    ];
+    const items = selectTranscriptItems(events);
+    // Outer group is opened first; inner is added as a child of outer (it's a
+    // taskGroup item but routed via the items.push at task_started, while
+    // tool_use rows inside it are in the inner's children).
+    expect(items).toHaveLength(2);
+    const outer = items[0];
+    const inner = items[1];
+    if (outer.kind !== 'taskGroup' || inner.kind !== 'taskGroup') {
+      throw new Error('expected two taskGroups');
+    }
+    expect(outer.taskId).toBe('task-outer');
+    expect(inner.taskId).toBe('task-inner');
+    expect(outer.children.map((c) => c.id)).toEqual([2, 6]);
+    expect(inner.children.map((c) => c.id)).toEqual([4]);
+  });
+
+  it('leaves a tool_use that arrives outside any open task at the top level', () => {
+    const events: AgentEvent[] = [
+      mkToolUse(1, 'Bash', 'tu-1'),
+      mkSystemNote(2, 'task_started', 'task-A'),
+      mkSystemNote(3, 'task_notification', 'task-A', { status: 'completed' }),
+      mkToolUse(4, 'Bash', 'tu-2'),
+    ];
+    const items = selectTranscriptItems(events);
+    expect(items.map((i) => i.kind)).toEqual(['event', 'taskGroup', 'event']);
+    const group = items[1];
+    if (group.kind !== 'taskGroup') throw new Error('expected taskGroup');
+    expect(group.children).toHaveLength(0);
+  });
 });
