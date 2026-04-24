@@ -66,6 +66,12 @@ export interface ChatStore {
   // per-agent streaming text here; ChatTranscript renders it as a synthetic
   // trailing row until the authoritative assistant_text event lands.
   streamingByAgent: Record<string, string>;
+  // Phase 19.7 — true between agent-turn-started and agent-turn-complete
+  // for the named agent. ChatTranscript renders a "GENERATING" indicator
+  // row while this is true and the streaming buffer is still empty —
+  // gives feedback during the silent pre-text-delta phase (Claude
+  // thinking, tool-only turns).
+  isAgentRunningByAgent: Record<string, boolean>;
   // Phase 19.2 — reverse-infinite-scroll guards. `loadingOlderByAgent`
   // prevents concurrent loadOlder invocations while a fetch is in flight
   // (the scroll handler can fire loadOlder on every pixel near the top —
@@ -98,6 +104,7 @@ const INITIAL_LIMIT = 50;
 export const useChatStore = create<ChatStore>((set, get) => ({
   eventsByAgent: {},
   streamingByAgent: {},
+  isAgentRunningByAgent: {},
   loadingOlderByAgent: {},
   hasMoreOlderByAgent: {},
   channels: [],
@@ -308,13 +315,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         });
       }),
 
-      // 2. agent-turn-started — Plan 05 no-op (the per-event streaming flag
-      //    is carried on the assistant_text payload itself; Plan 02 aggregator
-      //    emits agent-event-appended with streaming:true as needed).
+      // 2. agent-turn-started — flip the per-agent isAgentRunning flag on
+      //    so ChatTranscript can render a "GENERATING" indicator while the
+      //    SDK is processing pre-first-delta. Cleared by turn-complete.
       listen<{ agentId: string; sessionId?: string | null }>(
         'agent-turn-started',
-        () => {
-          /* no-op */
+        (ev) => {
+          const agentId = ev.payload.agentId;
+          set((s) => ({
+            isAgentRunningByAgent: {
+              ...s.isAgentRunningByAgent,
+              [agentId]: true,
+            },
+          }));
         },
       ),
 
@@ -331,6 +344,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           const next = { ...s.streamingByAgent };
           delete next[agentId];
           return { streamingByAgent: next };
+        });
+        // Phase 19.7 — clear the GENERATING indicator regardless of how
+        // the turn ended (success, tool-only, error).
+        set((s) => {
+          if (s.isAgentRunningByAgent[agentId] === undefined) return s;
+          const next = { ...s.isAgentRunningByAgent };
+          delete next[agentId];
+          return { isAgentRunningByAgent: next };
         });
         set((s) => {
           const arr = s.eventsByAgent[agentId];
@@ -493,6 +514,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({
       eventsByAgent: {},
       streamingByAgent: {},
+      isAgentRunningByAgent: {},
       loadingOlderByAgent: {},
       hasMoreOlderByAgent: {},
       channels: [],

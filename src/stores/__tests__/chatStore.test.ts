@@ -429,6 +429,38 @@ describe('chatStore', () => {
     ).toBe('partial text');
   });
 
+  // Phase 19.7 — GENERATING indicator flag.
+  it('agent-turn-started sets isAgentRunningByAgent[agentId] = true', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    const handler = handlers.get('agent-turn-started')!;
+    handler({
+      payload: { agentId: 'claude-cc-001', sessionId: null },
+    });
+    expect(
+      useChatStore.getState().isAgentRunningByAgent['claude-cc-001'],
+    ).toBe(true);
+  });
+
+  it('agent-turn-complete clears isAgentRunningByAgent for that agent', async () => {
+    const handlers = installListenMock();
+    await useChatStore.getState().subscribeToChat();
+    useChatStore.setState({
+      isAgentRunningByAgent: { 'claude-cc-001': true },
+    });
+    const handler = handlers.get('agent-turn-complete')!;
+    handler({
+      payload: {
+        agentId: 'claude-cc-001',
+        terminalReason: 'completed',
+        isError: false,
+      },
+    });
+    expect(
+      useChatStore.getState().isAgentRunningByAgent['claude-cc-001'],
+    ).toBeUndefined();
+  });
+
   it('agent-turn-complete clears streamingByAgent as a tool-only-turn safety net', async () => {
     const handlers = installListenMock();
     await useChatStore.getState().subscribeToChat();
