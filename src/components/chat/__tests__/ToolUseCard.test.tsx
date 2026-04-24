@@ -414,7 +414,7 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     fireEvent.click(container.querySelector('button[aria-expanded]')!);
     // The accent class lives on the same div as the ToolPreview stub's
     // ancestor; query the expanded body wrapper.
-    const expandedBody = container.querySelector('.border-l-secondary');
+    const expandedBody = container.querySelector('.border-secondary');
     expect(expandedBody).not.toBeNull();
     expect(expandedBody?.className).toContain('border-l-2');
   });
@@ -429,7 +429,8 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     });
     const { container } = renderWithRouter(<ToolUseCard event={event} />);
     fireEvent.click(container.querySelector('button[aria-expanded]')!);
-    expect(container.querySelector('.border-l-secondary')).toBeNull();
+    expect(container.querySelector('.border-secondary')).toBeNull();
+    expect(container.querySelector('.border-tertiary')).toBeNull();
   });
 
   it('Task OUTPUT renders through the agent-variant section (markdown-rendered)', () => {
@@ -596,11 +597,11 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     });
     const { container } = renderWithRouter(<ToolUseCard event={event} />);
     fireEvent.click(container.querySelector('button[aria-expanded]')!);
-    const expandedBody = container.querySelector('.border-l-tertiary');
+    const expandedBody = container.querySelector('.border-tertiary');
     expect(expandedBody).not.toBeNull();
     expect(expandedBody?.className).toContain('border-l-2');
     // Skill must not borrow Agent's cyan.
-    expect(container.querySelector('.border-l-secondary')).toBeNull();
+    expect(container.querySelector('.border-secondary')).toBeNull();
   });
 
   it('Skill OUTPUT section is suppressed even when a tool_result is paired', () => {

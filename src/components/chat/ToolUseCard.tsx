@@ -303,13 +303,13 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
             className="overflow-hidden"
           >
             <div
-              className={`px-5 pb-4 pt-4 bg-surface-container-lowest border-t border-outline${
+              className={
                 isAgent
-                  ? ' border-l-2 border-l-secondary'
+                  ? 'px-5 pb-4 pt-4 bg-surface-container-lowest border-l-2 border-secondary'
                   : isSkill
-                  ? ' border-l-2 border-l-tertiary'
-                  : ''
-              }`}
+                  ? 'px-5 pb-4 pt-4 bg-surface-container-lowest border-l-2 border-tertiary'
+                  : 'px-5 pb-4 pt-4 bg-surface-container-lowest border-t border-outline'
+              }
             >
               {approvalId != null && (
                 <div className="flex justify-end mb-3">
