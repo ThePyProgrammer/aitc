@@ -273,6 +273,12 @@ async fn dispatch_system(v: &serde_json::Value, sink: &mpsc::Sender<StreamEvent>
                 })
                 .await;
         }
+        // SDK heartbeat — emitted periodically during active turns, carries
+        // no user-visible signal. Silent drop so it doesn't bloat the
+        // transcript with grey "[system/status]" rows. Same pattern as the
+        // SessionStart: hook lifecycle drop above. raw_stdout still
+        // preserves the full envelope for debugging.
+        "status" => {}
         _ => {
             // Unknown system subtype — log and surface as a generic note.
             let text = format!("[system/{subtype}]");
@@ -1140,6 +1146,50 @@ mod tests {
                 assert!(data.is_none(), "plain hook notes keep data: None");
             }
             other => panic!("expected SystemNote for hook, got {:?}", other),
+        }
+    }
+
+    // SDK heartbeat — `{type: "system", subtype: "status"}` arrives every few
+    // seconds during active turns and carries no user-visible signal. The
+    // parser must drop it silently (same pattern as SessionStart hooks)
+    // rather than spamming the transcript with grey "[system/status]" rows.
+    #[tokio::test]
+    async fn dispatch_system_drops_status_heartbeat() {
+        let (tx, mut rx) = mpsc::channel::<StreamEvent>(8);
+        let status = serde_json::json!({
+            "type": "system",
+            "subtype": "status",
+            "session_id": "sess-1",
+            // Even with a payload, we drop — the SDK's status fields aren't
+            // surfaced anywhere in the UI today.
+            "queue_depth": 3,
+            "tokens": { "input": 1234, "output": 56 },
+        });
+        // Sanity: an unknown subtype DOES emit (so we know the silent-drop
+        // arm isn't a bug in the catch-all).
+        let unknown = serde_json::json!({
+            "type": "system",
+            "subtype": "novel_subtype",
+            "session_id": "sess-1",
+        });
+        dispatch_system(&status, &tx).await;
+        dispatch_system(&unknown, &tx).await;
+        drop(tx);
+        let mut out = Vec::new();
+        while let Some(e) = rx.recv().await {
+            out.push(e);
+        }
+        assert_eq!(
+            out.len(),
+            1,
+            "status must be dropped; only the unknown subtype should surface, got {:?}",
+            out
+        );
+        match &out[0] {
+            StreamEvent::SystemNote { text, .. } => {
+                assert_eq!(text, "[system/novel_subtype]");
+            }
+            other => panic!("expected SystemNote, got {:?}", other),
         }
     }
 
