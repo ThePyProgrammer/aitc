@@ -15,7 +15,7 @@ describe('AgentPreview', () => {
     render(
       <AgentPreview
         requestId={1}
-        toolName="Task"
+        toolName="Agent"
         toolInputJson={{
           subagent_type: 'Explore',
           description: 'audit',
@@ -34,7 +34,7 @@ describe('AgentPreview', () => {
     render(
       <AgentPreview
         requestId={1}
-        toolName="Task"
+        toolName="Agent"
         toolInputJson={{
           subagent_type: 'Explore',
           description: 'audit',
@@ -54,7 +54,7 @@ describe('AgentPreview', () => {
     render(
       <AgentPreview
         requestId={1}
-        toolName="Task"
+        toolName="Agent"
         toolInputJson={{ prompt: 'solo' }}
         filePath={null}
       />,
@@ -67,7 +67,7 @@ describe('AgentPreview', () => {
     render(
       <AgentPreview
         requestId={1}
-        toolName="Task"
+        toolName="Agent"
         toolInputJson={{ subagent_type: 'Explore', description: 'x' }}
         filePath={null}
       />,
@@ -80,7 +80,7 @@ describe('AgentPreview', () => {
     render(
       <AgentPreview
         requestId={1}
-        toolName="Task"
+        toolName="Agent"
         toolInputJson={{ prompt: '   ' }}
         filePath={null}
       />,

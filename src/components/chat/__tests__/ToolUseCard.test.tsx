@@ -362,11 +362,11 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
   // Task-path coverage — agent-aware rendering for Task tool calls.
   // ---------------------------------------------------------------------
 
-  it('Task collapsed row renders AGENT[SUBAGENT_TYPE] label + description as primary', () => {
+  it('Agent collapsed row renders AGENT[SUBAGENT_TYPE] label + description as primary', () => {
     const event = mk({
       payloadJson: {
         tool_use_id: 'toolu_task_1',
-        tool_name: 'Task',
+        tool_name: 'Agent',
         tool_input: {
           subagent_type: 'Explore',
           description: 'Style consistency audit',
@@ -384,11 +384,11 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     expect(container.querySelector('[data-testid="tool-preview-stub"]')).toBeNull();
   });
 
-  it('Task collapsed row falls back to plain AGENT when subagent_type is missing', () => {
+  it('Agent collapsed row falls back to plain AGENT when subagent_type is missing', () => {
     const event = mk({
       payloadJson: {
         tool_use_id: 'toolu_task_2',
-        tool_name: 'Task',
+        tool_name: 'Agent',
         tool_input: { description: 'no subagent', prompt: 'brief' },
       },
     });
@@ -398,11 +398,11 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     expect(card.textContent ?? '').not.toContain('AGENT[');
   });
 
-  it('Task expanded body has cyan left-border accent', () => {
+  it('Agent expanded body has cyan left-border accent', () => {
     const event = mk({
       payloadJson: {
         tool_use_id: 'toolu_task_3',
-        tool_name: 'Task',
+        tool_name: 'Agent',
         tool_input: {
           subagent_type: 'Explore',
           description: 'audit',
@@ -419,7 +419,7 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     expect(expandedBody?.className).toContain('border-l-2');
   });
 
-  it('non-Task expanded body has NO accent border (regression guard)', () => {
+  it('non-Agent expanded body has NO accent border (regression guard)', () => {
     const event = mk({
       payloadJson: {
         tool_use_id: 'toolu_bash_3',
@@ -433,7 +433,7 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     expect(container.querySelector('.border-tertiary')).toBeNull();
   });
 
-  it('Task OUTPUT renders through the agent-variant section (markdown-rendered)', () => {
+  it('Agent OUTPUT renders through the agent-variant section (markdown-rendered)', () => {
     selectToolUseWithResultMock.mockReturnValue({
       toolUse: null,
       toolResult: {
@@ -455,7 +455,7 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     const event = mk({
       payloadJson: {
         tool_use_id: 'toolu_task_out',
-        tool_name: 'Task',
+        tool_name: 'Agent',
         tool_input: {
           subagent_type: 'Explore',
           description: 'audit',
@@ -479,7 +479,7 @@ describe('ToolUseCard enrichment (D-02 — V-19-05..V-19-12)', () => {
     expect(container.textContent ?? '').toContain('finding 1');
   });
 
-  it('non-Task OUTPUT still uses the <pre> path (regression guard)', () => {
+  it('non-Agent OUTPUT still uses the <pre> path (regression guard)', () => {
     selectToolUseWithResultMock.mockReturnValue({
       toolUse: null,
       toolResult: {

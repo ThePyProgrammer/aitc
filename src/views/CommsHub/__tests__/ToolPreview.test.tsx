@@ -58,9 +58,16 @@ describe('ToolPreview registry — Phase 8 Plan 05 real renderers', () => {
     },
   );
 
-  it('resolveRenderer returns AgentPreview for Task', () => {
-    expect(resolveRenderer('Task')).toBe(AgentPreview);
+  it('resolveRenderer returns AgentPreview for Agent', () => {
+    expect(resolveRenderer('Agent')).toBe(AgentPreview);
   });
+
+  it.each(['TodoWrite', 'ToolSearch'])(
+    'resolveRenderer returns ProtectedPathPreview for %s',
+    (tool) => {
+      expect(resolveRenderer(tool)).toBe(ProtectedPathPreview);
+    },
+  );
 
   it('resolveRenderer returns SkillPreview for Skill', () => {
     expect(resolveRenderer('Skill')).toBe(SkillPreview);
