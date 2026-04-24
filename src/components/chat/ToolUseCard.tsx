@@ -98,7 +98,7 @@ function deriveSummary(
         return { primary: url };
       }
     }
-    case 'Task': {
+    case 'Agent': {
       const description = toolInput.description as string | undefined;
       if (description && description.length > 0) {
         return { primary: description };
@@ -143,7 +143,7 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   Bash: Terminal,
   WebFetch: Download,
   WebSearch: Globe,
-  Task: Bot,
+  Agent: Bot,
   Skill: Sparkles,
 };
 
@@ -185,10 +185,10 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
   const toolInput = payload.tool_input ?? {};
   const summary = deriveSummary(toolName ?? undefined, payload.tool_input);
   const approvalId = event.approvalRequestId;
-  const isAgent = toolName === 'Task';
+  const isAgent = toolName === 'Agent';
   const isSkill = toolName === 'Skill';
   // Special-cased labels:
-  //   Task  → AGENT[SUBAGENT_TYPE]   ("delegated sub-conversation")
+  //   Agent → AGENT[SUBAGENT_TYPE]   ("delegated sub-conversation")
   //   Skill → SKILL[SKILL_NAME]      ("inline-loaded slash-command")
   // Each falls back to a plain unparameterized label if the relevant
   // identifier field is missing or non-string.
