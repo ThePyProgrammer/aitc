@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { TaskGroupCard } from '../TaskGroupCard';
+import { TaskGroupCard, getCurrentActivity } from '../TaskGroupCard';
 import type { AgentEvent } from '../../../stores/chatStore';
 
 // motion/react mock — strips motion props so the wrapper renders as a plain
@@ -132,7 +132,7 @@ describe('TaskGroupCard', () => {
     const card = screen.getByTestId('task-group-card');
     expect(card.textContent).toContain('SUBAGENT_TASK');
     expect(card.textContent).toContain('Echo hello');
-    expect(card.textContent).toContain('2 steps');
+    expect(card.textContent).toContain('2 STEPS');
     const dot = screen.getByTestId('task-status-dot');
     expect(dot.dataset.status).toBe('success');
     expect(dot.className).toContain('bg-primary');
@@ -367,6 +367,220 @@ describe('TaskGroupCard', () => {
     );
     const card = screen.getByTestId('task-group-card');
     // 1 progress note + 1 tool_use = 2 steps; tool_result excluded.
-    expect(card.textContent).toContain('2 steps');
+    expect(card.textContent).toContain('2 STEPS');
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase 19.4 — bigger collapsed card with live activity + spec strip +
+  // pulse animation while pending. Distinguishes a long-running subagent
+  // dispatch from a generic single-shot tool row.
+  // -------------------------------------------------------------------------
+
+  it('shows live activity line with current step + last task description', () => {
+    render(
+      <MemoryRouter>
+        <TaskGroupCard
+          taskId="task-A"
+          header={header}
+          children={[child1, child2]}
+          footer={null}
+        />
+      </MemoryRouter>,
+    );
+    const activity = screen.getByTestId('task-current-activity');
+    expect(activity.textContent).toContain('STEP 2');
+    expect(activity.textContent).toContain('Running Print');
+  });
+
+  it('derives activity from latest tool_use when it is the most recent child', () => {
+    const tu: AgentEvent = {
+      id: 5,
+      agentId: 'claude-cc-001',
+      sessionId: 'sess-1',
+      eventType: 'tool_use',
+      payloadJson: {
+        tool_name: 'Bash',
+        tool_use_id: 'tu-1',
+        tool_input: { command: 'cargo test --workspace' },
+      },
+      approvalRequestId: null,
+      sequenceNumber: 5,
+      createdAt: '2026-04-24T00:00:00Z',
+      deliveryStatus: null,
+    };
+    render(
+      <MemoryRouter>
+        <TaskGroupCard
+          taskId="task-A"
+          header={header}
+          children={[child1, tu]}
+          footer={null}
+        />
+      </MemoryRouter>,
+    );
+    const activity = screen.getByTestId('task-current-activity');
+    // Tool name uppercased + first 50 chars of command.
+    expect(activity.textContent).toContain('BASH');
+    expect(activity.textContent).toContain('cargo test --workspace');
+  });
+
+  it('shows INITIALIZING when pending and no children have arrived yet', () => {
+    render(
+      <MemoryRouter>
+        <TaskGroupCard
+          taskId="task-A"
+          header={header}
+          children={[]}
+          footer={null}
+        />
+      </MemoryRouter>,
+    );
+    expect(
+      screen.getByTestId('task-current-activity').textContent,
+    ).toContain('INITIALIZING');
+  });
+
+  it('renders the spec strip with STEPS · TOOLS · MM:SS', () => {
+    render(
+      <MemoryRouter>
+        <TaskGroupCard
+          taskId="task-A"
+          header={header}
+          children={[child1, child2]}
+          footer={footerCompleted}
+        />
+      </MemoryRouter>,
+    );
+    const strip = screen.getByTestId('task-spec-strip');
+    expect(strip.textContent).toContain('2 STEPS');
+    // footerCompleted's usage.tool_uses === 2.
+    expect(strip.textContent).toContain('2 TOOLS');
+    // Completed → freezes on duration_ms = 1704 → "00:01".
+    expect(strip.textContent).toContain('00:01');
+  });
+
+  it('applies the radar-pulse animation to the Bot icon and status dot while pending', () => {
+    render(
+      <MemoryRouter>
+        <TaskGroupCard
+          taskId="task-A"
+          header={header}
+          children={[]}
+          footer={null}
+        />
+      </MemoryRouter>,
+    );
+    const botIcon = screen.getByTestId('task-bot-icon');
+    const dot = screen.getByTestId('task-status-dot');
+    expect(botIcon.getAttribute('style') ?? '').toContain('radar-pulse');
+    expect(dot.getAttribute('style') ?? '').toContain('radar-pulse');
+  });
+
+  it('does NOT animate Bot/dot when state is success', () => {
+    render(
+      <MemoryRouter>
+        <TaskGroupCard
+          taskId="task-A"
+          header={header}
+          children={[]}
+          footer={footerCompleted}
+        />
+      </MemoryRouter>,
+    );
+    const botIcon = screen.getByTestId('task-bot-icon');
+    const dot = screen.getByTestId('task-status-dot');
+    expect(botIcon.getAttribute('style') ?? '').not.toContain('radar-pulse');
+    expect(dot.getAttribute('style') ?? '').not.toContain('radar-pulse');
+  });
+});
+
+describe('getCurrentActivity (helper)', () => {
+  function mkProgress(id: number, description: string): AgentEvent {
+    return {
+      id,
+      agentId: 'a',
+      sessionId: 's',
+      eventType: 'system_note',
+      payloadJson: {
+        text: '[system/task_progress]',
+        data: { subtype: 'task_progress', task_id: 'task-A', description },
+      },
+      approvalRequestId: null,
+      sequenceNumber: id,
+      createdAt: '2026-04-24T00:00:00Z',
+      deliveryStatus: null,
+    };
+  }
+  function mkUse(id: number, name: string, input: Record<string, unknown>): AgentEvent {
+    return {
+      id,
+      agentId: 'a',
+      sessionId: 's',
+      eventType: 'tool_use',
+      payloadJson: { tool_name: name, tool_use_id: `tu-${id}`, tool_input: input },
+      approvalRequestId: null,
+      sequenceNumber: id,
+      createdAt: '2026-04-24T00:00:00Z',
+      deliveryStatus: null,
+    };
+  }
+  function mkResult(id: number, tu: string): AgentEvent {
+    return {
+      id,
+      agentId: 'a',
+      sessionId: 's',
+      eventType: 'tool_result',
+      payloadJson: { tool_use_id: tu, content: '' },
+      approvalRequestId: null,
+      sequenceNumber: id,
+      createdAt: '2026-04-24T00:00:00Z',
+      deliveryStatus: null,
+    };
+  }
+
+  it('returns null with no children and non-pending state', () => {
+    expect(getCurrentActivity([], 'success')).toBeNull();
+  });
+
+  it('returns INITIALIZING with no children and pending state', () => {
+    expect(getCurrentActivity([], 'pending')).toEqual({
+      step: 0,
+      label: 'INITIALIZING',
+    });
+  });
+
+  it('skips tool_result rows when finding the latest activity', () => {
+    const events = [
+      mkUse(1, 'Bash', { command: 'ls' }),
+      mkResult(2, 'tu-1'),
+    ];
+    const a = getCurrentActivity(events, 'pending');
+    expect(a?.step).toBe(1); // tool_result not counted
+    expect(a?.label).toContain('BASH');
+    expect(a?.label).toContain('ls');
+  });
+
+  it('counts step number from non-tool_result children only', () => {
+    const events = [
+      mkProgress(1, 'one'),
+      mkUse(2, 'Bash', { command: 'cmd' }),
+      mkResult(3, 'tu-2'),
+      mkProgress(4, 'two'),
+    ];
+    const a = getCurrentActivity(events, 'pending');
+    expect(a?.step).toBe(3);
+    expect(a?.label).toBe('two');
+  });
+
+  it('truncates tool_use primary input to 50 chars and first line', () => {
+    const long = 'x'.repeat(200);
+    const a = getCurrentActivity(
+      [mkUse(1, 'Bash', { command: `${long}\nsecond` })],
+      'pending',
+    );
+    expect(a?.label).toContain('BASH');
+    // 50 chars of the first line, no second-line content.
+    expect(a?.label).not.toContain('second');
+    expect(a?.label.length).toBeLessThan(80);
   });
 });

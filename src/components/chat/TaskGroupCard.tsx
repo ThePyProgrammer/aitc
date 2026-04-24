@@ -20,7 +20,7 @@
 // the chat store and renders it through MarkdownBody, falling back to the
 // task_notification.summary when the parent result hasn't arrived yet.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Bot, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -36,10 +36,22 @@ import { extractText } from './ToolResultCard';
 // stable arrays between updates when the agent has no events yet.
 const EMPTY_EVENTS: readonly AgentEvent[] = Object.freeze([]);
 
+// Inline pulse animation — the radar-pulse keyframe lives in animations.css
+// and is applied here so we don't pollute the global theme tokens with a
+// utility used in exactly one place.
+const PULSE_STYLE = { animation: 'radar-pulse 1.5s ease-in-out infinite' };
+
 function countWords(s: string): number {
   const t = s.trim();
   if (t === '') return 0;
   return t.split(/\s+/).filter(Boolean).length;
+}
+
+function formatDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
 export interface TaskGroupCardProps {
@@ -105,6 +117,98 @@ function dotClass(state: DotState): string {
   }
 }
 
+// Phase 19.4 — derive the currently-running step for the live activity line
+// in the collapsed card. Walks children backwards skipping tool_result rows
+// (bookkeeping, not user-visible work) and returns:
+//   - tool_use → "{TOOL_NAME} · {first 50 chars of primary input}"
+//   - task_progress → progress.description
+// `step` is the 1-based index counting only progress notes + tool_uses, so
+// it matches what's surfaced in the spec strip's STEPS counter.
+export function getCurrentActivity(
+  children: AgentEvent[],
+  state: DotState,
+): { step: number; label: string } | null {
+  let stepCount = 0;
+  let lastIdx = -1;
+  for (let i = 0; i < children.length; i++) {
+    if (children[i]!.eventType === 'tool_result') continue;
+    stepCount++;
+    lastIdx = i;
+  }
+  if (lastIdx === -1) {
+    // No work emitted yet — show INITIALIZING while pending so the user
+    // sees activity the instant the group opens.
+    return state === 'pending' ? { step: 0, label: 'INITIALIZING' } : null;
+  }
+  const last = children[lastIdx]!;
+  if (last.eventType === 'tool_use') {
+    const p = last.payloadJson as {
+      tool_name?: string;
+      tool_input?: Record<string, unknown>;
+    } | null;
+    const toolName = (p?.tool_name ?? 'TOOL').toUpperCase();
+    const input = p?.tool_input ?? {};
+    const raw = String(
+      input.command ??
+        input.file_path ??
+        input.pattern ??
+        input.url ??
+        input.query ??
+        '',
+    );
+    const summary = raw.split('\n')[0]!.slice(0, 50);
+    return {
+      step: stepCount,
+      label: summary ? `${toolName} · ${summary}` : toolName,
+    };
+  }
+  // task_progress system_note
+  const d = readData<TaskProgressData>(last);
+  return {
+    step: stepCount,
+    label: d?.description ?? '(in progress)',
+  };
+}
+
+// Phase 19.4 — count the sub-agent's tool uses for the spec strip. Prefer
+// the authoritative footer.usage.tool_uses when complete; while pending,
+// walk progress notes backwards for the latest usage.tool_uses; final
+// fallback is the locally-visible tool_use count.
+function deriveToolsCount(
+  children: AgentEvent[],
+  footerData: TaskNotificationData | null,
+): number {
+  if (footerData?.usage?.tool_uses !== undefined) {
+    return footerData.usage.tool_uses;
+  }
+  for (let i = children.length - 1; i >= 0; i--) {
+    const c = children[i]!;
+    if (c.eventType === 'system_note') {
+      const d = readData<TaskProgressData>(c);
+      if (d?.usage?.tool_uses !== undefined) return d.usage.tool_uses;
+    }
+  }
+  return children.filter((c) => c.eventType === 'tool_use').length;
+}
+
+// Phase 19.4 — live MM:SS clock. While `completedDurationMs` is undefined
+// (subagent still running), tick once a second; once the footer arrives
+// freeze on the authoritative value.
+function useLiveDuration(
+  startedAtIso: string,
+  completedDurationMs?: number,
+): string {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (completedDurationMs !== undefined) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [completedDurationMs]);
+  const ms =
+    completedDurationMs ?? Math.max(0, now - Date.parse(startedAtIso));
+  return formatDuration(ms);
+}
+
 export function TaskGroupCard({
   taskId,
   header,
@@ -147,6 +251,23 @@ export function TaskGroupCard({
     [headerData?.prompt],
   );
 
+  // Phase 19.4 — collapsed-row spec strip + live activity line. Pending
+  // groups need a 1s clock tick; completed ones freeze on the authoritative
+  // duration_ms from the notification.
+  const currentActivity = useMemo(
+    () => getCurrentActivity(children, state),
+    [children, state],
+  );
+  const toolsCount = useMemo(
+    () => deriveToolsCount(children, footerData),
+    [children, footerData],
+  );
+  const durationLabel = useLiveDuration(
+    header.createdAt,
+    footerData?.usage?.duration_ms,
+  );
+  const isPending = state === 'pending';
+
   const description =
     headerData?.description && headerData.description.length > 0
       ? headerData.description
@@ -176,53 +297,92 @@ export function TaskGroupCard({
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
-        className="w-full flex items-center gap-3 px-5 py-2.5 text-left bg-secondary/5 hover:bg-secondary/10 transition-colors"
+        data-pending={isPending || undefined}
+        className="w-full flex flex-col gap-1.5 px-5 py-3.5 text-left bg-secondary/5 hover:bg-secondary/10 transition-colors"
         aria-expanded={expanded}
       >
-        <Bot
-          size={14}
-          strokeWidth={1.5}
-          className="text-secondary shrink-0"
-          aria-hidden="true"
-        />
-        <span className="font-headline text-[10px] uppercase tracking-widest text-secondary shrink-0">
-          SUBAGENT_TASK
-        </span>
-        <span className="text-on-surface-variant/40 shrink-0 font-mono text-xs">
-          ·
-        </span>
-        <span className="flex-1 truncate font-mono text-xs text-on-surface">
-          {description}
-          {childCount > 0 && (
-            <>
-              {' · '}
-              <span className="text-on-surface-variant/60">
-                {childCount} {childCount === 1 ? 'step' : 'steps'}
-              </span>
-            </>
+        {/* Identity row */}
+        <div className="flex items-center gap-3 w-full">
+          <Bot
+            size={16}
+            strokeWidth={1.5}
+            className="text-secondary shrink-0"
+            style={isPending ? PULSE_STYLE : undefined}
+            data-testid="task-bot-icon"
+            aria-hidden="true"
+          />
+          <span className="font-headline text-[11px] font-bold uppercase tracking-widest text-secondary shrink-0">
+            SUBAGENT_TASK
+          </span>
+          <span className="text-on-surface-variant/40 shrink-0 font-mono text-xs">
+            ·
+          </span>
+          <span className="flex-1 truncate font-mono text-sm text-on-surface">
+            {description}
+          </span>
+          <span
+            data-testid="task-status-dot"
+            data-status={state}
+            className={`shrink-0 w-2 h-2 rounded-full ${dotClass(state)}`}
+            style={isPending ? PULSE_STYLE : undefined}
+            aria-hidden="true"
+          />
+          {expanded ? (
+            <ChevronUp
+              size={12}
+              strokeWidth={1.5}
+              className="text-on-surface-variant/60 shrink-0"
+              aria-hidden="true"
+            />
+          ) : (
+            <ChevronDown
+              size={12}
+              strokeWidth={1.5}
+              className="text-on-surface-variant/60 shrink-0"
+              aria-hidden="true"
+            />
           )}
-        </span>
-        <span
-          data-testid="task-status-dot"
-          data-status={state}
-          className={`shrink-0 w-2 h-2 rounded-full ${dotClass(state)}`}
-          aria-hidden="true"
-        />
-        {expanded ? (
-          <ChevronUp
-            size={12}
-            strokeWidth={1.5}
-            className="text-on-surface-variant/60 shrink-0"
-            aria-hidden="true"
-          />
-        ) : (
-          <ChevronDown
-            size={12}
-            strokeWidth={1.5}
-            className="text-on-surface-variant/60 shrink-0"
-            aria-hidden="true"
-          />
-        )}
+        </div>
+        {/* Live activity row + spec strip. pl-7 aligns the activity text
+            with the description above (Bot icon is 16px + 12px gap = 28px). */}
+        <div className="flex items-center gap-3 w-full pl-7">
+          <span
+            data-testid="task-current-activity"
+            className="flex-1 min-w-0 font-mono text-xs text-on-surface-variant/70"
+          >
+            <AnimatePresence mode="wait" initial={false}>
+              {currentActivity && (
+                <motion.span
+                  key={currentActivity.label}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="block truncate"
+                >
+                  <span className="text-on-surface-variant/40">
+                    → STEP {currentActivity.step} ·{' '}
+                  </span>
+                  {currentActivity.label}
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </span>
+          <span
+            data-testid="task-spec-strip"
+            className="shrink-0 font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/50 flex items-center gap-1.5"
+          >
+            <span>
+              {childCount} {childCount === 1 ? 'STEP' : 'STEPS'}
+            </span>
+            <span className="text-on-surface-variant/30">·</span>
+            <span>
+              {toolsCount} {toolsCount === 1 ? 'TOOL' : 'TOOLS'}
+            </span>
+            <span className="text-on-surface-variant/30">·</span>
+            <span className="font-mono">{durationLabel}</span>
+          </span>
+        </div>
       </button>
       <AnimatePresence>
         {expanded && (
