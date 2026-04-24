@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { TaskGroupCard } from '../TaskGroupCard';
@@ -44,13 +44,27 @@ vi.mock('../MarkdownBody', () => ({
 }));
 
 // chatStore mock — ToolUseCard subscribes via useChatStore and looks up
-// paired tool_results via selectToolUseWithResult. Return empty so the
-// grouping-test focus stays on rendering, not result-pairing.
+// paired tool_results via selectToolUseWithResult. Defaults to empty so the
+// grouping-test focus stays on rendering, not result-pairing. Tests that
+// need a specific tool_result available to the lookup can override
+// `mockEventsByAgent` in a beforeEach (and mockSelectToolUseWithResult).
+const mockEventsByAgent: { current: Record<string, AgentEvent[]> } = {
+  current: {},
+};
+type ToolUseWithResult = {
+  toolUse: AgentEvent | null;
+  toolResult: AgentEvent | null;
+};
+const mockSelectToolUseWithResult = vi.fn<
+  (events: AgentEvent[], toolUseId: string) => ToolUseWithResult
+>(() => ({ toolUse: null, toolResult: null }));
+
 vi.mock('../../../stores/chatStore', () => ({
   useChatStore: (
     selector: (s: { eventsByAgent: Record<string, AgentEvent[]> }) => unknown,
-  ) => selector({ eventsByAgent: {} }),
-  selectToolUseWithResult: () => ({ toolUse: null, toolResult: null }),
+  ) => selector({ eventsByAgent: mockEventsByAgent.current }),
+  selectToolUseWithResult: (events: AgentEvent[], toolUseId: string) =>
+    mockSelectToolUseWithResult(events, toolUseId),
 }));
 
 function mkNote(
@@ -73,6 +87,16 @@ function mkNote(
     deliveryStatus: null,
   };
 }
+
+// Reset mock state between tests so per-test overrides don't leak.
+beforeEach(() => {
+  mockEventsByAgent.current = {};
+  mockSelectToolUseWithResult.mockReset();
+  mockSelectToolUseWithResult.mockReturnValue({
+    toolUse: null,
+    toolResult: null,
+  });
+});
 
 describe('TaskGroupCard', () => {
   const header = mkNote(1, 'task_started', {
@@ -116,22 +140,29 @@ describe('TaskGroupCard', () => {
     expect(screen.queryByTestId('task-prompt-section')).toBeNull();
   });
 
-  it('expands to show prompt, progress list, and completion result on click', () => {
+  it('expands to show brief toggle, progress list, and completion result on click', () => {
     render(
-      <TaskGroupCard
-        taskId="task-A"
-        header={header}
-        children={[child1, child2]}
-        footer={footerCompleted}
-      />,
+      <MemoryRouter>
+        <TaskGroupCard
+          taskId="task-A"
+          header={header}
+          children={[child1, child2]}
+          footer={footerCompleted}
+        />
+      </MemoryRouter>,
     );
     fireEvent.click(screen.getByRole('button', { expanded: false }));
-    expect(screen.getByTestId('task-prompt-section').textContent).toContain(
+    // Brief is collapsed by default — only the toggle is visible.
+    const promptSection = screen.getByTestId('task-prompt-section');
+    expect(promptSection.textContent).toContain('SHOW_BRIEF');
+    expect(promptSection.textContent).toContain('local_agent');
+    expect(screen.queryByTestId('task-brief-body')).toBeNull();
+    // Click the brief toggle (it's the only button labeled SHOW_BRIEF).
+    fireEvent.click(screen.getByRole('button', { name: /SHOW_BRIEF/ }));
+    expect(screen.getByTestId('task-brief-body').textContent).toContain(
       "Echo 'hello' and stop.",
     );
-    expect(screen.getByTestId('task-prompt-section').textContent).toContain(
-      'local_agent',
-    );
+
     const rows = screen.getAllByTestId('task-progress-row');
     expect(rows).toHaveLength(2);
     expect(rows[0].textContent).toContain('Running List entries');
@@ -139,6 +170,7 @@ describe('TaskGroupCard', () => {
     expect(rows[0].textContent).toContain('12345 tok');
     const result = screen.getByTestId('task-result-section');
     expect(result.textContent).toContain('COMPLETED');
+    // No parent tool_result in chatStore mock → falls back to summary.
     expect(result.textContent).toContain('Echo hello');
     expect(result.textContent).toContain('30000 tokens');
     expect(result.textContent).toContain('1704ms');
@@ -251,6 +283,49 @@ describe('TaskGroupCard', () => {
     expect(
       screen.queryByText((c) => c.includes('output')),
     ).toBeNull();
+  });
+
+  // Phase 19.3 — when the parent Agent tool_result is in the chatStore,
+  // RESULT renders its content via MarkdownBody (the merged body), not the
+  // task_notification.summary fallback.
+  it('renders parent tool_result content via MarkdownBody when available', () => {
+    const parentToolResult: AgentEvent = {
+      id: 99,
+      agentId: 'claude-cc-001',
+      sessionId: 'sess-1',
+      eventType: 'tool_result',
+      payloadJson: {
+        tool_use_id: 'toolu_1', // matches header.data.tool_use_id from mkNote
+        content: '# Audit Report\n\n- finding A',
+      },
+      approvalRequestId: null,
+      sequenceNumber: 99,
+      createdAt: '2026-04-24T00:00:00Z',
+      deliveryStatus: null,
+    };
+    mockEventsByAgent.current = { 'claude-cc-001': [parentToolResult] };
+    mockSelectToolUseWithResult.mockReturnValue({
+      toolUse: null,
+      toolResult: parentToolResult,
+    });
+
+    render(
+      <MemoryRouter>
+        <TaskGroupCard
+          taskId="task-A"
+          header={header}
+          children={[]}
+          footer={footerCompleted}
+        />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+    const body = screen.getByTestId('task-result-body');
+    // MarkdownBody mock surfaces content as text, so we can assert directly.
+    expect(body.textContent).toContain('# Audit Report');
+    expect(body.textContent).toContain('finding A');
+    // Summary fallback path is hidden when parent body exists.
+    expect(screen.queryByTestId('task-result-summary-fallback')).toBeNull();
   });
 
   it('counts only progress notes + tool_use rows in the step count (skips tool_result)', () => {

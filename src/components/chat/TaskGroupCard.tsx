@@ -11,12 +11,36 @@
 // tool_use events as nested ToolUseCards. tool_result rows are skipped — they
 // already render inside their paired ToolUseCard's expanded body via the
 // per-agent event lookup.
+//
+// Phase 19.3 — TaskGroupCard absorbs the parent Agent tool_use's content.
+// selectTranscriptItems now removes the standalone Agent tool_use row when a
+// matching task_started arrives, so this card is the unified representation.
+// PROMPT renders the brief through MarkdownBody behind a SHOW_BRIEF toggle
+// (matching AgentPreview's UX). RESULT looks up the parent's tool_result via
+// the chat store and renders it through MarkdownBody, falling back to the
+// task_notification.summary when the parent result hasn't arrived yet.
 
 import { useMemo, useState } from 'react';
-import { Bot, ChevronDown, ChevronUp } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import type { AgentEvent } from '../../stores/chatStore';
+import {
+  useChatStore,
+  selectToolUseWithResult,
+  type AgentEvent,
+} from '../../stores/chatStore';
 import { ToolUseCard } from './ToolUseCard';
+import { MarkdownBody } from './MarkdownBody';
+import { extractText } from './ToolResultCard';
+
+// Stable empty-array reference so the Zustand selector returns referentially
+// stable arrays between updates when the agent has no events yet.
+const EMPTY_EVENTS: readonly AgentEvent[] = Object.freeze([]);
+
+function countWords(s: string): number {
+  const t = s.trim();
+  if (t === '') return 0;
+  return t.split(/\s+/).filter(Boolean).length;
+}
 
 export interface TaskGroupCardProps {
   taskId: string;
@@ -88,6 +112,7 @@ export function TaskGroupCard({
   footer,
 }: TaskGroupCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [briefShown, setBriefShown] = useState(false);
 
   const headerData = useMemo(
     () => readData<TaskStartedData>(header),
@@ -98,6 +123,29 @@ export function TaskGroupCard({
     [footer],
   );
   const state = footerState(footer);
+
+  // Phase 19.3 — look up the parent Agent tool_result by tool_use_id so we
+  // can render the full sub-agent response inline. The parent tool_use row
+  // is removed from top-level items by selectTranscriptItems, so this card
+  // is the only place its content surfaces. Falls back to footer summary
+  // when no result has arrived yet.
+  const parentToolUseId = headerData?.tool_use_id;
+  const agentEvents = useChatStore(
+    (s) => s.eventsByAgent[header.agentId] ?? EMPTY_EVENTS,
+  );
+  const parentResult = useMemo(() => {
+    if (!parentToolUseId) return null;
+    return selectToolUseWithResult(agentEvents, parentToolUseId).toolResult;
+  }, [agentEvents, parentToolUseId]);
+  const parentResultBody = useMemo(() => {
+    if (!parentResult) return '';
+    const payload = parentResult.payloadJson as { content?: unknown } | null;
+    return extractText(payload?.content);
+  }, [parentResult]);
+  const briefWords = useMemo(
+    () => countWords(headerData?.prompt ?? ''),
+    [headerData?.prompt],
+  );
 
   const description =
     headerData?.description && headerData.description.length > 0
@@ -188,20 +236,41 @@ export function TaskGroupCard({
             <div className="px-5 pb-4 pt-4 bg-surface-container-lowest border-t border-secondary/20 space-y-5">
               {headerData?.prompt && (
                 <section data-testid="task-prompt-section">
-                  <h4 className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/70 mb-2">
-                    PROMPT
-                    {headerData.task_type && (
-                      <>
-                        {' · '}
-                        <span className="text-on-surface-variant/50">
-                          {headerData.task_type}
-                        </span>
-                      </>
+                  <button
+                    type="button"
+                    onClick={() => setBriefShown((v) => !v)}
+                    aria-expanded={briefShown}
+                    className="flex items-center gap-1.5 font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/70 hover:text-on-surface transition-colors"
+                  >
+                    {briefShown ? (
+                      <ChevronDown
+                        size={11}
+                        strokeWidth={1.5}
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <ChevronRight
+                        size={11}
+                        strokeWidth={1.5}
+                        aria-hidden="true"
+                      />
                     )}
-                  </h4>
-                  <pre className="whitespace-pre-wrap font-mono text-xs text-on-surface-variant/80 max-h-[200px] overflow-y-auto">
-                    {headerData.prompt}
-                  </pre>
+                    <span>{briefShown ? 'HIDE_BRIEF' : 'SHOW_BRIEF'}</span>
+                    <span className="text-on-surface-variant/50">
+                      ({briefWords} {briefWords === 1 ? 'word' : 'words'})
+                    </span>
+                    {headerData.task_type && (
+                      <span className="text-on-surface-variant/50">
+                        {' · '}
+                        {headerData.task_type}
+                      </span>
+                    )}
+                  </button>
+                  {briefShown && (
+                    <div className="mt-3" data-testid="task-brief-body">
+                      <MarkdownBody content={headerData.prompt} />
+                    </div>
+                  )}
                 </section>
               )}
 
@@ -292,10 +361,24 @@ export function TaskGroupCard({
                       </span>
                     )}
                   </h4>
-                  {footerData?.summary && (
-                    <div className="font-mono text-xs text-on-surface mb-2">
-                      {footerData.summary}
+                  {parentResultBody !== '' ? (
+                    <div
+                      data-testid="task-result-body"
+                      className={`max-h-[640px] overflow-y-auto max-w-full mb-2 ${
+                        state === 'error' ? 'text-error' : ''
+                      }`}
+                    >
+                      <MarkdownBody content={parentResultBody} />
                     </div>
+                  ) : (
+                    footerData?.summary && (
+                      <div
+                        data-testid="task-result-summary-fallback"
+                        className="font-mono text-xs text-on-surface mb-2"
+                      >
+                        {footerData.summary}
+                      </div>
+                    )
                   )}
                   {footerData?.usage && (
                     <div className="font-mono text-[11px] text-on-surface-variant/50">
