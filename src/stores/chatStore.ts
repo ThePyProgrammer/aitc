@@ -471,3 +471,96 @@ export function selectToolUseWithResult(
   }
   return { toolUse, toolResult };
 }
+
+// Phase 19.1 — group Claude Code's Task-tool lifecycle events into
+// collapsible sections. Each task emits:
+//   system_note { data.subtype: "task_started",      data.task_id: X }
+//   system_note { data.subtype: "task_progress",     data.task_id: X } * N
+//   system_note { data.subtype: "task_notification", data.task_id: X }
+// The selector walks the flat events in order, opens a group on a
+// task_started, routes matching task_progress / task_notification into
+// that group (supporting overlapping tasks keyed by task_id), and leaves
+// everything else — including the parent tool_use(Task) row that sits
+// just before the group — at the top level. An unclosed group (missing
+// task_notification) stays open with footer: null so the UI still shows
+// header + any progress rows.
+export type TranscriptItem =
+  | { kind: 'event'; event: AgentEvent }
+  | {
+      kind: 'taskGroup';
+      taskId: string;
+      header: AgentEvent;
+      children: AgentEvent[];
+      footer: AgentEvent | null;
+    };
+
+type TaskNotePayload = {
+  data?: {
+    subtype?: string;
+    task_id?: string;
+  };
+} | null;
+
+function readTaskMeta(
+  event: AgentEvent,
+): { subtype: string; taskId: string } | null {
+  if (event.eventType !== 'system_note') return null;
+  const payload = event.payloadJson as TaskNotePayload;
+  const subtype = payload?.data?.subtype;
+  const taskId = payload?.data?.task_id;
+  if (
+    typeof subtype !== 'string' ||
+    typeof taskId !== 'string' ||
+    (subtype !== 'task_started' &&
+      subtype !== 'task_progress' &&
+      subtype !== 'task_notification')
+  ) {
+    return null;
+  }
+  return { subtype, taskId };
+}
+
+export function selectTranscriptItems(events: AgentEvent[]): TranscriptItem[] {
+  const items: TranscriptItem[] = [];
+  const open = new Map<string, TranscriptItem & { kind: 'taskGroup' }>();
+
+  for (const event of events) {
+    const meta = readTaskMeta(event);
+    if (meta) {
+      if (meta.subtype === 'task_started') {
+        const group: TranscriptItem & { kind: 'taskGroup' } = {
+          kind: 'taskGroup',
+          taskId: meta.taskId,
+          header: event,
+          children: [],
+          footer: null,
+        };
+        open.set(meta.taskId, group);
+        items.push(group);
+        continue;
+      }
+      if (meta.subtype === 'task_progress') {
+        const group = open.get(meta.taskId);
+        if (group) {
+          group.children.push(event);
+          continue;
+        }
+        // Orphan progress — parent started is paginated off or missing.
+        // Fall through to render it as a top-level system_note so the
+        // user at least sees something.
+      }
+      if (meta.subtype === 'task_notification') {
+        const group = open.get(meta.taskId);
+        if (group) {
+          group.footer = event;
+          open.delete(meta.taskId);
+          continue;
+        }
+        // Orphan notification — fall through.
+      }
+    }
+    items.push({ kind: 'event', event });
+  }
+
+  return items;
+}

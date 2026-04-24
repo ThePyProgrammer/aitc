@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import {
   useChatStore,
   selectToolUseWithResult,
+  selectTranscriptItems,
   type AgentEvent,
   type ChatChannel,
 } from '../chatStore';
@@ -613,5 +614,121 @@ describe('selectToolUseWithResult (D-02.2 — V-19-08)', () => {
     );
     expect(result.toolUse?.id).toBe(20);
     expect(result.toolResult).toBeNull();
+  });
+});
+
+describe('selectTranscriptItems', () => {
+  function mkSystemNote(
+    id: number,
+    subtype: string | undefined,
+    taskId: string | undefined,
+    extras: Record<string, unknown> = {},
+  ): AgentEvent {
+    const data =
+      subtype === undefined
+        ? undefined
+        : { subtype, task_id: taskId, ...extras };
+    return {
+      id,
+      agentId: 'claude-cc-001',
+      sessionId: 'sess-1',
+      eventType: 'system_note',
+      payloadJson: {
+        text: subtype ? `[system/${subtype}]` : '[system/other]',
+        ...(data ? { data } : {}),
+      },
+      approvalRequestId: null,
+      sequenceNumber: id,
+      createdAt: '2026-04-24T00:00:00Z',
+      deliveryStatus: null,
+    };
+  }
+
+  function mkAsst(id: number): AgentEvent {
+    return {
+      id,
+      agentId: 'claude-cc-001',
+      sessionId: 'sess-1',
+      eventType: 'assistant_text',
+      payloadJson: { content: `text-${id}` },
+      approvalRequestId: null,
+      sequenceNumber: id,
+      createdAt: '2026-04-24T00:00:00Z',
+      deliveryStatus: null,
+    };
+  }
+
+  it('groups task_started → task_progress* → task_notification by task_id', () => {
+    const events: AgentEvent[] = [
+      mkAsst(1),
+      mkSystemNote(2, 'task_started', 'task-A', {
+        description: 'Echo hello',
+      }),
+      mkSystemNote(3, 'task_progress', 'task-A'),
+      mkSystemNote(4, 'task_progress', 'task-A'),
+      mkSystemNote(5, 'task_notification', 'task-A', { status: 'completed' }),
+      mkAsst(6),
+    ];
+    const items = selectTranscriptItems(events);
+    expect(items.map((i) => i.kind)).toEqual(['event', 'taskGroup', 'event']);
+    const group = items[1];
+    if (group.kind !== 'taskGroup') throw new Error('expected taskGroup');
+    expect(group.taskId).toBe('task-A');
+    expect(group.header.id).toBe(2);
+    expect(group.children.map((c) => c.id)).toEqual([3, 4]);
+    expect(group.footer?.id).toBe(5);
+  });
+
+  it('routes overlapping tasks to their own groups by task_id', () => {
+    const events: AgentEvent[] = [
+      mkSystemNote(1, 'task_started', 'task-A'),
+      mkSystemNote(2, 'task_started', 'task-B'),
+      mkSystemNote(3, 'task_progress', 'task-A'),
+      mkSystemNote(4, 'task_progress', 'task-B'),
+      mkSystemNote(5, 'task_notification', 'task-A', { status: 'completed' }),
+      mkSystemNote(6, 'task_progress', 'task-B'),
+      mkSystemNote(7, 'task_notification', 'task-B', { status: 'completed' }),
+    ];
+    const items = selectTranscriptItems(events);
+    expect(items).toHaveLength(2);
+    const [gA, gB] = items;
+    if (gA.kind !== 'taskGroup' || gB.kind !== 'taskGroup') {
+      throw new Error('expected two taskGroups');
+    }
+    expect(gA.taskId).toBe('task-A');
+    expect(gA.children.map((c) => c.id)).toEqual([3]);
+    expect(gA.footer?.id).toBe(5);
+    expect(gB.taskId).toBe('task-B');
+    expect(gB.children.map((c) => c.id)).toEqual([4, 6]);
+    expect(gB.footer?.id).toBe(7);
+  });
+
+  it('leaves an unclosed group with footer: null when task_notification is missing', () => {
+    const events: AgentEvent[] = [
+      mkSystemNote(1, 'task_started', 'task-A'),
+      mkSystemNote(2, 'task_progress', 'task-A'),
+    ];
+    const items = selectTranscriptItems(events);
+    expect(items).toHaveLength(1);
+    const g = items[0];
+    if (g.kind !== 'taskGroup') throw new Error('expected taskGroup');
+    expect(g.footer).toBeNull();
+    expect(g.children.map((c) => c.id)).toEqual([2]);
+  });
+
+  it('falls through orphan task_progress / task_notification as top-level events', () => {
+    const events: AgentEvent[] = [
+      mkSystemNote(1, 'task_progress', 'task-ghost'),
+      mkSystemNote(2, 'task_notification', 'task-ghost'),
+    ];
+    const items = selectTranscriptItems(events);
+    expect(items.map((i) => i.kind)).toEqual(['event', 'event']);
+  });
+
+  it('treats system_notes without structured data as ordinary events', () => {
+    const hook = mkSystemNote(1, undefined, undefined);
+    const items = selectTranscriptItems([hook]);
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('event');
   });
 });
