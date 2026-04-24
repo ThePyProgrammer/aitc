@@ -152,8 +152,12 @@ function DetailPane({ channel }: { channel: ChatChannel | null }) {
         </div>
       </div>
 
-      {/* Transcript */}
-      <div className="flex-1 min-h-0 px-6 pb-2 flex flex-col">
+      {/* Transcript — right padding is dropped so the scroll container
+          (and its scrollbar) sits flush with the detail pane's right
+          edge. Tool / task / assistant cards still get their own
+          horizontal inset via mx-5 / px-5, so the visible content
+          column keeps breathing room from the scrollbar. */}
+      <div className="flex-1 min-h-0 pl-6 pb-2 flex flex-col">
         <ChatTranscript agentId={channel.agentId} />
       </div>
 
