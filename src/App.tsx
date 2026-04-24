@@ -54,7 +54,12 @@ function App() {
   useEffect(() => {
     void subscribe();
     void useChatStore.getState().fetchChannels();
-    return () => unsubscribe();
+    // unsubscribe is now async (it awaits any in-flight subscribe to
+    // avoid leaking listeners under React.StrictMode); fire-and-forget
+    // is fine here — the cleanup just needs to enqueue the teardown.
+    return () => {
+      void unsubscribe();
+    };
   }, [subscribe, unsubscribe]);
 
   return (
