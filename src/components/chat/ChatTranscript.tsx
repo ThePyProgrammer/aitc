@@ -140,8 +140,28 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
     // Near-top triggers loadOlder (D-18 upward infinite-scroll). Flat
     // `flatEvents` is the right signal here — we care whether there's a
     // real page of history to pull, regardless of how it grouped.
+    // Anchor the viewport before the fetch so the store's prepend
+    // doesn't yank the user back to the top: capture current
+    // scrollHeight, then after the async load + virtualizer reflow,
+    // shift scrollTop by the growth delta to keep the visible row
+    // stationary. Without this, the scrollTop stayed near 0 and
+    // handleScroll kept refiring loadOlder, reading as "chat reloading".
     if (el.scrollTop <= TOP_THRESHOLD_PX && agentId && flatEvents.length > 0) {
-      void loadOlder(agentId);
+      const beforeHeight = el.scrollHeight;
+      const beforeTop = el.scrollTop;
+      void loadOlder(agentId).then(() => {
+        // Wait two rAF passes so TanStack Virtual has re-measured the
+        // prepended rows (one for the React commit, one for the
+        // virtualizer effect that pushes the new scrollHeight).
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const current = scrollRef.current;
+            if (!current) return;
+            const growth = current.scrollHeight - beforeHeight;
+            if (growth > 0) current.scrollTop = beforeTop + growth;
+          });
+        });
+      });
     }
   };
 

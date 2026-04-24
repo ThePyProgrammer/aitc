@@ -66,6 +66,14 @@ export interface ChatStore {
   // per-agent streaming text here; ChatTranscript renders it as a synthetic
   // trailing row until the authoritative assistant_text event lands.
   streamingByAgent: Record<string, string>;
+  // Phase 19.2 — reverse-infinite-scroll guards. `loadingOlderByAgent`
+  // prevents concurrent loadOlder invocations while a fetch is in flight
+  // (the scroll handler can fire loadOlder on every pixel near the top —
+  // without this guard it bombarded the backend and the viewport kept
+  // snapping back to the top). `hasMoreOlderByAgent` short-circuits
+  // further attempts once the backend returns an empty page.
+  loadingOlderByAgent: Record<string, boolean>;
+  hasMoreOlderByAgent: Record<string, boolean>;
   channels: ChatChannel[];
   selectedAgentId: string | null;
   unreadByAgent: Record<string, number>;
@@ -90,6 +98,8 @@ const INITIAL_LIMIT = 50;
 export const useChatStore = create<ChatStore>((set, get) => ({
   eventsByAgent: {},
   streamingByAgent: {},
+  loadingOlderByAgent: {},
+  hasMoreOlderByAgent: {},
   channels: [],
   selectedAgentId: null,
   unreadByAgent: {},
@@ -126,25 +136,58 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   loadOlder: async (agentId) => {
-    const current = get().eventsByAgent[agentId] ?? [];
+    const s = get();
+    // In-flight guard — the scroll handler fires many times per gesture
+    // when the user is near the top. Without this, ten concurrent
+    // loadOlders fire against the backend and the viewport yo-yos back
+    // to the top each time a response resolves.
+    if (s.loadingOlderByAgent[agentId]) return;
+    // End-of-history short-circuit — once the backend returns an empty
+    // page for this agent we're done; stop trying.
+    if (s.hasMoreOlderByAgent[agentId] === false) return;
+    const current = s.eventsByAgent[agentId] ?? [];
     const beforeId = current.length > 0 ? current[0].id : null;
     if (beforeId == null) return;
+    set((prev) => ({
+      loadingOlderByAgent: { ...prev.loadingOlderByAgent, [agentId]: true },
+    }));
     try {
       const older = await invoke<AgentEvent[]>('list_agent_events', {
         agentId,
         beforeId,
         limit: INITIAL_LIMIT,
       });
-      if (older.length === 0) return;
+      if (older.length === 0) {
+        set((prev) => ({
+          hasMoreOlderByAgent: {
+            ...prev.hasMoreOlderByAgent,
+            [agentId]: false,
+          },
+        }));
+        return;
+      }
       const oldestFirst = [...older].reverse();
-      set((s) => ({
+      set((prev) => ({
         eventsByAgent: {
-          ...s.eventsByAgent,
-          [agentId]: [...oldestFirst, ...(s.eventsByAgent[agentId] ?? [])],
+          ...prev.eventsByAgent,
+          [agentId]: [...oldestFirst, ...(prev.eventsByAgent[agentId] ?? [])],
+        },
+        // A full page hints there may be more; a short page means we're
+        // at the tail (mark exhausted so we don't probe again).
+        hasMoreOlderByAgent: {
+          ...prev.hasMoreOlderByAgent,
+          [agentId]: older.length === INITIAL_LIMIT,
         },
       }));
     } catch (e) {
       set({ error: String(e) });
+    } finally {
+      set((prev) => ({
+        loadingOlderByAgent: {
+          ...prev.loadingOlderByAgent,
+          [agentId]: false,
+        },
+      }));
     }
   },
 
@@ -190,10 +233,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   clearThread: async (agentId) => {
     try {
       await invoke('clear_agent_thread', { agentId });
-      set((s) => ({
-        eventsByAgent: { ...s.eventsByAgent, [agentId]: [] },
-        unreadByAgent: { ...s.unreadByAgent, [agentId]: 0 },
-      }));
+      set((s) => {
+        const nextHasMore = { ...s.hasMoreOlderByAgent };
+        delete nextHasMore[agentId];
+        return {
+          eventsByAgent: { ...s.eventsByAgent, [agentId]: [] },
+          unreadByAgent: { ...s.unreadByAgent, [agentId]: 0 },
+          hasMoreOlderByAgent: nextHasMore,
+        };
+      });
     } catch (e) {
       set({ error: String(e) });
     }
@@ -366,16 +414,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }),
 
       // 7. agent-thread-cleared — clear local events for that agent
-      //    (and drop any mid-stream buffer).
+      //    (and drop any mid-stream buffer + reverse-scroll exhaustion flag).
       listen<string>('agent-thread-cleared', (ev) => {
         const agentId = ev.payload;
         set((s) => {
           const nextStreaming = { ...s.streamingByAgent };
           delete nextStreaming[agentId];
+          const nextHasMore = { ...s.hasMoreOlderByAgent };
+          delete nextHasMore[agentId];
           return {
             eventsByAgent: { ...s.eventsByAgent, [agentId]: [] },
             unreadByAgent: { ...s.unreadByAgent, [agentId]: 0 },
             streamingByAgent: nextStreaming,
+            hasMoreOlderByAgent: nextHasMore,
           };
         });
       }),
@@ -442,6 +493,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({
       eventsByAgent: {},
       streamingByAgent: {},
+      loadingOlderByAgent: {},
+      hasMoreOlderByAgent: {},
       channels: [],
       selectedAgentId: null,
       unreadByAgent: {},
