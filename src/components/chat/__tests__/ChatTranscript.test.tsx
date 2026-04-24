@@ -279,4 +279,62 @@ describe('ChatTranscript', () => {
     // Expect the pill to render somewhere.
     expect(screen.getByTestId('new-messages-pill')).toBeInTheDocument();
   });
+
+  it('renders a TaskGroupCard instead of flat task_* system notes when a lifecycle bracket is present', () => {
+    function mkTaskNote(
+      id: number,
+      subtype: 'task_started' | 'task_progress' | 'task_notification',
+      extras: Record<string, unknown> = {},
+    ): AgentEvent {
+      return {
+        id,
+        agentId: 'a',
+        sessionId: null,
+        eventType: 'system_note',
+        payloadJson: {
+          text: `[system/${subtype}]`,
+          data: {
+            subtype,
+            task_id: 'task-A',
+            tool_use_id: 'toolu_1',
+            ...extras,
+          },
+        },
+        approvalRequestId: null,
+        sequenceNumber: id,
+        createdAt: '2026-04-24T00:00:00Z',
+        deliveryStatus: null,
+      };
+    }
+    useChatStore.setState({
+      eventsByAgent: {
+        a: [
+          mkEvent({ id: 1 }),
+          mkTaskNote(2, 'task_started', {
+            description: 'Echo hello',
+            prompt: 'say hi',
+          }),
+          mkTaskNote(3, 'task_progress', { description: 'Running step' }),
+          mkTaskNote(4, 'task_notification', {
+            status: 'completed',
+            summary: 'done',
+          }),
+          mkEvent({ id: 5, payloadJson: { content: 'pong' } }),
+        ],
+      },
+    });
+    renderT(<ChatTranscript agentId="a" />);
+    // Task group present, keyed by task_id.
+    const groups = screen.getAllByTestId('task-group-card');
+    expect(groups).toHaveLength(1);
+    expect(groups[0].dataset.taskId).toBe('task-A');
+    expect(groups[0].dataset.taskState).toBe('success');
+    // Individual task_* system notes no longer render as standalone cards
+    // when they're inside a group.
+    expect(screen.queryByText('[system/task_started]')).toBeNull();
+    expect(screen.queryByText('[system/task_notification]')).toBeNull();
+    // Surrounding events still render.
+    expect(screen.getByText('ping')).toBeInTheDocument();
+    expect(screen.getByText('pong')).toBeInTheDocument();
+  });
 });

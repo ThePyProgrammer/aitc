@@ -7,9 +7,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useChatStore, type AgentEvent } from '../../stores/chatStore';
+import {
+  useChatStore,
+  selectTranscriptItems,
+  type AgentEvent,
+} from '../../stores/chatStore';
 import { EventCard } from './EventCard';
 import { MarkdownBody } from './MarkdownBody';
+import { TaskGroupCard } from './TaskGroupCard';
 
 const EMPTY_EVENTS: AgentEvent[] = [];
 const BOTTOM_THRESHOLD_PX = 24;
@@ -29,7 +34,7 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
   // virtualized list so they don't double-render as standalone cards.
   // Orphan tool_result events (parent paginated off) still render via
   // ToolResultCard — defensive fallback.
-  const events = useMemo(() => {
+  const flatEvents = useMemo(() => {
     const toolUseIds = new Set<string>();
     for (const e of rawEvents) {
       if (e.eventType === 'tool_use') {
@@ -46,6 +51,11 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
       return !id || !toolUseIds.has(id);
     });
   }, [rawEvents]);
+  // Phase 19.1 — fold the Task-tool lifecycle bracket (system/task_started
+  // → system/task_progress* → system/task_notification) into a single
+  // collapsible group keyed by task_id. Ordinary events pass through as
+  // single-slot items so the virtualizer still sees a flat list.
+  const items = useMemo(() => selectTranscriptItems(flatEvents), [flatEvents]);
 
   // Phase 19 gap closure — per-agent mid-turn streaming buffer fed by
   // agent-assistant-delta. Renders below the virtualized list as a
@@ -65,11 +75,15 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
   const [atBottom, setAtBottom] = useState(true);
 
   const virtualizer = useVirtualizer({
-    count: events.length,
+    count: items.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 60,
     overscan: 10,
-    getItemKey: (i) => events[i]?.id ?? i,
+    getItemKey: (i) => {
+      const item = items[i];
+      if (!item) return i;
+      return item.kind === 'event' ? item.event.id : `task:${item.taskId}`;
+    },
   });
 
   // Scroll to bottom on mount / agent change.
@@ -77,19 +91,22 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight });
-    prevLengthRef.current = events.length;
+    prevLengthRef.current = items.length;
     setAtBottom(true);
     setNewMessageCount(0);
     // agentId reset should fire this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId]);
 
-  // Handle new event arrival.
+  // Handle new event arrival. Count is the number of TOP-LEVEL items
+  // (groups count as one regardless of child count) so
+  // `N_NEW_MESSAGES` stays meaningful when a subagent streams many
+  // task_progress rows.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const prev = prevLengthRef.current;
-    const curr = events.length;
+    const curr = items.length;
     const delta = curr - prev;
     if (delta > 0) {
       if (atBottom) {
@@ -101,7 +118,7 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
       }
     }
     prevLengthRef.current = curr;
-  }, [events.length, atBottom]);
+  }, [items.length, atBottom]);
 
   // Streaming-row auto-scroll: when the mid-turn buffer grows and the user
   // is already at the bottom, keep them pinned. Does NOT bump
@@ -120,8 +137,10 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
     const atBot = distanceFromBottom <= BOTTOM_THRESHOLD_PX;
     setAtBottom(atBot);
     if (atBot) setNewMessageCount(0);
-    // Near-top triggers loadOlder (D-18 upward infinite-scroll).
-    if (el.scrollTop <= TOP_THRESHOLD_PX && agentId && events.length > 0) {
+    // Near-top triggers loadOlder (D-18 upward infinite-scroll). Flat
+    // `flatEvents` is the right signal here — we care whether there's a
+    // real page of history to pull, regardless of how it grouped.
+    if (el.scrollTop <= TOP_THRESHOLD_PX && agentId && flatEvents.length > 0) {
       void loadOlder(agentId);
     }
   };
@@ -144,7 +163,7 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
     );
   }
 
-  if (events.length === 0 && streamingContent === '') {
+  if (items.length === 0 && streamingContent === '') {
     if (isArchived) {
       return (
         <div
@@ -191,11 +210,20 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
           }}
         >
           {virtualizer.getVirtualItems().map((vi) => {
-            const event = events[vi.index];
-            const prevEvent = vi.index > 0 ? events[vi.index - 1] : undefined;
+            const item = items[vi.index];
+            if (!item) return null;
+            // Continuation detection for AssistantTextCard only flows
+            // between top-level events; a task group breaks the chain
+            // (which is the right behaviour — role label reappearing
+            // after a subagent detour reads cleanly).
+            const prevItem = vi.index > 0 ? items[vi.index - 1] : undefined;
+            const prevEvent =
+              prevItem?.kind === 'event' ? prevItem.event : undefined;
+            const key =
+              item.kind === 'event' ? item.event.id : `task:${item.taskId}`;
             return (
               <div
-                key={event.id}
+                key={key}
                 ref={virtualizer.measureElement}
                 data-index={vi.index}
                 style={{
@@ -206,7 +234,16 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
                   transform: `translateY(${vi.start}px)`,
                 }}
               >
-                <EventCard event={event} prevEvent={prevEvent} />
+                {item.kind === 'event' ? (
+                  <EventCard event={item.event} prevEvent={prevEvent} />
+                ) : (
+                  <TaskGroupCard
+                    taskId={item.taskId}
+                    header={item.header}
+                    children={item.children}
+                    footer={item.footer}
+                  />
+                )}
               </div>
             );
           })}
