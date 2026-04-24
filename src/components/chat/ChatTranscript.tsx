@@ -200,7 +200,13 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
         ref={scrollRef}
         data-testid="chat-transcript"
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto"
+        // pr-6 restores the 24px gray gutter on the right so `w-full`
+        // cards (UserMessageCard / AssistantTextCard bg) stop symmetrical
+        // with the outer wrapper's pl-6 on the left. WebKit paints the
+        // scrollbar in the container's padding gutter — flush with the
+        // detail pane's right edge — so we keep the scrollbar at the
+        // screen edge AND put the gray margin back.
+        className="flex-1 overflow-y-auto pr-6"
       >
         <div
           style={{
