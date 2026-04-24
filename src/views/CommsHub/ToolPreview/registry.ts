@@ -6,10 +6,14 @@
  *   - Write                        → WritePreview (shiki-highlighted code block)
  *   - NotebookEdit                 → NotebookPreview (like Write + cell header)
  *   - Bash                         → BashPreview (DESCRIPTION/COMMAND/METADATA)
- *   - Task                         → AgentPreview (collapsible markdown brief)
+ *   - Agent                        → AgentPreview (collapsible markdown brief)
  *   - Skill                        → SkillPreview (ARGS row)
- *   - Read/LS/Grep/Glob/WebFetch/WebSearch → ProtectedPathPreview (KV table)
+ *   - Read/LS/Grep/Glob/WebFetch/WebSearch/TodoWrite/ToolSearch → ProtectedPathPreview (KV table)
  *   - mcp__* / anything else       → UnknownToolPreview (UNVERIFIED_TOOL banner)
+ *
+ * Note on Agent vs Task: the Anthropic SDK historically called this tool
+ * "Task"; Claude Code's stream now emits tool_name "Agent" for sub-agent
+ * dispatch. Only Agent is registered.
  *
  * Interface shape is FROZEN by Plan 01 contract-lock tests. Do NOT change
  * ToolPreviewProps / ToolRenderer / resolveRenderer signatures.
@@ -39,7 +43,7 @@ const RENDERERS: Record<string, ToolRenderer> = {
   Write: WritePreview,
   NotebookEdit: NotebookPreview,
   Bash: BashPreview,
-  Task: AgentPreview,
+  Agent: AgentPreview,
   Skill: SkillPreview,
   Read: ProtectedPathPreview,
   LS: ProtectedPathPreview,
@@ -47,6 +51,8 @@ const RENDERERS: Record<string, ToolRenderer> = {
   Glob: ProtectedPathPreview,
   WebFetch: ProtectedPathPreview,
   WebSearch: ProtectedPathPreview,
+  TodoWrite: ProtectedPathPreview,
+  ToolSearch: ProtectedPathPreview,
 };
 
 /** Resolve a renderer for the given tool_name. MCP tools (`mcp__*`) and
