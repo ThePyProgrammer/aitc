@@ -74,3 +74,33 @@ body {
 *, ::before, ::after {
   border-color: transparent;
 }
+
+/* Thin, discreet scrollbars — Command Horizon No-Line aesthetic. The
+   default chunky native scrollbar competes with the UI chrome; this
+   collapses it to an outline-variant sliver that brightens to outline
+   on hover. Transparent track, zero radius (matches the global
+   no-rounded-corners reset above). Cross-browser: Firefox uses
+   scrollbar-{width,color} via inheritance from html; WebKit (the Tauri
+   webview on all three platforms) uses the ::-webkit-scrollbar
+   pseudo-elements. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-outline-variant) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-outline-variant);
+  border-radius: 0;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-outline);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
