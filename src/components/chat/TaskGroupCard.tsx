@@ -103,22 +103,24 @@ export function TaskGroupCard({
       data-testid="task-group-card"
       data-task-id={taskId}
       data-task-state={state}
-      className="bg-surface-container-lowest rounded-sm mx-5 my-1.5"
+      // Persistent secondary left accent + subtle bg tint so a subagent
+      // group reads distinctly from neutral tool rows, even when collapsed.
+      className="bg-surface-container-lowest rounded-sm mx-5 my-1.5 border-l-2 border-secondary/70"
       transition={{ duration: 0.12, ease: 'easeOut' }}
     >
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
-        className="w-full flex items-center gap-3 px-5 py-2.5 text-left hover:bg-surface-container-low transition-colors"
+        className="w-full flex items-center gap-3 px-5 py-2.5 text-left bg-secondary/5 hover:bg-secondary/10 transition-colors"
         aria-expanded={expanded}
       >
         <Bot
           size={14}
           strokeWidth={1.5}
-          className="text-on-surface-variant shrink-0"
+          className="text-secondary shrink-0"
           aria-hidden="true"
         />
-        <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant shrink-0">
+        <span className="font-headline text-[10px] uppercase tracking-widest text-secondary shrink-0">
           SUBAGENT_TASK
         </span>
         <span className="text-on-surface-variant/40 shrink-0 font-mono text-xs">
@@ -166,7 +168,7 @@ export function TaskGroupCard({
             transition={{ duration: 0.15 }}
             className="overflow-hidden"
           >
-            <div className="px-5 pb-4 pt-4 bg-surface-container-lowest border-l-2 border-secondary space-y-5">
+            <div className="px-5 pb-4 pt-4 bg-surface-container-lowest border-t border-secondary/20 space-y-5">
               {headerData?.prompt && (
                 <section data-testid="task-prompt-section">
                   <h4 className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/70 mb-2">
