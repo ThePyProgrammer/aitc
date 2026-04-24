@@ -124,10 +124,24 @@ function dotClass(state: DotState): string {
 //   - task_progress → progress.description
 // `step` is the 1-based index counting only progress notes + tool_uses, so
 // it matches what's surfaced in the spec strip's STEPS counter.
+//
+// Phase 19.5 — when the task has terminated, surface a representative
+// terminal label instead of the last running step. Step 0 is the sentinel
+// for "no step number" — render layer drops the "STEP N · " prefix and
+// tints the label by state (primary green for COMPLETED, error red for
+// FAILED/CANCELLED).
 export function getCurrentActivity(
   children: AgentEvent[],
   state: DotState,
+  footerData?: TaskNotificationData | null,
 ): { step: number; label: string } | null {
+  if (state === 'success') return { step: 0, label: 'COMPLETED' };
+  if (state === 'error') {
+    const status = footerData?.status ?? '';
+    const label = status === 'cancelled' ? 'CANCELLED' : 'FAILED';
+    return { step: 0, label };
+  }
+  // Pending below — derive from the latest non-tool_result child.
   let stepCount = 0;
   let lastIdx = -1;
   for (let i = 0; i < children.length; i++) {
@@ -138,7 +152,7 @@ export function getCurrentActivity(
   if (lastIdx === -1) {
     // No work emitted yet — show INITIALIZING while pending so the user
     // sees activity the instant the group opens.
-    return state === 'pending' ? { step: 0, label: 'INITIALIZING' } : null;
+    return { step: 0, label: 'INITIALIZING' };
   }
   const last = children[lastIdx]!;
   if (last.eventType === 'tool_use') {
@@ -255,8 +269,8 @@ export function TaskGroupCard({
   // groups need a 1s clock tick; completed ones freeze on the authoritative
   // duration_ms from the notification.
   const currentActivity = useMemo(
-    () => getCurrentActivity(children, state),
-    [children, state],
+    () => getCurrentActivity(children, state, footerData),
+    [children, state, footerData],
   );
   const toolsCount = useMemo(
     () => deriveToolsCount(children, footerData),
@@ -361,9 +375,23 @@ export function TaskGroupCard({
                   className="block truncate"
                 >
                   <span className="text-on-surface-variant/40">
-                    → STEP {currentActivity.step} ·{' '}
+                    →{currentActivity.step > 0
+                      ? ` STEP ${currentActivity.step} · `
+                      : ' '}
                   </span>
-                  {currentActivity.label}
+                  <span
+                    className={
+                      currentActivity.step === 0
+                        ? state === 'success'
+                          ? 'text-primary font-bold tracking-widest'
+                          : state === 'error'
+                          ? 'text-error font-bold tracking-widest'
+                          : ''
+                        : ''
+                    }
+                  >
+                    {currentActivity.label}
+                  </span>
                 </motion.span>
               )}
             </AnimatePresence>

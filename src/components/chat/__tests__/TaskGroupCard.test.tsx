@@ -476,6 +476,53 @@ describe('TaskGroupCard', () => {
     expect(dot.getAttribute('style') ?? '').toContain('radar-pulse');
   });
 
+  it('activity line shows COMPLETED (not the last step) when state is success', () => {
+    render(
+      <MemoryRouter>
+        <TaskGroupCard
+          taskId="task-A"
+          header={header}
+          children={[child1, child2]}
+          footer={footerCompleted}
+        />
+      </MemoryRouter>,
+    );
+    const activity = screen.getByTestId('task-current-activity');
+    expect(activity.textContent).toContain('COMPLETED');
+    // The previous step's text must NOT be in the line.
+    expect(activity.textContent).not.toContain('Running Print');
+    // No STEP prefix on terminal labels.
+    expect(activity.textContent).not.toMatch(/STEP \d/);
+  });
+
+  it('activity line shows FAILED when state is error', () => {
+    const errFooter: AgentEvent = {
+      ...footerCompleted,
+      payloadJson: {
+        ...(footerCompleted.payloadJson as object),
+        data: {
+          subtype: 'task_notification',
+          task_id: 'task-A',
+          tool_use_id: 'toolu_1',
+          status: 'error',
+        },
+      },
+    };
+    render(
+      <MemoryRouter>
+        <TaskGroupCard
+          taskId="task-A"
+          header={header}
+          children={[child1]}
+          footer={errFooter}
+        />
+      </MemoryRouter>,
+    );
+    expect(
+      screen.getByTestId('task-current-activity').textContent,
+    ).toContain('FAILED');
+  });
+
   it('does NOT animate Bot/dot when state is success', () => {
     render(
       <MemoryRouter>
@@ -538,8 +585,24 @@ describe('getCurrentActivity (helper)', () => {
     };
   }
 
-  it('returns null with no children and non-pending state', () => {
-    expect(getCurrentActivity([], 'success')).toBeNull();
+  it('returns COMPLETED for terminal success state regardless of children', () => {
+    expect(getCurrentActivity([], 'success')).toEqual({
+      step: 0,
+      label: 'COMPLETED',
+    });
+  });
+
+  it('returns FAILED for terminal error state by default', () => {
+    expect(getCurrentActivity([], 'error')).toEqual({
+      step: 0,
+      label: 'FAILED',
+    });
+  });
+
+  it('returns CANCELLED when terminal error state has status === "cancelled"', () => {
+    expect(
+      getCurrentActivity([], 'error', { status: 'cancelled' }),
+    ).toEqual({ step: 0, label: 'CANCELLED' });
   });
 
   it('returns INITIALIZING with no children and pending state', () => {
