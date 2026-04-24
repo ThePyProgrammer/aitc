@@ -12,6 +12,7 @@ export { ReadOnlyBadge } from './ReadOnlyBadge';
 export { SessionBoundary } from './SessionBoundary';
 export { StreamingCursor } from './StreamingCursor';
 export { SystemNoteCard } from './SystemNoteCard';
+export { TaskGroupCard } from './TaskGroupCard';
 export { ToolResultCard } from './ToolResultCard';
 export { ToolUseCard } from './ToolUseCard';
 export { UserMessageCard } from './UserMessageCard';
