@@ -507,12 +507,13 @@ type TaskNotePayload = {
   data?: {
     subtype?: string;
     task_id?: string;
+    tool_use_id?: string;
   };
 } | null;
 
 function readTaskMeta(
   event: AgentEvent,
-): { subtype: string; taskId: string } | null {
+): { subtype: string; taskId: string; parentToolUseId?: string } | null {
   if (event.eventType !== 'system_note') return null;
   const payload = event.payloadJson as TaskNotePayload;
   const subtype = payload?.data?.subtype;
@@ -526,7 +527,13 @@ function readTaskMeta(
   ) {
     return null;
   }
-  return { subtype, taskId };
+  const parentToolUseId = payload?.data?.tool_use_id;
+  return {
+    subtype,
+    taskId,
+    parentToolUseId:
+      typeof parentToolUseId === 'string' ? parentToolUseId : undefined,
+  };
 }
 
 export function selectTranscriptItems(events: AgentEvent[]): TranscriptItem[] {
@@ -543,6 +550,30 @@ export function selectTranscriptItems(events: AgentEvent[]): TranscriptItem[] {
     const meta = readTaskMeta(event);
     if (meta) {
       if (meta.subtype === 'task_started') {
+        // Phase 19.3 — merge: if the parent Agent tool_use is already in the
+        // top-level items, splice it out. The TaskGroupCard becomes the
+        // unified representation (brief from header.data.prompt, body via
+        // chatStore lookup of the matching tool_result by tool_use_id).
+        // Without this dedupe the user would see two cards back-to-back
+        // with overlapping content.
+        if (meta.parentToolUseId) {
+          for (let i = items.length - 1; i >= 0; i--) {
+            const item = items[i]!;
+            if (item.kind !== 'event') continue;
+            if (item.event.eventType !== 'tool_use') continue;
+            const p = item.event.payloadJson as {
+              tool_name?: string;
+              tool_use_id?: string;
+            } | null;
+            if (
+              p?.tool_name === 'Agent' &&
+              p?.tool_use_id === meta.parentToolUseId
+            ) {
+              items.splice(i, 1);
+              break;
+            }
+          }
+        }
         const group: TranscriptItem & { kind: 'taskGroup' } = {
           kind: 'taskGroup',
           taskId: meta.taskId,
