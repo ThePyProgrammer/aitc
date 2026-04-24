@@ -472,7 +472,7 @@ export function selectToolUseWithResult(
   return { toolUse, toolResult };
 }
 
-// Phase 19.1 — group Claude Code's Task-tool lifecycle events into
+// Phase 19.1 — group Claude Code's Agent-tool lifecycle events into
 // collapsible sections. Each task emits:
 //   system_note { data.subtype: "task_started",      data.task_id: X }
 //   system_note { data.subtype: "task_progress",     data.task_id: X } * N
@@ -480,10 +480,19 @@ export function selectToolUseWithResult(
 // The selector walks the flat events in order, opens a group on a
 // task_started, routes matching task_progress / task_notification into
 // that group (supporting overlapping tasks keyed by task_id), and leaves
-// everything else — including the parent tool_use(Task) row that sits
+// everything else — including the parent tool_use(Agent) row that sits
 // just before the group — at the top level. An unclosed group (missing
 // task_notification) stays open with footer: null so the UI still shows
 // header + any progress rows.
+//
+// Phase 19.2 — also route bare tool_use / tool_result events that fall
+// inside the task bracket into the most-recently-opened group's children.
+// Sub-agent tool calls are emitted as plain tool_use rows on the parent
+// agent's stream (no parent_tool_use_id field) but they're chronologically
+// sandwiched between task_started and task_notification. Nesting them
+// into the group makes the SUBAGENT_TASK card a real mini-transcript of
+// what the sub-agent did, instead of leaving its tool calls floating
+// alongside the parent's events.
 export type TranscriptItem =
   | { kind: 'event'; event: AgentEvent }
   | {
@@ -523,6 +532,12 @@ function readTaskMeta(
 export function selectTranscriptItems(events: AgentEvent[]): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   const open = new Map<string, TranscriptItem & { kind: 'taskGroup' }>();
+  // Insertion-ordered stack of currently-open task ids. The "innermost"
+  // open group (last opened, not yet closed) owns any bare tool_use /
+  // tool_result events that arrive while it's open. Supports nested
+  // sub-agents (a sub-agent dispatching another Agent) — each opens a new
+  // task_started, the inner group claims tool_uses until it closes.
+  const openStack: string[] = [];
 
   for (const event of events) {
     const meta = readTaskMeta(event);
@@ -536,6 +551,7 @@ export function selectTranscriptItems(events: AgentEvent[]): TranscriptItem[] {
           footer: null,
         };
         open.set(meta.taskId, group);
+        openStack.push(meta.taskId);
         items.push(group);
         continue;
       }
@@ -554,11 +570,31 @@ export function selectTranscriptItems(events: AgentEvent[]): TranscriptItem[] {
         if (group) {
           group.footer = event;
           open.delete(meta.taskId);
+          // Drop this taskId from the stack wherever it sits — usually
+          // the top, but a nested sub-agent could close out-of-order if
+          // the SDK ever reorders events.
+          const idx = openStack.lastIndexOf(meta.taskId);
+          if (idx !== -1) openStack.splice(idx, 1);
           continue;
         }
         // Orphan notification — fall through.
       }
     }
+
+    // Phase 19.2 — bare tool_use / tool_result inside an open task
+    // bracket belongs to the sub-agent. Route to the innermost open group.
+    if (
+      (event.eventType === 'tool_use' || event.eventType === 'tool_result') &&
+      openStack.length > 0
+    ) {
+      const innerId = openStack[openStack.length - 1]!;
+      const group = open.get(innerId);
+      if (group) {
+        group.children.push(event);
+        continue;
+      }
+    }
+
     items.push({ kind: 'event', event });
   }
 
