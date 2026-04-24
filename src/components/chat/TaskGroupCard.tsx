@@ -105,7 +105,7 @@ export function TaskGroupCard({
       data-task-state={state}
       // Persistent secondary left accent + subtle bg tint so a subagent
       // group reads distinctly from neutral tool rows, even when collapsed.
-      className="bg-surface-container-lowest rounded-sm mx-5 my-1.5 border-l-2 border-secondary/70"
+      className="bg-surface-container-lowest rounded-sm mx-5 my-1.5 border-l-2 border-secondary"
       transition={{ duration: 0.12, ease: 'easeOut' }}
     >
       <button

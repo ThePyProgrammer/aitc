@@ -235,26 +235,57 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
     [approvalId, navigate],
   );
 
+  // Per-variant accent. AGENT (Task) shares the SUBAGENT_TASK green with
+  // TaskGroupCard; SKILL gets the amber tertiary. Other tools stay neutral.
+  // Accent is persistent on the outer wrapper so the tool category is
+  // readable at a glance without expanding, not just on the expanded body.
+  const variant: 'agent' | 'skill' | 'plain' = isAgent
+    ? 'agent'
+    : isSkill
+      ? 'skill'
+      : 'plain';
+  const outerAccentClass =
+    variant === 'agent'
+      ? 'border-l-2 border-secondary'
+      : variant === 'skill'
+        ? 'border-l-2 border-tertiary'
+        : '';
+  const headerBgClass =
+    variant === 'agent'
+      ? 'bg-secondary/5 hover:bg-secondary/10'
+      : variant === 'skill'
+        ? 'bg-tertiary/5 hover:bg-tertiary/10'
+        : 'hover:bg-surface-container-low';
+  const iconColorClass =
+    variant === 'agent'
+      ? 'text-secondary'
+      : variant === 'skill'
+        ? 'text-tertiary'
+        : 'text-on-surface-variant';
+  const labelColorClass = iconColorClass;
+
   return (
     <motion.div
       layout
       data-testid="tool-use-card"
-      className="bg-surface-container-lowest rounded-sm mx-5 my-1.5"
+      className={`bg-surface-container-lowest rounded-sm mx-5 my-1.5 ${outerAccentClass}`}
       transition={{ duration: 0.12, ease: 'easeOut' }}
     >
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
-        className="w-full flex items-center gap-3 px-5 py-2.5 text-left hover:bg-surface-container-low transition-colors"
+        className={`w-full flex items-center gap-3 px-5 py-2.5 text-left transition-colors ${headerBgClass}`}
         aria-expanded={expanded}
       >
         <Icon
           size={14}
           strokeWidth={1.5}
-          className="text-on-surface-variant shrink-0"
+          className={`${iconColorClass} shrink-0`}
           aria-hidden="true"
         />
-        <span className="font-headline text-[10px] uppercase tracking-widest text-on-surface-variant shrink-0">
+        <span
+          className={`font-headline text-[10px] uppercase tracking-widest ${labelColorClass} shrink-0`}
+        >
           {displayLabel}
         </span>
         <span className="text-on-surface-variant/40 shrink-0 font-mono text-xs">
@@ -305,10 +336,10 @@ export function ToolUseCard({ event }: ToolUseCardProps) {
             <div
               className={
                 isAgent
-                  ? 'px-5 pb-4 pt-4 bg-surface-container-lowest border-l-2 border-secondary'
+                  ? 'px-5 pb-4 pt-4 bg-surface-container-lowest border-t border-secondary/20'
                   : isSkill
-                  ? 'px-5 pb-4 pt-4 bg-surface-container-lowest border-l-2 border-tertiary'
-                  : 'px-5 pb-4 pt-4 bg-surface-container-lowest border-t border-outline'
+                    ? 'px-5 pb-4 pt-4 bg-surface-container-lowest border-t border-tertiary/20'
+                    : 'px-5 pb-4 pt-4 bg-surface-container-lowest border-t border-outline'
               }
             >
               {approvalId != null && (
