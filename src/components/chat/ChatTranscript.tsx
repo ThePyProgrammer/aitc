@@ -64,6 +64,11 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
   const streamingContent = useChatStore((s) =>
     agentId ? s.streamingByAgent[agentId] ?? '' : '',
   );
+  // Phase 19.7 — show a "GENERATING" indicator during the silent
+  // pre-first-delta phase (Claude thinking, tool-only turns).
+  const isAgentRunning = useChatStore((s) =>
+    agentId ? s.isAgentRunningByAgent[agentId] === true : false,
+  );
   const loadOlder = useChatStore((s) => s.loadOlder);
   const channels = useChatStore((s) => s.channels);
   const currentChannel = channels.find((c) => c.agentId === agentId) ?? null;
@@ -283,6 +288,35 @@ export function ChatTranscript({ agentId }: ChatTranscriptProps) {
               CLAUDE
             </div>
             <MarkdownBody content={streamingContent} streaming />
+          </div>
+        )}
+        {isAgentRunning && streamingContent === '' && (
+          <div
+            data-testid="generating-indicator-row"
+            className="w-full px-5 py-3 border-t border-outline-variant/10"
+          >
+            <div className="flex items-center gap-2 font-headline text-[10px] uppercase tracking-widest text-on-surface-variant/70">
+              <span>CLAUDE</span>
+              <span className="text-on-surface-variant/40">·</span>
+              <span>GENERATING</span>
+              <span
+                aria-hidden="true"
+                className="ml-1 inline-flex items-center gap-1"
+              >
+                <span
+                  className="inline-block w-1 h-1 rounded-full bg-secondary"
+                  style={{ animation: 'radar-pulse 1.4s ease-in-out 0s infinite' }}
+                />
+                <span
+                  className="inline-block w-1 h-1 rounded-full bg-secondary"
+                  style={{ animation: 'radar-pulse 1.4s ease-in-out 0.2s infinite' }}
+                />
+                <span
+                  className="inline-block w-1 h-1 rounded-full bg-secondary"
+                  style={{ animation: 'radar-pulse 1.4s ease-in-out 0.4s infinite' }}
+                />
+              </span>
+            </div>
           </div>
         )}
       </div>
