@@ -116,6 +116,12 @@ pub enum StreamEvent {
     },
     RawStdout { line: String },
     RawStderr { line: String },
-    SystemNote { text: String },
+    /// `data` carries the raw system envelope for structured subtypes
+    /// (task_started / task_progress / task_notification). None for plain
+    /// notes — the old `[system/...]` badge is sufficient for those.
+    SystemNote {
+        text: String,
+        data: Option<serde_json::Value>,
+    },
     StdoutClosed,
 }

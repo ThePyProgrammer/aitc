@@ -256,12 +256,27 @@ async fn dispatch_system(v: &serde_json::Value, sink: &mpsc::Sender<StreamEvent>
                 return;
             }
             let text = format!("[{subtype}] {hook_name}");
-            let _ = sink.send(StreamEvent::SystemNote { text }).await;
+            let _ = sink.send(StreamEvent::SystemNote { text, data: None }).await;
+        }
+        // Subagent (Task tool) lifecycle: task_started, task_progress,
+        // task_notification — each carries `task_id` + `tool_use_id` plus
+        // subtype-specific fields (description, prompt, usage, status,
+        // summary). Preserve the full envelope so the frontend can group
+        // by task_id into a collapsible card; the fallback `text` badge
+        // keeps old SystemNoteCard rendering backwards-compatible.
+        "task_started" | "task_progress" | "task_notification" => {
+            let text = format!("[system/{subtype}]");
+            let _ = sink
+                .send(StreamEvent::SystemNote {
+                    text,
+                    data: Some(v.clone()),
+                })
+                .await;
         }
         _ => {
             // Unknown system subtype — log and surface as a generic note.
             let text = format!("[system/{subtype}]");
-            let _ = sink.send(StreamEvent::SystemNote { text }).await;
+            let _ = sink.send(StreamEvent::SystemNote { text, data: None }).await;
         }
     }
 }
@@ -758,9 +773,17 @@ async fn run_event_aggregator<R: tauri::Runtime>(
                     Err(e) => tracing::warn!(agent_id = %agent_id, err = %e, "raw_stderr insert"),
                 }
             }
-            StreamEvent::SystemNote { text } => {
+            StreamEvent::SystemNote { text, data } => {
                 let session_id = sessions.session_id_for(&agent_id).await;
-                let payload = serde_json::json!({ "text": text });
+                // `data` is None for plain notes (hook lifecycle, unknown
+                // subtypes) — the row stores only `{text}` then, matching
+                // the pre-Phase-19.1 shape. When Some, it carries the raw
+                // system envelope (task_started / task_progress /
+                // task_notification) so the frontend can group by task_id.
+                let payload = match &data {
+                    Some(d) => serde_json::json!({ "text": text, "data": d }),
+                    None => serde_json::json!({ "text": text }),
+                };
                 match crate::db::events::insert_agent_event(
                     &pool,
                     &agent_id,
@@ -1024,6 +1047,162 @@ mod tests {
         assert_eq!(
             asst_count, 0,
             "SessionStart hooks must never surface as assistant text"
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_system_preserves_task_event_payloads() {
+        // Task-tool lifecycle envelopes (subtype = task_started / task_progress
+        // / task_notification) must surface with their full JSON payload on
+        // SystemNote.data so the frontend can group by task_id into a
+        // collapsible card. Plain system subtypes (hook_started etc.) still
+        // emit data: None.
+        let (tx, mut rx) = mpsc::channel::<StreamEvent>(32);
+        let started = serde_json::json!({
+            "type": "system",
+            "subtype": "task_started",
+            "task_id": "task-abc",
+            "tool_use_id": "toolu_1",
+            "description": "Echo hello",
+            "task_type": "local_agent",
+            "prompt": "Echo 'hello' and stop.",
+            "session_id": "sess-1",
+        });
+        let progress = serde_json::json!({
+            "type": "system",
+            "subtype": "task_progress",
+            "task_id": "task-abc",
+            "tool_use_id": "toolu_1",
+            "description": "Running Bash",
+            "last_tool_name": "Bash",
+            "session_id": "sess-1",
+        });
+        let notification = serde_json::json!({
+            "type": "system",
+            "subtype": "task_notification",
+            "task_id": "task-abc",
+            "tool_use_id": "toolu_1",
+            "status": "completed",
+            "summary": "Echo hello",
+            "usage": {"total_tokens": 19191, "tool_uses": 0, "duration_ms": 1704},
+            "session_id": "sess-1",
+        });
+        let hook = serde_json::json!({
+            "type": "system",
+            "subtype": "hook_started",
+            "hook_name": "PreToolUse:Edit",
+            "session_id": "sess-1",
+        });
+        dispatch_system(&started, &tx).await;
+        dispatch_system(&progress, &tx).await;
+        dispatch_system(&notification, &tx).await;
+        dispatch_system(&hook, &tx).await;
+        drop(tx);
+        let mut out = Vec::new();
+        while let Some(e) = rx.recv().await {
+            out.push(e);
+        }
+        assert_eq!(out.len(), 4, "four SystemNote events expected, got {:?}", out);
+        // Task events: data is Some and round-trips the full envelope.
+        for (i, (expected_subtype, expected_source)) in [
+            ("task_started", &started),
+            ("task_progress", &progress),
+            ("task_notification", &notification),
+        ]
+        .iter()
+        .enumerate()
+        {
+            match &out[i] {
+                StreamEvent::SystemNote { text, data } => {
+                    assert_eq!(text, &format!("[system/{expected_subtype}]"));
+                    let d = data.as_ref().unwrap_or_else(|| {
+                        panic!("{expected_subtype}: data must be Some")
+                    });
+                    assert_eq!(
+                        d.get("task_id").and_then(|v| v.as_str()),
+                        Some("task-abc"),
+                        "{expected_subtype}: task_id preserved"
+                    );
+                    assert_eq!(
+                        d.get("tool_use_id").and_then(|v| v.as_str()),
+                        Some("toolu_1"),
+                        "{expected_subtype}: tool_use_id preserved"
+                    );
+                    assert_eq!(d, *expected_source, "{expected_subtype}: payload round-trip");
+                }
+                other => panic!("expected SystemNote at {i}, got {:?}", other),
+            }
+        }
+        // Plain hook: data is None.
+        match &out[3] {
+            StreamEvent::SystemNote { text, data } => {
+                assert_eq!(text, "[hook_started] PreToolUse:Edit");
+                assert!(data.is_none(), "plain hook notes keep data: None");
+            }
+            other => panic!("expected SystemNote for hook, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn aggregator_writes_task_event_data_into_system_note_row() {
+        // Downstream of the parser: when the aggregator writes a SystemNote
+        // with data=Some, the row's payload_json must expose { text, data }
+        // so the frontend selector can pick up task_id, description, etc.
+        let started_payload = serde_json::json!({
+            "type": "system",
+            "subtype": "task_started",
+            "task_id": "task-abc",
+            "tool_use_id": "toolu_1",
+            "description": "Echo hello",
+            "task_type": "local_agent",
+        });
+        let events = vec![
+            StreamEvent::SessionStarted {
+                session_id: "sess-1".to_string(),
+            },
+            StreamEvent::SystemNote {
+                text: "[system/task_started]".to_string(),
+                data: Some(started_payload.clone()),
+            },
+            StreamEvent::SystemNote {
+                text: "[hook_started] PreToolUse:Edit".to_string(),
+                data: None,
+            },
+            StreamEvent::TurnComplete {
+                terminal_reason: "completed".to_string(),
+                is_error: false,
+            },
+        ];
+        let pool = run_aggregator_with_events("A-1", events).await;
+        let rows = crate::db::events::list_events_for_agent(&pool, "A-1", None, 20)
+            .await
+            .expect("list_events_for_agent");
+        let mut system_rows: Vec<_> = rows
+            .iter()
+            .filter(|r| r.event_type == "system_note")
+            .collect();
+        system_rows.sort_by_key(|r| r.id);
+        assert_eq!(system_rows.len(), 2, "two system_note rows expected");
+        // First row — task event: payload has both text and data.
+        let task_payload = &system_rows[0].payload_json;
+        assert_eq!(
+            task_payload.get("text").and_then(|v| v.as_str()),
+            Some("[system/task_started]"),
+        );
+        assert_eq!(
+            task_payload.get("data"),
+            Some(&started_payload),
+            "task event's raw envelope persisted verbatim"
+        );
+        // Second row — plain hook: payload has text only, no data key.
+        let hook_payload = &system_rows[1].payload_json;
+        assert_eq!(
+            hook_payload.get("text").and_then(|v| v.as_str()),
+            Some("[hook_started] PreToolUse:Edit"),
+        );
+        assert!(
+            hook_payload.get("data").is_none(),
+            "plain hook rows omit the data key (backwards-compatible with pre-19.1 consumers)"
         );
     }
 
