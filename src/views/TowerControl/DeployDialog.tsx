@@ -144,7 +144,15 @@ export function DeployDialog({ open, onClose }: DeployDialogProps) {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
             transition={{ duration: 0.15 }}
-            className="w-[480px] bg-surface/80 backdrop-blur-xl border border-outline/10"
+            // Dialog surface lifted two tiers above the "no chat selected"
+            // detail pane (bg-surface-container-highest, #262626) — we were
+            // previously at bg-surface/80 which rendered DARKER than the
+            // darkened detail pane and disappeared into it. Solid highest
+            // tier + 40% outline border gives the dialog a real silhouette;
+            // the primary left-stripe matches the Command Horizon accent
+            // motif used on AGENT / SUBAGENT / SKILL cards and signals
+            // "active primary affordance".
+            className="w-[480px] bg-surface-container-highest border border-outline/40 border-l-2 border-l-primary"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
