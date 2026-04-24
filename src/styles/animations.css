@@ -29,3 +29,12 @@
     transform: translateY(0);
   }
 }
+
+/* Radar pulse -- subtle opacity oscillation, 1.5s infinite. Used to mark
+   live/in-flight indicators (e.g. SUBAGENT_TASK Bot icon + status dot
+   while running). Distinct from blink-cursor (which fully blanks the
+   element) and ping-scale (which scales outward). */
+@keyframes radar-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
