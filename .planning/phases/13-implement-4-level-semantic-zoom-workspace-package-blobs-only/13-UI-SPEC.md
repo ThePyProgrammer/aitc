@@ -62,13 +62,15 @@ Exceptions: Canvas world-space primitives may divide by zoom for visual constanc
 | Heading | 16px | 600 | 1.2 |
 | Display | 20px | 600 | 1.2 |
 
+Only allowed Phase 13 font sizes are `10px`, `14px`, `16px`, and `20px`. Do not introduce `12px` or any additional phase-specific text size.
+
 Phase-specific usage:
 
 - Semantic level label in the zoom HUD: `10px`, weight `600`, Space Grotesk, uppercase, letter-spacing `0.12em`.
-- Workspace/package blob labels: `12px` for top-level blobs, `10px` for sub-package labels, Space Grotesk, uppercase, weight `600`, line-height `1.2`.
+- Workspace/package blob labels: `14px` for top-level blobs, `10px` for sub-package labels, Space Grotesk, uppercase, weight `600`, line-height `1.2`.
 - File names at file/code levels: `10px`, JetBrains Mono, weight `400`, line-height `1.2`.
-- Signature card title/path: `12px`, JetBrains Mono, weight `600`, line-height `1.2`.
-- Signature rows and snippets: `12px`, JetBrains Mono, weight `400`, line-height `1.5`.
+- Signature card title: `14px`, JetBrains Mono, weight `600`, line-height `1.2`; signature card path metadata: `10px`, JetBrains Mono, weight `400`, line-height `1.2`.
+- Signature rows and metadata: `10px`, JetBrains Mono, weight `400`, line-height `1.2`; expanded snippets: `14px`, JetBrains Mono, weight `400`, line-height `1.5`.
 - New Phase 13 UI must use only weights `400` and `600`; pre-existing `font-bold` components are legacy and should not be copied into new semantic zoom surfaces.
 
 ---
