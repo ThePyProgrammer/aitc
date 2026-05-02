@@ -173,3 +173,6 @@ It runs, though. On my Linux machine at least. Mostly. And apparently on Windows
 I had this idea when I read [this LinkedIn post](https://www.linkedin.com/posts/dr-oliver-borchers-043a48b9_cursor-3-just-left-vs-code-completely-rewritten-share-7447171765312786433-3TO3) that suggested the logical progression for an IDE like Cursor was to move from being a "co-pilot" to an "air traffic control system". After discussing with [@Ethan-Chew](https://github.com/Ethan-Chew), it sounded like a pretty cool idea to implement over the weekend.
 
 Now it's twenty-two phases long (twenty-three if you count 11.1) so...
+
+> [!WARNING]
+> This system may fork bomb your computer. DO NOT TRY AT HOME!!!
