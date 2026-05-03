@@ -57,7 +57,12 @@ import {
   drawBoundaryAnchorLabels,
   BRIDGE_HIT_RADIUS,
 } from './BridgeRenderer';
+import { commands } from '../../bindings';
 import { BridgeTooltip } from './BridgeTooltip';
+import {
+  CodePreviewOverlay,
+  type SourceSnippetPreview,
+} from './CodePreviewOverlay';
 import {
   resolveSemanticZoom,
   semanticLabelForLevel,
@@ -237,6 +242,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const mousePosRef = useRef({ x: 0, y: 0 });
   const [degradedDismissed, setDegradedDismissed] = useState(false);
   const [overloadDismissed, setOverloadDismissed] = useState(false);
+  const [expandedCodePreviewIds, setExpandedCodePreviewIds] = useState<Set<string>>(new Set());
 
   // Store-driven state — single selector with shallow equality so only
   // fields that actually changed trigger a re-render (was 9 separate
@@ -275,6 +281,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const { viewport, setViewport, handlers, screenToWorld } = useCanvasZoomPan();
   const semantic = resolveSemanticZoom(viewport.zoom);
   const semanticLabel = semanticLabelForLevel(semantic.dominantLevel);
+  const codeCardsVisible =
+    semantic.dominantLevel === 'code' || semantic.opacityByLevel.code > 0;
   const { quadtreeRef, simNodesRef, isSimulatingRef, markDirtyRef } = useGraphLayout();
 
   // D-25 / D-26 — Metadata lookup for the rAF hot path. graphNodes is
@@ -453,6 +461,19 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const packageBlobs = useMemo(
     () => selectPackageBlobs(packageBlobModel),
     [packageBlobModel],
+  );
+  const requestCodeSnippet = useCallback(
+    async (repoRelativePath: string): Promise<SourceSnippetPreview> => {
+      const result = await commands.getSourceSnippet(repoRelativePath, null);
+      if (result.status === 'error') {
+        throw new Error(result.error);
+      }
+      return {
+        lines: result.data.lines,
+        startLine: result.data.startLine,
+      };
+    },
+    [],
   );
 
   // D-14 trail spawn: for each new pipeline event attributed to a known
@@ -1129,16 +1150,23 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     [screenToWorld, findBridgeAtWorld, viewport.zoom, workspaceBlobs, packageBlobs, setViewport, canvasSize],
   );
 
-  // Phase 12 (UI-SPEC §Keyboard) — Escape clears the selected bridge.
+  // Phase 12/13 (UI-SPEC §Keyboard) — Escape closes code cards before bridges.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        useRadarStore.getState().selectBridge(null);
+      if (e.key !== 'Escape') return;
+      if (expandedCodePreviewIds.size > 0) {
+        setExpandedCodePreviewIds(new Set());
+        return;
       }
+      if (codeCardsVisible && (hoveredNodeId || selectedNode)) {
+        setHoveredNodeId(null);
+        return;
+      }
+      useRadarStore.getState().selectBridge(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [codeCardsVisible, expandedCodePreviewIds, hoveredNodeId, selectedNode]);
 
   // Attach native wheel/mouse handlers for pan/zoom (wheel must be non-passive).
   useEffect(() => {
@@ -1274,6 +1302,21 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         role="img"
         aria-label={`Codebase dependency graph. ${graphNodes.length} files, ${graphEdges.length} edges.`}
       />
+
+      {codeCardsVisible && (
+        <CodePreviewOverlay
+          nodes={graphNodes.filter((n) => n.kind !== 'bridge')}
+          viewport={viewport}
+          canvasWidth={canvasSize.width}
+          canvasHeight={canvasSize.height}
+          hoveredNodeId={hoveredNodeId}
+          selectedNodeId={selectedNode?.id ?? null}
+          activeAgentFileIds={activeAgentFiles}
+          expandedNodeIds={expandedCodePreviewIds}
+          onExpandedChange={setExpandedCodePreviewIds}
+          onRequestSnippet={requestCodeSnippet}
+        />
+      )}
 
       {/* Empty / building state overlay (UI-SPEC §States). */}
       {graphNodes.length === 0 && settledAt === null && (
