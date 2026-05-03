@@ -72,7 +72,7 @@ function addToGroup(
   node: GraphNode,
   contentionScores: Map<string, number>,
   activeConflictPaths: Set<string>,
-  activeAgentFiles: Set<string>,
+  activeAgentFileCounts: Map<string, number>,
 ): void {
   if (node.x === undefined || node.y === undefined) return;
   const group = groups.get(dirKey) ?? {
@@ -91,7 +91,7 @@ function addToGroup(
   group.ySum += node.y;
   group.contentionScore = Math.max(group.contentionScore, contentionScores.get(node.id) ?? 0);
   if (activeConflictPaths.has(node.id)) group.conflictCount += 1;
-  if (activeAgentFiles.has(node.id)) group.activeAgentCount += 1;
+  group.activeAgentCount += activeAgentFileCounts.get(node.id) ?? 0;
   groups.set(dirKey, group);
 }
 
@@ -140,15 +140,18 @@ export function derivePackageBlobs(inputs: PackageBlobInputs): PackageBlob[] {
 
   const contentionScores = inputs.contentionScores ?? new Map<string, number>();
   const activeConflictPaths = new Set(inputs.activeConflictPaths ?? []);
-  const activeAgentFiles = new Set(inputs.activeAgentFiles ?? []);
+  const activeAgentFileCounts = new Map<string, number>();
+  for (const path of inputs.activeAgentFiles ?? []) {
+    activeAgentFileCounts.set(path, (activeAgentFileCounts.get(path) ?? 0) + 1);
+  }
   const workspaceGroups = new Map<string, GroupAccumulator>();
   const packageGroups = new Map<string, GroupAccumulator>();
 
   for (const node of inputs.nodes) {
     if (node.kind === 'bridge') continue;
     if (node.x === undefined || node.y === undefined) continue;
-    addToGroup(workspaceGroups, topLevelDir(node), node, contentionScores, activeConflictPaths, activeAgentFiles);
-    addToGroup(packageGroups, packageDir(node), node, contentionScores, activeConflictPaths, activeAgentFiles);
+    addToGroup(workspaceGroups, topLevelDir(node), node, contentionScores, activeConflictPaths, activeAgentFileCounts);
+    addToGroup(packageGroups, packageDir(node), node, contentionScores, activeConflictPaths, activeAgentFileCounts);
   }
 
   cacheEpoch = epoch;

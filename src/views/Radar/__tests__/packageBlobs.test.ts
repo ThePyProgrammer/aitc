@@ -119,8 +119,8 @@ describe('package blob derivation', () => {
 
     expect(src.contentionScore).toBe(0.9);
     expect(src.conflictCount).toBe(2);
-    expect(src.activeAgentCount).toBe(2);
-    expect(src.importance).toBeCloseTo(3 + (2 * 50) + (2 * 25) + (0.9 * 20));
+    expect(src.activeAgentCount).toBe(3);
+    expect(src.importance).toBeCloseTo(3 + (2 * 50) + (3 * 25) + (0.9 * 20));
   });
 
   it('bridge nodes do not affect file counts or centroids', () => {
@@ -162,6 +162,20 @@ describe('PackageBlobRenderer', () => {
     expect(ctx._assignments.strokeStyle).toContain('#ff7351');
     expect(ctx._assignments.fillStyle).toContain('rgba(255, 115, 81, 0.16)');
     expect(ctx._calls.filter((c) => c.fn === 'fillText').some((c) => c.args[0] === '1')).toBe(true);
+  });
+
+  it('keeps top-level label font size screen-constant across zoom levels', () => {
+    const [blob] = selectWorkspaceBlobs(derivePackageBlobs({ nodes }));
+    const ctx = createMockCtx();
+
+    drawPackageBlobs(ctx, [blob], {
+      zoom: 2,
+      viewport: { zoom: 2, panX: 0, panY: 0 },
+      canvasWidth: 800,
+      canvasHeight: 600,
+    });
+
+    expect(ctx._assignments.font).toContain('7px "Space Grotesk", sans-serif');
   });
 
   it('uses a 44px minimum hit diameter divided by zoom', () => {
