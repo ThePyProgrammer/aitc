@@ -31,4 +31,5 @@ src-tauri/target
 .superpowers/
 outputs/
 .worktrees/
+.claude/worktrees/
 
