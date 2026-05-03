@@ -45,6 +45,8 @@ pub fn run() {
             pipeline::commands::list_worktrees,
             pipeline::commands::get_tree_index,
             pipeline::commands::get_dependency_graph,
+            pipeline::commands::get_source_signatures,
+            pipeline::commands::get_source_snippet,
             pipeline::commands::get_ipc_bridges,
             repo_session::get_launch_cwd,
             repo_session::detect_git_root,
@@ -105,6 +107,8 @@ pub fn run() {
         .typ::<pipeline::worktree::Worktree>()
         .typ::<pipeline::deps::DependencyEdgeDto>()
         .typ::<pipeline::deps::EdgeKind>()
+        .typ::<pipeline::deps::SourceSignatureDto>()
+        .typ::<pipeline::commands::SourceSnippetDto>()
         .typ::<pipeline::ipc_bridges::IpcBridgeDto>()
         .typ::<pipeline::ipc_bridges::IpcCallSite>()
         .typ::<pipeline::ipc_bridges::CallShape>()

@@ -70,6 +70,29 @@ async getDependencyGraph() : Promise<Result<DependencyEdgeDto[], string>> {
 }
 },
 /**
+ * Get best-effort source signatures for active watched source files.
+ * Returns an empty vec if no watch is active or extraction cannot parse a file.
+ */
+async getSourceSignatures() : Promise<Result<SourceSignatureDto[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_source_signatures") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get a capped read-only snippet for a repo-relative source path.
+ */
+async getSourceSnippet(path: string, startLine: number | null) : Promise<Result<SourceSnippetDto, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_source_snippet", { path, startLine }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get the IPC bridge surface (commands + handlers + callers) for the active
  * watch. Returns an empty vec if no watch is active.
  * 
@@ -1003,6 +1026,17 @@ export type SessionRecord = { id: number; agentId: string; agentType: string; st
  * captures the stream-json `init` envelope's `session_id`.
  */
 export type SessionStartedPayload = { agentId: string; sessionId: string }
+/**
+ * Best-effort signature metadata for a source file. `path` is repo-relative
+ * at the command boundary; extraction itself intentionally stores no absolute
+ * paths in the DTO to avoid leaking host filesystem layout over IPC.
+ */
+export type SourceSignatureDto = { path: string; signatures: string[] }
+/**
+ * Wire-format for a capped read-only source snippet. Paths are repo-relative
+ * forward-slash strings; lines are capped by [`SOURCE_SNIPPET_MAX_LINES`].
+ */
+export type SourceSnippetDto = { path: string; startLine: number; lines: string[] }
 /**
  * Live system load snapshot.
  */

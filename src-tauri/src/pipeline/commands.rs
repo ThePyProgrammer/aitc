@@ -18,6 +18,7 @@ use crate::conflict::engine::ConflictEngine;
 use crate::conflict::commands::emit_conflict_event;
 use crate::conflict::types::ConflictState;
 use crate::pipeline::events::FileEventBatch;
+use crate::pipeline::deps::extract::{detect_language, extract_source_signatures, MAX_FILE_SIZE_BYTES};
 use crate::pipeline::pipeline_state::{ActiveWatch, PipelineState};
 use crate::pipeline::process_snapshot::{
     spawn_snapshot_refresher, start_attributing_stream, ProcessSnapshot,
@@ -27,11 +28,95 @@ use crate::pipeline::watcher::spawn_watcher;
 use crate::pipeline::worktree::{list_worktrees as do_list_worktrees, Worktree};
 use sqlx::{Pool, Sqlite};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::Manager;
+use serde::{Deserialize, Serialize};
+use specta::Type;
 use tokio::sync::{broadcast, mpsc, RwLock};
+
+/// Wire-format for a capped read-only source snippet. Paths are repo-relative
+/// forward-slash strings; lines are capped by [`SOURCE_SNIPPET_MAX_LINES`].
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceSnippetDto {
+    pub path: String,
+    pub start_line: usize,
+    pub lines: Vec<String>,
+}
+
+pub const SOURCE_SNIPPET_MAX_LINES: usize = 12;
+
+fn normalize_repo_relative_path(path: &str) -> Result<PathBuf, String> {
+    let raw = PathBuf::from(path);
+    if raw.is_absolute() {
+        return Err("path must be repo-relative".into());
+    }
+    if path.trim().is_empty() {
+        return Err("path must not be empty".into());
+    }
+    let mut out = PathBuf::new();
+    for component in raw.components() {
+        match component {
+            Component::Normal(part) => out.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => return Err("path traversal is not allowed".into()),
+            Component::RootDir | Component::Prefix(_) => {
+                return Err("path must be repo-relative".into());
+            }
+        }
+    }
+    if out.as_os_str().is_empty() {
+        return Err("path must not be empty".into());
+    }
+    Ok(out)
+}
+
+fn canonical_source_path(repo_root: &Path, rel_path: &str) -> Result<PathBuf, String> {
+    let rel = normalize_repo_relative_path(rel_path)?;
+    let target = repo_root.join(rel);
+    let canonical = target
+        .canonicalize()
+        .map(strip_unc)
+        .map_err(|e| format!("canonicalize source path: {e}"))?;
+    if !canonical.starts_with(repo_root) {
+        return Err("path escapes active repo root".into());
+    }
+    if detect_language(&canonical).is_none() {
+        return Err("unsupported source file extension".into());
+    }
+    let metadata = std::fs::metadata(&canonical).map_err(|e| format!("metadata source path: {e}"))?;
+    if !metadata.is_file() {
+        return Err("path is not a file".into());
+    }
+    if metadata.len() > MAX_FILE_SIZE_BYTES {
+        return Err("source file exceeds size cap".into());
+    }
+    Ok(canonical)
+}
+
+fn read_source_snippet(
+    repo_root: &Path,
+    rel_path: &str,
+    start_line: Option<usize>,
+) -> Result<SourceSnippetDto, String> {
+    let canonical = canonical_source_path(repo_root, rel_path)?;
+    let source = std::fs::read_to_string(&canonical)
+        .map_err(|e| format!("read source path as utf-8 text: {e}"))?;
+    let start = start_line.unwrap_or(1).max(1);
+    let lines = source
+        .lines()
+        .skip(start.saturating_sub(1))
+        .take(SOURCE_SNIPPET_MAX_LINES)
+        .map(ToOwned::to_owned)
+        .collect();
+    Ok(SourceSnippetDto {
+        path: rel_path.replace('\\', "/"),
+        start_line: start,
+        lines,
+    })
+}
 
 /// PID polling cadence. If Plan 01's BENCH_RESULT showed sysinfo refresh >=50ms,
 /// bump this to 2000. Keep at 1000 otherwise.
@@ -410,6 +495,69 @@ pub async fn get_dependency_graph(
     }
 }
 
+/// Get best-effort source signatures for active watched source files.
+/// Returns an empty vec if no watch is active or extraction cannot parse a file.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_source_signatures(
+    state: tauri::State<'_, PipelineState>,
+) -> Result<Vec<crate::pipeline::deps::SourceSignatureDto>, String> {
+    use crate::pipeline::deps::SourceSignatureDto;
+    let guard = state.inner.lock().await;
+    match guard.as_ref() {
+        Some(active) => {
+            let repo_root = active.repo_root.clone();
+            let files: Vec<std::path::PathBuf> = active
+                .tree_index
+                .iter()
+                .filter(|(_, node)| !node.is_dir)
+                .map(|(path, _)| path.clone())
+                .collect();
+            drop(guard);
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                files
+                    .into_iter()
+                    .filter_map(|path| {
+                        let signatures = extract_source_signatures(&path);
+                        if signatures.is_empty() {
+                            return None;
+                        }
+                        let rel = path.strip_prefix(&repo_root).ok()?.to_string_lossy().replace('\\', "/");
+                        Some(SourceSignatureDto { path: rel, signatures })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .await
+            .map_err(|e| format!("spawn_blocking join: {e}"))?;
+            Ok(result)
+        }
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Get a capped read-only snippet for a repo-relative source path.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_source_snippet(
+    path: String,
+    start_line: Option<usize>,
+    state: tauri::State<'_, PipelineState>,
+) -> Result<SourceSnippetDto, String> {
+    let guard = state.inner.lock().await;
+    match guard.as_ref() {
+        Some(active) => {
+            let repo_root = active.repo_root.clone();
+            drop(guard);
+            tauri::async_runtime::spawn_blocking(move || {
+                read_source_snippet(&repo_root, &path, start_line)
+            })
+            .await
+            .map_err(|e| format!("spawn_blocking join: {e}"))?
+        }
+        None => Err("no active watch".into()),
+    }
+}
+
 /// Get the IPC bridge surface (commands + handlers + callers) for the active
 /// watch. Returns an empty vec if no watch is active.
 ///
@@ -612,6 +760,26 @@ mod tests {
     #[test]
     fn pipeline_mpsc_capacity_matches_research_recommendation() {
         assert_eq!(PIPELINE_MPSC_CAPACITY, 1024);
+    }
+
+    #[test]
+    fn source_snippet_rejects_absolute_and_traversal_paths() {
+        assert!(normalize_repo_relative_path("/etc/passwd").is_err());
+        assert!(normalize_repo_relative_path("../secret.ts").is_err());
+        assert!(normalize_repo_relative_path("src/../secret.ts").is_err());
+    }
+
+    #[test]
+    fn source_snippet_caps_output_to_twelve_lines() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().canonicalize().map(strip_unc).unwrap();
+        let source = (1..=20).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        std::fs::write(root.join("sample.ts"), source).unwrap();
+        let snippet = read_source_snippet(&root, "sample.ts", Some(3)).unwrap();
+        assert_eq!(snippet.start_line, 3);
+        assert_eq!(snippet.lines.len(), SOURCE_SNIPPET_MAX_LINES);
+        assert_eq!(snippet.lines[0], "line 3");
+        assert_eq!(snippet.lines[11], "line 14");
     }
 
     /// V-12-13: `get_ipc_bridges` returns `Ok(Vec::new())` when no watch is
