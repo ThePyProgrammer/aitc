@@ -501,7 +501,7 @@ describe('RadarCanvas (graph mode) — Plan 04', () => {
       { id: 'src/a.ts', dirKey: 'src', dirDepth: 1, x: 0, y: 0 },
       { id: 'src/b.ts', dirKey: 'src', dirDepth: 1, x: 100, y: 0 },
     ];
-    mockRadarState.graphEdges = [{ source: 'src/a.ts', target: 'src/b.ts', kind: 'imports' }];
+    mockRadarState.graphEdges = [{ source: 'src/a.ts', target: 'src/b.ts', kind: 'import' }];
     mockRadarState.settledAt = Date.now();
     const original = HTMLCanvasElement.prototype.getBoundingClientRect;
     HTMLCanvasElement.prototype.getBoundingClientRect = () => ({
