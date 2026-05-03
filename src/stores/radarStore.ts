@@ -25,6 +25,7 @@ import type {
   EdgeKind,
   IpcBridgeDto,
   IpcCallSite,
+  SourceSignatureDto,
 } from '../bindings';
 import { GRAPH_HALF_WIDTH } from '../workers/graphSimConfig';
 import {
@@ -53,6 +54,11 @@ export interface GraphNode {
   // Phase 12 (D-16): language classification for forceBoundary routing; only
   // populated on file nodes (undefined on bridges + language-agnostic files).
   language?: 'ts' | 'rust';
+  // Phase 13 (D-09/D-11): optional best-effort code zoom metadata; file nodes
+  // only. Absence means CodePreviewOverlay should use PATH_METADATA /
+  // SIGNATURES_UNAVAILABLE fallback.
+  signatures?: string[];
+  signatureSource?: 'tree_sitter' | 'path_metadata';
   // Phase 12 bridge-only fields (undefined on file nodes).
   commandName?: string;
   rustName?: string;
@@ -222,10 +228,11 @@ export const useRadarStore = create<RadarStore>((set, get) => ({
    */
   fetchGraph: async () => {
     try {
-      // Phase 12 (V-12-16, D-08): widened to three-leg Promise.all — bridges
-      // are best-effort; a single backend failure leaves the other slots
-      // intact thanks to the per-leg .catch() guards.
-      const [treeIndex, edges, bridges] = await Promise.all([
+      // Phase 12 (V-12-16, D-08) + Phase 13 (D-09/D-11): widened to
+      // four-leg Promise.all — bridges and signatures are best-effort; a
+      // single backend failure leaves the other slots intact thanks to the
+      // per-leg .catch() guards.
+      const [treeIndex, edges, bridges, signatures] = await Promise.all([
         invoke<TreeIndexEntryRaw[]>('get_tree_index'),
         invoke<DependencyEdgeDto[]>('get_dependency_graph'),
         invoke<IpcBridgeDto[]>('get_ipc_bridges').catch((err) => {
@@ -234,9 +241,21 @@ export const useRadarStore = create<RadarStore>((set, get) => ({
           console.error('get_ipc_bridges failed:', err);
           return [] as IpcBridgeDto[];
         }),
+        invoke<SourceSignatureDto[]>('get_source_signatures').catch((err) => {
+          // Per-leg catch so source signature extraction cannot blank the
+          // graph. Code preview falls back to PATH_METADATA /
+          // SIGNATURES_UNAVAILABLE when this list is empty.
+          console.error('get_source_signatures failed:', err);
+          return [] as SourceSignatureDto[];
+        }),
       ]);
       const fileEntries = treeIndex.filter((e) => !e.isDir);
       const knownIds = new Set(fileEntries.map((e) => e.path));
+      const signaturesByPath = new Map(
+        signatures
+          .filter((entry) => entry.signatures.length > 0)
+          .map((entry) => [entry.path, entry.signatures] as const),
+      );
       // Phase 11.1 fix: preserve x/y/fx/fy for nodes that survive the
       // refresh. Without this, a pipeline-triggered re-fetch (e.g. from a
       // stray file-watcher event) would wipe every node's coords and the
@@ -260,6 +279,7 @@ export const useRadarStore = create<RadarStore>((set, get) => ({
         const lastSlash = e.path.lastIndexOf('/');
         const dirKey = lastSlash >= 0 ? e.path.slice(0, lastSlash) : '';
         const prev = existingById.get(e.path);
+        const nodeSignatures = signaturesByPath.get(e.path);
         return {
           id: e.path,
           dirKey,
@@ -270,6 +290,9 @@ export const useRadarStore = create<RadarStore>((set, get) => ({
           fy: prev?.fy,
           kind: 'file' as const,
           language: classifyLanguage(e.path),
+          ...(nodeSignatures
+            ? { signatures: nodeSignatures, signatureSource: 'tree_sitter' as const }
+            : {}),
         };
       });
       const validEdges: GraphEdge[] = edges
