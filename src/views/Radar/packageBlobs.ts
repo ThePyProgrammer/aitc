@@ -100,6 +100,8 @@ function groupToBlob(group: GroupAccumulator, level: 'workspace' | 'package'): P
   const conflictCount = group.conflictCount;
   const activeAgentCount = group.activeAgentCount;
   const contentionScore = group.contentionScore;
+  const labelParts = (group.dirKey || '(root)').split('/');
+  const label = labelParts[labelParts.length - 1];
   return {
     id: `${level}:${group.dirKey || '(root)'}`,
     dirKey: group.dirKey,
@@ -113,7 +115,7 @@ function groupToBlob(group: GroupAccumulator, level: 'workspace' | 'package'): P
     contentionScore,
     conflictCount,
     activeAgentCount,
-    label: (group.dirKey || '(root)').split('/').at(-1)!.toUpperCase(),
+    label: label.toUpperCase(),
     importance: fileCount + (conflictCount * 50) + (activeAgentCount * 25) + (contentionScore * 20),
     memberFileIds: [...group.memberFileIds].sort(),
   };
