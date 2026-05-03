@@ -19,6 +19,19 @@ import type {
 } from '../../../stores/radarStore';
 import type { FileEvent } from '../../../bindings';
 
+const packageBlobSpies = vi.hoisted(() => ({
+  derivePackageBlobs: vi.fn(),
+}));
+
+vi.mock('../packageBlobs', async () => {
+  const actual = await vi.importActual<typeof import('../packageBlobs')>('../packageBlobs');
+  packageBlobSpies.derivePackageBlobs.mockImplementation(actual.derivePackageBlobs);
+  return {
+    ...actual,
+    derivePackageBlobs: packageBlobSpies.derivePackageBlobs,
+  };
+});
+
 // jsdom has no ResizeObserver — inject a no-op shim before any component
 // mounts. The RadarCanvas observes its container size to drive HiDPI
 // rescaling; the test harness does not exercise resize behavior.
@@ -426,6 +439,28 @@ describe('RadarCanvas (graph mode) — Plan 04', () => {
     mockRadarState.graphNodes = nodes;
     const { getByText } = render(<RadarCanvas />);
     expect(getByText('INFO_DEGRADED')).toBeTruthy();
+  });
+
+  it('derives semantic package blobs outside repeated dirty frames (T-13-04)', async () => {
+    mockRadarState.graphNodes = [
+      { id: 'src/a.ts', dirKey: 'src', dirDepth: 1, x: 0, y: 0 },
+      { id: 'src/b.ts', dirKey: 'src', dirDepth: 1, x: 20, y: 0 },
+    ];
+    mockRadarState.settledAt = Date.now();
+    packageBlobSpies.derivePackageBlobs.mockClear();
+
+    render(<RadarCanvas />);
+    await new Promise((r) => setTimeout(r, 60));
+
+    expect(packageBlobSpies.derivePackageBlobs).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the semantic zoom HUD label beside the numeric zoom (D-04)', () => {
+    mockRadarState.viewport = { zoom: 0.5, panX: 400, panY: 300 };
+    const { getByText } = render(<RadarCanvas />);
+
+    expect(getByText('0.5x')).toBeTruthy();
+    expect(getByText('WORKSPACE')).toBeTruthy();
   });
 
   it('renders conflict pulse ring on contended nodes (D-22)', async () => {
