@@ -265,13 +265,18 @@ Plans:
 
 ### Phase 13: Implement 4-level semantic zoom — workspace (package blobs only), package (sub-packages + file dots), file (names + edges + agent indicators), code (content preview + function signatures). Replace current 3-tier shouldRenderHullAtZoom with a full semantic zoom system that changes representation, not just visibility
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** User can smoothly zoom the Radar across four semantic representations — WORKSPACE package blobs, PACKAGE sub-package blobs plus file dots, FILE names/edges/agent indicators, and CODE signature cards — while bridge, agent, conflict, pan/zoom, minimap, and 10k-file performance constraints remain intact.
+**Requirements**: VIZN-01, VIZN-04, VIZN-05, DSGN-01, DSGN-04
 **Depends on:** Phase 12
-**Plans:** 0 plans
+**Plans:** 6 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 13 to break down)
+- [ ] 13-01-PLAN.md — Wave 0 Nyquist test scaffold for semantic zoom, package blobs, code preview, and renderer regressions
+- [ ] 13-02-PLAN.md — Pure semantic zoom helpers, package blob derivation/rendering, FILE-level labels, and semantic edge filtering
+- [ ] 13-03-PLAN.md — RadarCanvas workspace/package/file representation orchestration, semantic HUD, and dominant hit-testing
+- [ ] 13-04-PLAN.md — Guarded best-effort source signature extraction, Tauri binding, and GraphNode metadata merge
+- [ ] 13-05-PLAN.md — CODE-level capped signature cards with fallback copy and RadarCanvas overlay integration
+- [ ] 13-06-PLAN.md — Final automated validation and blocking semantic zoom human UAT checkpoint
 
 ### Phase 14: Multi-layer offscreen canvas rendering — separate static graph (hulls, edges, nodes) from animated agent layer (trails, dots, pulses). Cache layers 1-5 to offscreen canvases, composite per frame. Only the agent layer (6) and DOM overlay (7) redraw at 60fps
 
