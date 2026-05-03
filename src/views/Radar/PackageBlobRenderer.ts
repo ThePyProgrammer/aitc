@@ -46,6 +46,8 @@ export function drawPackageBlobs(
     const isHovered = options.hoveredBlobId === blob.id;
     const isSelected = options.selectedBlobId === blob.id;
 
+    const passAlpha = ctx.globalAlpha;
+
     ctx.save();
     if (isConflict) {
       ctx.shadowColor = CONFLICT_COLOR;
@@ -67,7 +69,7 @@ export function drawPackageBlobs(
       ctx.strokeStyle = theme.hullStroke;
     }
 
-    ctx.globalAlpha = isSelected || isHovered ? 0.95 : 0.72;
+    ctx.globalAlpha = passAlpha * (isSelected || isHovered ? 0.95 : 0.72);
     ctx.lineWidth = (isConflict ? 2 : 1) / zoom;
     ctx.beginPath();
     ctx.arc(blob.centroid.x, blob.centroid.y, radius, 0, Math.PI * 2);
@@ -90,6 +92,7 @@ export function drawPackageBlobs(
       const badgeR = 8 / zoom;
       const badgeX = blob.centroid.x + radius * 0.7;
       const badgeY = blob.centroid.y - radius * 0.7;
+      ctx.globalAlpha = passAlpha;
       ctx.fillStyle = CONFLICT_COLOR;
       ctx.strokeStyle = theme.canvasBackground;
       ctx.lineWidth = 1 / zoom;
@@ -108,7 +111,7 @@ export function drawPackageBlobs(
     if (shouldDrawLabel(blob, rank, maxLabels)) {
       ctx.save();
       ctx.fillStyle = isConflict ? CONFLICT_COLOR : theme.folderLabelColor;
-      ctx.globalAlpha = isConflict ? 1 : 0.82;
+      ctx.globalAlpha = passAlpha * (isConflict ? 1 : 0.82);
       const labelPx = blob.depth <= 1 ? 14 : 10;
       ctx.font = `${labelPx / zoom}px "Space Grotesk", sans-serif`;
       ctx.textAlign = 'center';

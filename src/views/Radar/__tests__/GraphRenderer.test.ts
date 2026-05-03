@@ -43,6 +43,7 @@ function createMockCtx() {
     font: [],
     textAlign: [],
     textBaseline: [],
+    globalAlpha: [],
   };
   const record = (fn: string) =>
     vi.fn((...args: unknown[]) => {
@@ -280,6 +281,26 @@ describe('GraphRenderer pure functions — Plan 04', () => {
       drawEdges(ctx, edges, positions, 1, VIEWPORT, CANVAS_W, CANVAS_H);
       const strokes = (ctx as any)._calls.filter((c: any) => c.fn === 'stroke');
       expect(strokes.length).toBe(0);
+    });
+
+    it('restores caller semantic pass alpha after boosting IPC edges', () => {
+      const ctx = createMockCtx();
+      ctx.globalAlpha = 0.25;
+      const edges: GraphEdge[] = [
+        { source: 'web', target: 'bridge:ping', kind: 'invokes' },
+        { source: 'a', target: 'b', kind: 'import' },
+      ];
+      const positions = new Map<string, { x: number; y: number }>([
+        ['web', { x: 0, y: 0 }],
+        ['bridge:ping', { x: 100, y: 0 }],
+        ['a', { x: 0, y: 10 }],
+        ['b', { x: 100, y: 10 }],
+      ]);
+
+      drawEdges(ctx, edges, positions, 1, VIEWPORT, CANVAS_W, CANVAS_H);
+
+      expect(ctx._assignments.globalAlpha).toContain(0.3175);
+      expect(ctx.globalAlpha).toBe(0.25);
     });
   });
 

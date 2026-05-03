@@ -178,6 +178,22 @@ describe('PackageBlobRenderer', () => {
     expect(ctx._assignments.font).toContain('7px "Space Grotesk", sans-serif');
   });
 
+  it('multiplies blob and label alpha by the caller semantic pass alpha', () => {
+    const [blob] = selectWorkspaceBlobs(derivePackageBlobs({ nodes }));
+    const ctx = createMockCtx();
+    ctx.globalAlpha = 0.25;
+
+    drawPackageBlobs(ctx, [blob], {
+      zoom: 1,
+      viewport: { zoom: 1, panX: 0, panY: 0 },
+      canvasWidth: 800,
+      canvasHeight: 600,
+    });
+
+    expect(ctx._assignments.globalAlpha.some((alpha) => Math.abs(Number(alpha) - 0.18) < 0.001)).toBe(true);
+    expect(ctx._assignments.globalAlpha.some((alpha) => Math.abs(Number(alpha) - 0.205) < 0.001)).toBe(true);
+  });
+
   it('uses a 44px minimum hit diameter divided by zoom', () => {
     const blob = {
       id: 'workspace:tiny',
