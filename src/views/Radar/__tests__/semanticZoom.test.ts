@@ -1,60 +1,94 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  SEMANTIC_ANCHORS,
   CROSSFADE_HALF_BAND,
+  SEMANTIC_ANCHORS,
+  isFileDetailLevel,
   resolveSemanticZoom,
   semanticLabelForLevel,
 } from '../semanticZoom';
 
-describe('semantic zoom resolver — Phase 13 Wave 0', () => {
-  it('locks semantic anchors at 0.6, 2, and 4 (D-01)', () => {
-    expect(SEMANTIC_ANCHORS).toEqual({ package: 0.6, file: 2, code: 4 });
+describe('semanticZoom contract', () => {
+  it('exports locked anchors and crossfade band', () => {
+    expect(SEMANTIC_ANCHORS.workspaceToPackage).toBe(0.6);
+    expect(SEMANTIC_ANCHORS.packageToFile).toBe(2);
+    expect(SEMANTIC_ANCHORS.fileToCode).toBe(4);
+    expect(CROSSFADE_HALF_BAND).toBe(0.10);
+  });
+
+  it('switches dominant levels at the locked anchors', () => {
     expect(resolveSemanticZoom(0.59).dominantLevel).toBe('workspace');
     expect(resolveSemanticZoom(0.6).dominantLevel).toBe('package');
     expect(resolveSemanticZoom(2).dominantLevel).toBe('file');
     expect(resolveSemanticZoom(4).dominantLevel).toBe('code');
   });
 
-  it('maps semantic levels to Command Horizon HUD labels (D-04)', () => {
+  it('maps levels to exact Command Horizon HUD labels', () => {
     expect(semanticLabelForLevel('workspace')).toBe('WORKSPACE');
     expect(semanticLabelForLevel('package')).toBe('PACKAGE');
     expect(semanticLabelForLevel('file')).toBe('FILE');
     expect(semanticLabelForLevel('code')).toBe('CODE');
   });
 
-  it('crossfades linearly across the zoom 2 band and clamps outside it (D-02)', () => {
-    expect(CROSSFADE_HALF_BAND).toBe(0.10);
-
-    const before = resolveSemanticZoom(2 - CROSSFADE_HALF_BAND - 0.01);
-    expect(before.opacities.file).toBe(1);
-    expect(before.opacities.code).toBe(0);
-
-    const start = resolveSemanticZoom(1.9);
-    expect(start.opacities.package).toBe(1);
-    expect(start.opacities.file).toBe(0);
-
-    const midpoint = resolveSemanticZoom(2);
-    expect(midpoint.opacities.package).toBeCloseTo(0.5);
-    expect(midpoint.opacities.file).toBeCloseTo(0.5);
-
-    const end = resolveSemanticZoom(2.1);
-    expect(end.opacities.package).toBe(0);
-    expect(end.opacities.file).toBe(1);
-
-    const after = resolveSemanticZoom(2 + CROSSFADE_HALF_BAND + 0.01);
-    expect(after.opacities.file).toBe(1);
-    expect(after.opacities.package).toBe(0);
+  it('uses full opacity outside crossfade bands', () => {
+    expect(resolveSemanticZoom(0.4)).toMatchObject({
+      dominantLevel: 'workspace',
+      hitLevel: 'workspace',
+      opacityByLevel: { workspace: 1, package: 0, file: 0, code: 0 },
+    });
+    expect(resolveSemanticZoom(1)).toMatchObject({
+      dominantLevel: 'package',
+      hitLevel: 'package',
+      opacityByLevel: { workspace: 0, package: 1, file: 0, code: 0 },
+    });
+    expect(resolveSemanticZoom(3)).toMatchObject({
+      dominantLevel: 'file',
+      hitLevel: 'file',
+      opacityByLevel: { workspace: 0, package: 0, file: 1, code: 0 },
+    });
+    expect(resolveSemanticZoom(4.2)).toMatchObject({
+      dominantLevel: 'code',
+      hitLevel: 'code',
+      opacityByLevel: { workspace: 0, package: 0, file: 0, code: 1 },
+    });
   });
 
-  it('uses the higher-detail representation for hitLevel at an exact opacity tie (D-03)', () => {
-    const packageFileTie = resolveSemanticZoom(2);
-    expect(packageFileTie.opacities.package).toBeCloseTo(0.5);
-    expect(packageFileTie.opacities.file).toBeCloseTo(0.5);
-    expect(packageFileTie.hitLevel).toBe('file'); // higher-detail tie break per UI-SPEC line 157
+  it('linearly crossfades over anchor ±0.10 and clamps opacities', () => {
+    const beforePackage = resolveSemanticZoom(0.55).opacityByLevel;
+    expect(beforePackage.workspace).toBeCloseTo(0.75);
+    expect(beforePackage.package).toBeCloseTo(0.25);
 
-    const fileCodeTie = resolveSemanticZoom(4);
-    expect(fileCodeTie.opacities.file).toBeCloseTo(0.5);
-    expect(fileCodeTie.opacities.code).toBeCloseTo(0.5);
-    expect(fileCodeTie.hitLevel).toBe('code'); // higher-detail tie break per UI-SPEC line 157
+    const packageFileStart = resolveSemanticZoom(1.9).opacityByLevel;
+    expect(packageFileStart.package).toBe(1);
+    expect(packageFileStart.file).toBe(0);
+
+    const packageFileMid = resolveSemanticZoom(2).opacityByLevel;
+    expect(packageFileMid.package).toBeCloseTo(0.5);
+    expect(packageFileMid.file).toBeCloseTo(0.5);
+
+    const packageFileEnd = resolveSemanticZoom(2.1).opacityByLevel;
+    expect(packageFileEnd.package).toBe(0);
+    expect(packageFileEnd.file).toBe(1);
+
+    const afterPackage = resolveSemanticZoom(0.65).opacityByLevel;
+    expect(afterPackage.workspace).toBeCloseTo(0.25);
+    expect(afterPackage.package).toBeCloseTo(0.75);
+
+    for (const opacity of Object.values(resolveSemanticZoom(3.95).opacityByLevel)) {
+      expect(opacity).toBeGreaterThanOrEqual(0);
+      expect(opacity).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('uses higher-detail hit dominance at exact opacity ties', () => {
+    expect(resolveSemanticZoom(0.6).hitLevel).toBe('package');
+    expect(resolveSemanticZoom(2).hitLevel).toBe('file');
+    expect(resolveSemanticZoom(4).hitLevel).toBe('code');
+  });
+
+  it('identifies file-detail levels for downstream renderers', () => {
+    expect(isFileDetailLevel('workspace')).toBe(false);
+    expect(isFileDetailLevel('package')).toBe(false);
+    expect(isFileDetailLevel('file')).toBe(true);
+    expect(isFileDetailLevel('code')).toBe(true);
   });
 });

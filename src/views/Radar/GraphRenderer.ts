@@ -11,6 +11,7 @@
 // 05 and 06).
 
 import type { GraphNode, GraphEdge, Viewport } from '../../stores/radarStore';
+import type { SemanticLevel } from './semanticZoom';
 import type { GraphTheme } from './themes';
 import { clusterAccentFor, THEMES, DEFAULT_THEME_ID } from './themes';
 // Phase 11.1 (T3): convex-hull math + Catmull-Rom spline + padded-point
@@ -54,7 +55,7 @@ export const FOLDER_HULL_FILL_ALPHA = 0.05;
 export const FOLDER_HULL_STROKE_ALPHA = 0.4;
 export const VIEWPORT_CULL_PADDING = 100;
 export const PINNED_BADGE_SIZE = 5;
-export const FILE_LABEL_ZOOM_THRESHOLD = 4; // UI-SPEC §Progressive Detail: ≥ 4× shows file-name labels
+export const FILE_LABEL_ZOOM_THRESHOLD = 2; // Phase 13 FILE level: ≥ 2× shows file-name labels
 
 // ───── Heat-map color blend (D-19, UI-SPEC §Color heat-map ramp) ─────
 /** Error token — the end of the heat-map ramp. Stable across themes. */
@@ -247,6 +248,16 @@ export function drawFolderHulls(
 ): void {
   drawFolderHullShapes(ctx, nodes, zoom, settledAt, theme);
   drawFolderLabels(ctx, nodes, zoom, settledAt, parentChildMap, dirsWithOwnFiles, theme);
+}
+
+export function filterEdgesForSemanticLevel(
+  edges: GraphEdge[],
+  level: SemanticLevel,
+): GraphEdge[] {
+  if (level === 'workspace' || level === 'package') {
+    return edges.filter((e) => e.kind === 'invokes' || e.kind === 'handles');
+  }
+  return edges;
 }
 
 // ───── drawEdges (UI-SPEC z-order step 4) ─────
@@ -452,12 +463,12 @@ export function drawNodes(
   }
 }
 
-// ───── drawFileLabels (UI-SPEC §Progressive Detail: zoom ≥ 4× shows file names) ─────
+// ───── drawFileLabels (Phase 13 FILE level: zoom ≥ 2× shows file names) ─────
 /**
- * At high zoom, render the file name (basename only) below each node so the
- * user can identify what each dot represents. Uses JetBrains Mono at 10px
- * (world-space / zoom) per UI-SPEC §Typography "Data-sm".
- * Viewport-culled. Only drawn when zoom >= FILE_LABEL_ZOOM_THRESHOLD (4×).
+ * At FILE/CODE zoom, render the file name (basename only) below each node so
+ * the user can identify what each dot represents. Uses JetBrains Mono at 10px
+ * (world-space / zoom) per Phase 13 UI-SPEC typography.
+ * Viewport-culled. Only drawn when zoom >= FILE_LABEL_ZOOM_THRESHOLD (2×).
  */
 export function drawFileLabels(
   ctx: CanvasRenderingContext2D,
