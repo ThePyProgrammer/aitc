@@ -456,11 +456,10 @@ describe('RadarCanvas (graph mode) — Plan 04', () => {
   });
 
   it('shows the semantic zoom HUD label beside the numeric zoom (D-04)', () => {
-    mockRadarState.viewport = { zoom: 0.5, panX: 400, panY: 300 };
     const { getByText } = render(<RadarCanvas />);
 
-    expect(getByText('0.5x')).toBeTruthy();
-    expect(getByText('WORKSPACE')).toBeTruthy();
+    expect(getByText('1.0x')).toBeTruthy();
+    expect(getByText('PACKAGE')).toBeTruthy();
   });
 
   it('renders conflict pulse ring on contended nodes (D-22)', async () => {

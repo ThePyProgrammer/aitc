@@ -45,6 +45,7 @@ import {
   drawSelectedNode,
   drawFileLabels,
   NODE_HIT_RADIUS,
+  filterEdgesForSemanticLevel,
 } from './GraphRenderer';
 import { drawCometTrails, drawAgentDots } from './CometTrail';
 import { ForceConfigPanel } from './ForceConfigPanel';
@@ -57,6 +58,16 @@ import {
   BRIDGE_HIT_RADIUS,
 } from './BridgeRenderer';
 import { BridgeTooltip } from './BridgeTooltip';
+import {
+  resolveSemanticZoom,
+  semanticLabelForLevel,
+} from './semanticZoom';
+import {
+  derivePackageBlobs,
+  selectWorkspaceBlobs,
+  selectPackageBlobs,
+} from './packageBlobs';
+import { drawPackageBlobs, findPackageBlobAtWorld } from './PackageBlobRenderer';
 
 // UI-SPEC §Performance states thresholds (D-23).
 const DEGRADED_NODE_THRESHOLD = 5_000;
@@ -164,6 +175,7 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   // but no other component needs it cross-view. selectedBridgeId lives in
   // the store (D-21) so BridgeDetailPanel + keyboard handlers share state.
   const [hoveredBridgeId, setHoveredBridgeId] = useState<string | null>(null);
+  const [hoveredPackageBlobId, setHoveredPackageBlobId] = useState<string | null>(null);
   // Screen-space mouse position relative to the container — used to place the
   // hover popover. Stored as a ref so it doesn't trigger extra re-renders;
   // the popover reads this when hoveredNodeId changes.
@@ -206,6 +218,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   const theme = useMemo(() => resolveTheme(themeId), [themeId]);
 
   const { viewport, setViewport, handlers, screenToWorld } = useCanvasZoomPan();
+  const semantic = resolveSemanticZoom(viewport.zoom);
+  const semanticLabel = semanticLabelForLevel(semantic.dominantLevel);
   const { quadtreeRef, simNodesRef, isSimulatingRef, markDirtyRef } = useGraphLayout();
 
   // D-25 / D-26 — Metadata lookup for the rAF hot path. graphNodes is
@@ -362,6 +376,30 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
 
   const pipelineEvents = usePipelineStore((s) => s.events);
 
+  const activeAgentFiles = useMemo(
+    () => Array.from(lastAgentFileRef.current.values()),
+    // agentFileVersion participates so ref mutations update package aggregates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [agentFileVersion],
+  );
+  const packageBlobModel = useMemo(
+    () => derivePackageBlobs({
+      nodes: graphNodes,
+      contentionScores,
+      activeConflictPaths,
+      activeAgentFiles,
+    }),
+    [graphNodes, contentionScores, activeConflictPaths, activeAgentFiles],
+  );
+  const workspaceBlobs = useMemo(
+    () => selectWorkspaceBlobs(packageBlobModel),
+    [packageBlobModel],
+  );
+  const packageBlobs = useMemo(
+    () => selectPackageBlobs(packageBlobModel),
+    [packageBlobModel],
+  );
+
   // D-14 trail spawn: for each new pipeline event attributed to a known
   // agent, update the dot position + spawn a trail when the path changes.
   // Tracks the highest event timestampMs we've already processed so we
@@ -442,6 +480,9 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     agentFileVersion,
     activeConflictPaths,
     theme,
+    semantic,
+    workspaceBlobs,
+    packageBlobs,
   ]);
 
   // Keep the render loop dirty while any conflict pulse is active so the
@@ -541,6 +582,9 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     activeTrails,
     activeConflictPaths,
     theme,
+    semantic,
+    workspaceBlobs,
+    packageBlobs,
     nodeById,
     settledAt, // Phase 11.1 T3 (D-08) — cache key for hullCache.getHullCache.
   });
@@ -562,6 +606,9 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       activeTrails,
       activeConflictPaths,
       theme,
+      semantic,
+      workspaceBlobs,
+      packageBlobs,
       nodeById,
       settledAt, // Phase 11.1 T3 (D-08) — see stateRef init block.
     };
@@ -582,6 +629,9 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
     activeTrails,
     activeConflictPaths,
     theme,
+    semantic,
+    workspaceBlobs,
+    packageBlobs,
     nodeById,
     settledAt, // Phase 11.1 T3 (D-08).
   ]);
@@ -720,36 +770,83 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
         drawBoundaryLine(ctx, bridgeNodes, vp, w, h, s.theme);
       }
 
-      // Step 3 only: Folder labels (shapes dropped per option-2 spike — the
-      // hullCache still computes centroids that the labels anchor on).
-      drawFolderLabels(
-        ctx,
-        liveNodes,
-        vp.zoom,
-        s.settledAt, // Phase 11.1 T3 (D-08) — hullCache key.
-        s.parentChildMap,
-        s.dirsWithOwnFiles,
-        s.theme,
+      if (s.semantic.opacityByLevel.workspace > 0) {
+        ctx.save();
+        ctx.globalAlpha = s.semantic.opacityByLevel.workspace;
+        drawPackageBlobs(ctx, s.workspaceBlobs, {
+          zoom: vp.zoom,
+          viewport: vp,
+          canvasWidth: w,
+          canvasHeight: h,
+          hoveredBlobId: hoveredPackageBlobId,
+          theme: s.theme,
+          maxLabels: 8,
+        });
+        ctx.restore();
+      }
+
+      if (s.semantic.opacityByLevel.package > 0) {
+        ctx.save();
+        ctx.globalAlpha = s.semantic.opacityByLevel.package;
+        drawPackageBlobs(ctx, s.packageBlobs, {
+          zoom: vp.zoom,
+          viewport: vp,
+          canvasWidth: w,
+          canvasHeight: h,
+          hoveredBlobId: hoveredPackageBlobId,
+          theme: s.theme,
+          maxLabels: 12,
+        });
+        drawNodes(
+          ctx,
+          fileNodes,
+          s.contentionScores,
+          s.heatMapEnabled,
+          null,
+          vp.zoom,
+          vp,
+          w,
+          h,
+          s.theme,
+        );
+        ctx.restore();
+      }
+
+      const fileCodeOpacity = Math.min(
+        1,
+        s.semantic.opacityByLevel.file + s.semantic.opacityByLevel.code,
       );
-      // Step 4: Edges.
-      drawEdges(ctx, s.graphEdges, livePositions, vp.zoom, vp, w, h, s.theme);
-      // Step 5: Arrow heads.
-      drawArrowHeads(ctx, s.graphEdges, livePositions, vp.zoom, vp, w, h, s.theme);
-      // Step 6: Nodes (heat-tint fill on demand).
-      drawNodes(
-        ctx,
-        fileNodes,
-        s.contentionScores,
-        s.heatMapEnabled,
-        s.hoveredNodeId,
-        vp.zoom,
-        vp,
-        w,
-        h,
-        s.theme,
-      );
-      // Step 6b: File-name labels at high zoom (UI-SPEC §Progressive Detail ≥ 4×).
-      drawFileLabels(ctx, fileNodes, vp.zoom, vp, w, h, s.theme);
+      if (s.semantic.opacityByLevel.file > 0 || s.semantic.opacityByLevel.code > 0) {
+        ctx.save();
+        ctx.globalAlpha = fileCodeOpacity;
+        drawFolderLabels(
+          ctx,
+          liveNodes,
+          vp.zoom,
+          s.settledAt,
+          s.parentChildMap,
+          s.dirsWithOwnFiles,
+          s.theme,
+        );
+        const fileLevelEdges = filterEdgesForSemanticLevel(s.graphEdges, 'file');
+        drawEdges(ctx, fileLevelEdges, livePositions, vp.zoom, vp, w, h, s.theme);
+        drawArrowHeads(ctx, fileLevelEdges, livePositions, vp.zoom, vp, w, h, s.theme);
+        drawNodes(
+          ctx,
+          fileNodes,
+          s.contentionScores,
+          s.heatMapEnabled,
+          s.hoveredNodeId,
+          vp.zoom,
+          vp,
+          w,
+          h,
+          s.theme,
+        );
+        drawFileLabels(ctx, fileNodes, vp.zoom, vp, w, h, s.theme);
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
 
       // Phase 12 (D-17, D-31 z-order steps 12-13): bridge diamonds + labels.
       // Drawn AFTER file nodes/labels so diamonds read as layered atop the
@@ -886,12 +983,28 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       const bridge = findBridgeAtWorld(world.x, world.y);
       if (bridge && bridge.commandName) {
         setHoveredBridgeId(bridge.commandName);
+        setHoveredPackageBlobId(null);
         setHoveredNodeId(null);
         onHoveredAgentChange?.(null, sx, sy);
         return;
       }
       setHoveredBridgeId(null);
 
+      const hitLevel = resolveSemanticZoom(viewport.zoom).hitLevel;
+      if (hitLevel === 'workspace' || hitLevel === 'package') {
+        const blob = findPackageBlobAtWorld(
+          hitLevel === 'workspace' ? workspaceBlobs : packageBlobs,
+          world.x,
+          world.y,
+          viewport.zoom,
+        );
+        setHoveredPackageBlobId(blob?.id ?? null);
+        setHoveredNodeId(null);
+        onHoveredAgentChange?.(null, sx, sy);
+        return;
+      }
+
+      setHoveredPackageBlobId(null);
       const found = quadtreeRef.current?.find(
         world.x,
         world.y,
@@ -907,6 +1020,8 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       onHoveredAgentChange,
       quadtreeRef,
       findBridgeAtWorld,
+      workspaceBlobs,
+      packageBlobs,
     ],
   );
 
@@ -923,9 +1038,26 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       const bridge = findBridgeAtWorld(world.x, world.y);
       if (bridge && bridge.commandName) {
         useRadarStore.getState().selectBridge(bridge.commandName);
+        return;
+      }
+      const hitLevel = resolveSemanticZoom(viewport.zoom).hitLevel;
+      if (hitLevel === 'workspace' || hitLevel === 'package') {
+        const blob = findPackageBlobAtWorld(
+          hitLevel === 'workspace' ? workspaceBlobs : packageBlobs,
+          world.x,
+          world.y,
+          viewport.zoom,
+        );
+        if (!blob) return;
+        const nextZoom = Math.max(viewport.zoom, 2);
+        setViewport({
+          zoom: nextZoom,
+          panX: canvasSize.width / 2 - blob.centroid.x * nextZoom,
+          panY: canvasSize.height / 2 - blob.centroid.y * nextZoom,
+        });
       }
     },
-    [screenToWorld, findBridgeAtWorld],
+    [screenToWorld, findBridgeAtWorld, viewport.zoom, workspaceBlobs, packageBlobs, setViewport, canvasSize],
   );
 
   // Phase 12 (UI-SPEC §Keyboard) — Escape clears the selected bridge.
@@ -1097,8 +1229,13 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       )}
 
       {/* Zoom indicator */}
-      <div className="absolute bottom-3 left-3 font-mono text-[10px] text-on-surface-variant/50 select-none">
-        {viewport.zoom.toFixed(1)}x
+      <div className="absolute bottom-3 left-3 flex items-center gap-2 select-none">
+        <span className="font-mono text-[10px] text-on-surface-variant/50">
+          {viewport.zoom.toFixed(1)}x
+        </span>
+        <span className="font-headline text-[10px] font-semibold tracking-[0.12em] text-primary">
+          {semanticLabel}
+        </span>
       </div>
       {/* Heat map toggle */}
       <button
