@@ -15,7 +15,9 @@ import {
   drawEdges,
   drawArrowHeads,
   drawNodes,
+  drawFileLabels,
   drawSelectedNode,
+  filterEdgesForSemanticLevel,
   heatColor,
   isInViewport,
   collapseSingleChildChain,
@@ -281,6 +283,30 @@ describe('GraphRenderer pure functions — Plan 04', () => {
     });
   });
 
+  describe('filterEdgesForSemanticLevel (Phase 13 semantic edge visibility)', () => {
+    it('keeps only IPC bridge edges at workspace/package levels', () => {
+      const edges: GraphEdge[] = [
+        { source: 'a', target: 'b', kind: 'import' },
+        { source: 'web', target: 'bridge:ping', kind: 'invokes' },
+        { source: 'bridge:ping', target: 'src-tauri/ping.rs', kind: 'handles' },
+      ];
+
+      expect(filterEdgesForSemanticLevel(edges, 'workspace')).toEqual([edges[1], edges[2]]);
+      expect(filterEdgesForSemanticLevel(edges, 'package')).toEqual([edges[1], edges[2]]);
+    });
+
+    it('keeps all edges at file/code levels', () => {
+      const edges: GraphEdge[] = [
+        { source: 'a', target: 'b', kind: 'import' },
+        { source: 'web', target: 'bridge:ping', kind: 'invokes' },
+        { source: 'bridge:ping', target: 'src-tauri/ping.rs', kind: 'handles' },
+      ];
+
+      expect(filterEdgesForSemanticLevel(edges, 'file')).toEqual(edges);
+      expect(filterEdgesForSemanticLevel(edges, 'code')).toEqual(edges);
+    });
+  });
+
   describe('drawArrowHeads (UI-SPEC §Sizing)', () => {
     beforeEach(() => vi.clearAllMocks());
     it('places the apex 5px (world) inset from the target center (Test 5)', () => {
@@ -347,6 +373,16 @@ describe('GraphRenderer pure functions — Plan 04', () => {
       drawNodes(ctx, nodes, new Map(), false, null, 1, VIEWPORT, CANVAS_W, CANVAS_H);
       const arcs = (ctx as any)._calls.filter((c: any) => c.fn === 'arc');
       expect(arcs.length).toBe(0);
+    });
+  });
+
+  describe('drawFileLabels (Phase 13 FILE level)', () => {
+    it('renders file labels at zoom 2', () => {
+      const ctx = createMockCtx();
+      const nodes: GraphNode[] = [{ id: 'src/views/Radar/GraphRenderer.ts', dirKey: 'src/views/Radar', dirDepth: 3, x: 10, y: 10 }];
+      drawFileLabels(ctx, nodes, 2, { ...VIEWPORT, zoom: 2 }, CANVAS_W, CANVAS_H);
+      const texts = (ctx as any)._calls.filter((c: any) => c.fn === 'fillText');
+      expect(texts[0].args[0]).toBe('GraphRenderer.ts');
     });
   });
 
