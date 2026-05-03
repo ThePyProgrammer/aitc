@@ -109,7 +109,8 @@ export function drawPackageBlobs(
       ctx.save();
       ctx.fillStyle = isConflict ? CONFLICT_COLOR : theme.folderLabelColor;
       ctx.globalAlpha = isConflict ? 1 : 0.82;
-      ctx.font = `${blob.depth <= 1 ? 14 : 10 / zoom}px "Space Grotesk", sans-serif`;
+      const labelPx = blob.depth <= 1 ? 14 : 10;
+      ctx.font = `${labelPx / zoom}px "Space Grotesk", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(blob.label, blob.centroid.x, blob.centroid.y);
