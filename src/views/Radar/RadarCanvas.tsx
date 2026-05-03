@@ -66,6 +66,7 @@ import {
   derivePackageBlobs,
   selectWorkspaceBlobs,
   selectPackageBlobs,
+  type PackageBlob,
 } from './packageBlobs';
 import { drawPackageBlobs, findPackageBlobAtWorld } from './PackageBlobRenderer';
 
@@ -131,6 +132,60 @@ function drawConflictPulses(
  * from node center. Rendered regardless of zoom to keep conflicts visible
  * even at low zoom where the ring is tiny.
  */
+function interpolatePoint(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  t: number,
+): { x: number; y: number } {
+  const clamped = Math.max(0, Math.min(1, t));
+  return {
+    x: from.x + (to.x - from.x) * clamped,
+    y: from.y + (to.y - from.y) * clamped,
+  };
+}
+
+function semanticAgentPosition(
+  filePath: string,
+  exact: { x: number; y: number } | undefined,
+  blobs: PackageBlob[],
+  semantic: ReturnType<typeof resolveSemanticZoom>,
+): { x: number; y: number } | null {
+  if (!exact) return null;
+  const blob = blobs.find((b) => b.memberFileIds.includes(filePath));
+  if (!blob) return exact;
+  if (semantic.hitLevel === 'workspace' || semantic.hitLevel === 'package') {
+    if (semantic.opacityByLevel.file > 0) {
+      return interpolatePoint(blob.centroid, exact, semantic.opacityByLevel.file);
+    }
+    return blob.centroid;
+  }
+  return exact;
+}
+
+function applyAgentFanout(
+  dots: Array<{ agentId: string; x: number; y: number; lastEventTs: number; blobKey: string | null }>,
+  zoom: number,
+): Array<{ agentId: string; x: number; y: number; lastEventTs: number }> {
+  const groups = new Map<string, number[]>();
+  dots.forEach((dot, index) => {
+    if (!dot.blobKey) return;
+    const group = groups.get(dot.blobKey) ?? [];
+    group.push(index);
+    groups.set(dot.blobKey, group);
+  });
+  const out = dots.map(({ blobKey: _blobKey, ...dot }) => ({ ...dot }));
+  for (const indexes of groups.values()) {
+    if (indexes.length <= 1) continue;
+    const ring = 8 / Math.max(zoom, 0.1);
+    indexes.forEach((dotIndex, i) => {
+      const angle = (Math.PI * 2 * i) / indexes.length;
+      out[dotIndex].x += Math.cos(angle) * ring;
+      out[dotIndex].y += Math.sin(angle) * ring;
+    });
+  }
+  return out;
+}
+
 function drawConflictBadges(
   ctx: CanvasRenderingContext2D,
   conflictedPaths: Set<string>,
@@ -384,12 +439,12 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
   );
   const packageBlobModel = useMemo(
     () => derivePackageBlobs({
-      nodes: graphNodes,
+      nodes: Array.from(nodeById.values()),
       contentionScores,
       activeConflictPaths,
       activeAgentFiles,
     }),
-    [graphNodes, contentionScores, activeConflictPaths, activeAgentFiles],
+    [nodeById, contentionScores, activeConflictPaths, activeAgentFiles],
   );
   const workspaceBlobs = useMemo(
     () => selectWorkspaceBlobs(packageBlobModel),
@@ -887,13 +942,27 @@ export function RadarCanvas({ onHoveredAgentChange }: RadarCanvasProps) {
       drawCometTrails(ctx, s.activeTrails, livePositions, now, vp.zoom);
       // Step 11: agent dots + pulse rings (D-17). Snapshot the ref's map
       // into an array for the pure draw function.
-      const dots = Array.from(agentDotsRef.current.entries()).map(
-        ([agentId, st]) => ({
-          agentId,
-          x: st.x,
-          y: st.y,
-          lastEventTs: st.lastEventTs,
+      const activeSemanticBlobs = s.semantic.hitLevel === 'workspace' ? s.workspaceBlobs : s.packageBlobs;
+      const dots = applyAgentFanout(
+        Array.from(agentDotsRef.current.entries()).flatMap(([agentId, st]) => {
+          const filePath = lastAgentFileRef.current.get(agentId);
+          const exact = filePath ? livePositions.get(filePath) : { x: st.x, y: st.y };
+          const semanticPosition = filePath
+            ? semanticAgentPosition(filePath, exact, activeSemanticBlobs, s.semantic)
+            : exact;
+          if (!semanticPosition) return [];
+          const blob = filePath
+            ? activeSemanticBlobs.find((b) => b.memberFileIds.includes(filePath))
+            : null;
+          return [{
+            agentId,
+            x: semanticPosition.x,
+            y: semanticPosition.y,
+            lastEventTs: st.lastEventTs,
+            blobKey: blob?.id ?? null,
+          }];
         }),
+        vp.zoom,
       );
       drawAgentDots(ctx, dots, now, vp.zoom);
 
