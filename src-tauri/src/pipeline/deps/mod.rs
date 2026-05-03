@@ -21,6 +21,8 @@ pub mod extract;
 pub mod queries;
 pub mod resolve;
 
+pub use extract::SourceSignatureDto;
+
 /// T-07-C: per-file fan-out cap. Generous relative to realistic barrel files;
 /// primarily a safety net against pathological inputs. Plan 02 tuning.
 pub const MAX_EDGES_PER_NODE: usize = 200;
