@@ -45,18 +45,18 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Visualization
 
-- [ ] **VIZN-01**: User can view a 2D spatial radar plotting agents as dots on a file-tree-based codebase map
+- [x] **VIZN-01**: User can view a 2D spatial radar plotting agents as dots on a file-tree-based codebase map
 - [ ] **VIZN-02**: Radar shows agent trajectories (lead lines indicating which files an agent is approaching/recently touched)
 - [x] **VIZN-03**: File heat map overlay on radar shows contention intensity (color = number of agents touching a region)
-- [ ] **VIZN-04**: Radar renders performantly via Canvas 2D for codebases with 10k+ files
-- [ ] **VIZN-05**: Codebase map uses file tree structure (directories = regions, files = points) as spatial layout
+- [x] **VIZN-04**: Radar renders performantly via Canvas 2D for codebases with 10k+ files
+- [x] **VIZN-05**: Codebase map uses file tree structure (directories = regions, files = points) as spatial layout
 
 ### Design System
 
-- [ ] **DSGN-01**: App follows the Command Horizon design system — dark room aesthetic, phosphor greens, zero-radius corners, radar indicators
+- [x] **DSGN-01**: App follows the Command Horizon design system — dark room aesthetic, phosphor greens, zero-radius corners, radar indicators
 - [ ] **DSGN-02**: Typography uses Space Grotesk for headlines and monospace for data/agent IDs
 - [ ] **DSGN-03**: Status indicators use radar pulse animations (not simple circles)
-- [ ] **DSGN-04**: UI achieves "glanceability" — system health (green/amber/red) visible from a glance
+- [x] **DSGN-04**: UI achieves "glanceability" — system health (green/amber/red) visible from a glance
 
 ### Persistence & History
 
@@ -144,15 +144,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | COMM-04 | Phase 4 | Pending |
 | COMM-05 | Phase 4 | Pending |
 | COMM-06 | Phase 4 | Pending |
-| VIZN-01 | Phase 4 | Pending |
+| VIZN-01 | Phase 4 | Complete |
 | VIZN-02 | Phase 4 | Pending |
 | VIZN-03 | Phase 5 | Complete |
-| VIZN-04 | Phase 4 | Pending |
-| VIZN-05 | Phase 4 | Pending |
-| DSGN-01 | Phase 1 | Pending |
+| VIZN-04 | Phase 4 | Complete |
+| VIZN-05 | Phase 4 | Complete |
+| DSGN-01 | Phase 1 | Complete |
 | DSGN-02 | Phase 1 | Pending |
 | DSGN-03 | Phase 1 | Pending |
-| DSGN-04 | Phase 1 | Pending |
+| DSGN-04 | Phase 1 | Complete |
 | HIST-01 | Phase 5 | Complete |
 | HIST-02 | Phase 5 | Complete |
 | HIST-03 | Phase 5 | Complete |
