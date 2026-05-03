@@ -10,7 +10,7 @@ if (typeof globalThis.Path2D === 'undefined') {
 }
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type {
   GraphNode,
   GraphEdge,
@@ -141,6 +141,25 @@ const mockLivePositions = {
   },
 };
 const mockIsSimulating = { current: false };
+const mockCanvasViewport = { current: { zoom: 1, panX: 400, panY: 300 } as Viewport };
+
+vi.mock('../../../hooks/useCanvasZoomPan', () => ({
+  useCanvasZoomPan: () => ({
+    viewport: mockCanvasViewport.current,
+    setViewport: vi.fn(),
+    handlers: {
+      onWheel: vi.fn(),
+      onMouseDown: vi.fn(),
+      onMouseMove: vi.fn(),
+      onMouseUp: vi.fn(),
+    },
+    screenToWorld: (x: number, y: number) => ({
+      x: (x - mockCanvasViewport.current.panX) / mockCanvasViewport.current.zoom,
+      y: (y - mockCanvasViewport.current.panY) / mockCanvasViewport.current.zoom,
+    }),
+  }),
+}));
+
 vi.mock('../../../hooks/useGraphLayout', () => {
   return {
     useGraphLayout: () => ({
@@ -153,6 +172,15 @@ vi.mock('../../../hooks/useGraphLayout', () => {
     }),
   };
 });
+
+vi.mock('../../../bindings', () => ({
+  commands: {
+    getSourceSnippet: vi.fn(async () => ({
+      status: 'ok',
+      data: { path: 'src/code.ts', startLine: 1, lines: ['export const code = true'] },
+    })),
+  },
+}));
 
 // Mock pipelineStore — the RadarCanvas reads `events`. Tests override
 // mockPipelineState.events before rendering.
@@ -210,6 +238,7 @@ const mockRadarState = {
   fetchGraph: vi.fn(),
   setViewport: vi.fn(),
   toggleHeatMap: vi.fn(),
+  selectBridge: vi.fn(),
   pushTrail: vi.fn((t: ActiveTrail) => {
     mockRadarState.activeTrails = [...mockRadarState.activeTrails, t];
   }),
@@ -277,7 +306,9 @@ describe('RadarCanvas (graph mode) — Plan 04', () => {
     mockRadarState.heatMapEnabled = false;
     mockRadarState.contentionScores = new Map();
     mockRadarState.viewport = { zoom: 1, panX: 400, panY: 300 };
+    mockCanvasViewport.current = { zoom: 1, panX: 400, panY: 300 };
     mockRadarState.activeTrails = [];
+    mockRadarState.selectBridge.mockClear();
     mockPipelineState.events = [];
     mockAgentState.agents = [];
     mockConflictState.alerts = [];
@@ -508,8 +539,8 @@ describe('RadarCanvas (graph mode) — Plan 04', () => {
       left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600, x: 0, y: 0, toJSON: () => ({}),
     } as DOMRect);
 
-    const { container } = render(<RadarCanvas />);
-    container.querySelector('canvas')!.dispatchEvent(new WheelEvent('wheel', { deltaY: -690, clientX: 400, clientY: 300, bubbles: true, cancelable: true }));
+    mockCanvasViewport.current = { zoom: 1.95, panX: 400, panY: 300 };
+    render(<RadarCanvas />);
     await new Promise((r) => setTimeout(r, 80));
     HTMLCanvasElement.prototype.getBoundingClientRect = original;
 
@@ -619,5 +650,32 @@ describe('RadarCanvas (graph mode) — Plan 04', () => {
 
     const strokes = shim.lastCtx.current!._assignments.strokeStyle ?? [];
     expect(strokes.some((s) => s === '#ff7351')).toBe(false);
+  });
+
+  it('renders CodePreviewOverlay at CODE zoom and clears expanded snippets before bridge selection on Escape', async () => {
+    mockRadarState.viewport = { zoom: 4.2, panX: 400, panY: 300 };
+    mockCanvasViewport.current = { zoom: 4.2, panX: 400, panY: 300 };
+    mockRadarState.graphNodes = [
+      {
+        id: 'src/code.ts',
+        dirKey: 'src',
+        dirDepth: 1,
+        kind: 'file',
+        x: 0,
+        y: 0,
+        signatures: ['export function code(): void'],
+      },
+    ];
+    mockRadarState.settledAt = Date.now();
+
+    const { getByText, queryByText } = render(<RadarCanvas />);
+    expect(getByText('export function code(): void')).toBeTruthy();
+
+    fireEvent.click(getByText('EXPAND_SNIPPET'));
+    expect(await screen.findByText('export const code = true')).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(queryByText('export const code = true')).toBeNull();
+    expect(mockRadarState.selectBridge).not.toHaveBeenCalled();
   });
 });
