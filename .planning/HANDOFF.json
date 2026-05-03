@@ -1,0 +1,38 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-05-03T03:27:11.916Z",
+  "phase": "13",
+  "phase_name": "implement-4-level-semantic-zoom-workspace-package-blobs-only",
+  "phase_dir": ".planning/phases/13-implement-4-level-semantic-zoom-workspace-package-blobs-only",
+  "plan": 6,
+  "task": "phase-closure",
+  "total_tasks": 6,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": "13-01", "name": "Wave 0 semantic zoom test scaffold", "status": "done", "summary": "13-01-SUMMARY.md"},
+    {"id": "13-02", "name": "Semantic zoom helpers and package blobs", "status": "done", "summary": "13-02-SUMMARY.md"},
+    {"id": "13-03", "name": "RadarCanvas semantic orchestration", "status": "done", "summary": "13-03-SUMMARY.md"},
+    {"id": "13-04", "name": "Source signature metadata and snippets", "status": "done", "summary": "13-04-SUMMARY.md"},
+    {"id": "13-05", "name": "CODE-level signature cards", "status": "done", "summary": "13-05-SUMMARY.md"},
+    {"id": "13-06", "name": "Final validation and human UAT checkpoint", "status": "done", "summary": "13-06-SUMMARY.md", "checkpoint": "13-06-CHECKPOINT.md", "human_response": "approved"}
+  ],
+  "remaining_tasks": [
+    {"id": "closure-1", "name": "Finish required advisory code review gate", "status": "not_started"},
+    {"id": "closure-2", "name": "Run verifier and create 13-VERIFICATION.md", "status": "not_started"},
+    {"id": "closure-3", "name": "Complete Phase 13 roadmap/state/requirements updates", "status": "not_started"},
+    {"id": "closure-4", "name": "Clean or document executor worktrees", "status": "not_started"}
+  ],
+  "blockers": [],
+  "human_actions_pending": [],
+  "decisions": [
+    {"decision": "User approved Phase 13 UAT", "rationale": "User said: 'i think I'm fine with what you're doing, just approved'", "phase": "13"},
+    {"decision": "Pause at required code review closure gate", "rationale": "Context reached critical budget after post-approval validation; GSD code review was enabled and depth resolved to standard", "phase": "13"}
+  ],
+  "uncommitted_files": [
+    ".planning/STATE.md",
+    ".planning/HANDOFF.json",
+    ".planning/phases/13-implement-4-level-semantic-zoom-workspace-package-blobs-only/.continue-here.md"
+  ],
+  "next_action": "Resume with the gsd-code-review workflow for Phase 13 at standard depth, produce 13-REVIEW.md, then continue verifier and phase.complete closure.",
+  "context_notes": "All six Phase 13 plans are implemented and committed on branch gsd/phase-13-semantic-zoom. Post-approval validation passed: Phase 13 targeted Vitest 78 tests, npm run build, cargo pipeline::deps 24 tests, cargo pipeline::commands 14 tests. Only .planning/STATE.md was dirty before pause; do not discard it without reviewing because it was modified by earlier state.begin-phase/pause bookkeeping. Several .claude executor worktrees remain locked; their commits have been merged/cherry-picked already."
+}
