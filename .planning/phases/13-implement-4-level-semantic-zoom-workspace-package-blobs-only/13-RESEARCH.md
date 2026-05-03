@@ -351,22 +351,19 @@ pub const MAX_PARSE_DURATION: Duration = Duration::from_millis(500);
 | A1 | Drawing opacity and hit-testing are often implemented separately, causing duplicate target bugs unless unified. | Common Pitfalls | Planner may under-test crossfade hit dominance. |
 | A2 | Function/class/export extraction invites deeper semantic parsing than the UI needs. | Common Pitfalls | Planner may over-scope backend work if not constrained by D-11. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should signature extraction be in Phase 13 or should Phase 13 ship path metadata first?**
-   - What we know: The context allows existing graph/source-scan data first and path metadata fallback; it forbids a full new indexer unless cheap. [VERIFIED: /home/prannayag/pragnition/htx/aitc/.planning/phases/13-implement-4-level-semantic-zoom-workspace-package-blobs-only/13-CONTEXT.md]
-   - What's unclear: No existing exported-symbol scanner was verified, only import extraction infrastructure. [VERIFIED: /home/prannayag/pragnition/htx/aitc/src-tauri/src/pipeline/deps/extract.rs]
-   - Recommendation: Plan a small optional backend wave only if it reuses existing tree-sitter guardrails; otherwise ship `SIGNATURES_UNAVAILABLE`/`PATH_METADATA` fallback first. [VERIFIED: /home/prannayag/pragnition/htx/aitc/.planning/phases/13-implement-4-level-semantic-zoom-workspace-package-blobs-only/13-UI-SPEC.md]
+   - **Resolution:** Include a tightly-scoped backend signature/snippet path in Phase 13. Signature extraction remains best-effort and guarded by the existing tree-sitter file-size and parse-time protections, while `PATH_METADATA` / `SIGNATURES_UNAVAILABLE` remains the fallback when signatures are absent. D-12 additionally requires raw source snippets, so Phase 13 must include a repo-root guarded, read-only raw snippet command capped at 12 lines for `EXPAND_SNIPPET`; path metadata alone is not sufficient for expanded cards.
+   - **Constraints:** No full language indexer, no LSP dependency, no persistent symbol DB, no repository edit/write action. Snippet reads must canonicalize under the watched repo root and reject arbitrary absolute paths/`..` traversal per T-13-01.
 
 2. **Should package blobs reuse `hullCache` entries or derive a separate blob model?**
-   - What we know: `hullCache` already groups by `dirKey`, excludes bridges, and computes centroids, but it also contains obsolete three-tier zoom build logic. [VERIFIED: /home/prannayag/pragnition/htx/aitc/src/views/Radar/hullCache.ts]
-   - What's unclear: Reusing `hullCache` directly may couple new package semantics to old hull shape assumptions. [VERIFIED: /home/prannayag/pragnition/htx/aitc/src/views/Radar/hullCache.ts]
-   - Recommendation: Derive `packageBlobs` separately but reuse shared low-level grouping/centroid utilities if extraction is cheap. [VERIFIED: /home/prannayag/pragnition/htx/aitc/src/views/Radar/hullCache.ts]
+   - **Resolution:** Derive a separate `packageBlobs` model. It may share low-level geometry/cache discipline from `hullCache` and must preserve bridge exclusion, but it must not reuse obsolete three-tier hull visibility gates as the semantic representation source of truth. Package blobs need their own file-count sizing, heat/activity aggregation, conflict badges, active-agent counts, label importance, member file ids, and centroid data.
+   - **Constraints:** Keep package hierarchy, blob membership, label importance, and aggregate heat out of the rAF loop; cache or memoize from graph/topology/contention/conflict/agent inputs.
 
 3. **How should package-click focus/zoom be implemented without mutating layout?**
-   - What we know: UI spec says package click focuses/zooms toward centroid and must not mutate graph layout or pin nodes. [VERIFIED: /home/prannayag/pragnition/htx/aitc/.planning/phases/13-implement-4-level-semantic-zoom-workspace-package-blobs-only/13-UI-SPEC.md]
-   - What's unclear: Existing click handler currently only selects bridges; file click is not implemented as a plain click. [VERIFIED: /home/prannayag/pragnition/htx/aitc/src/views/Radar/RadarCanvas.tsx]
-   - Recommendation: Plan package click as viewport transition only through `setViewport`, with tests that `pinNode` is not called. [VERIFIED: /home/prannayag/pragnition/htx/aitc/src/stores/radarStore.ts]
+   - **Resolution:** Package click focuses the selected blob through a viewport target transition using existing pan/zoom state (`setViewport` or equivalent). It must not mutate graph layout, pin nodes, alter worker physics, change minimap semantics, or write back package positions. The target is computed from the selected blob centroid and current canvas dimensions, with existing wheel/pan/minimap controls preserved.
+   - **Constraints:** Tests should assert package-click does not call `pinNode` or any layout mutation path.
 
 ## Environment Availability
 
