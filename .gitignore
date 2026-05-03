@@ -30,4 +30,5 @@ src-tauri/target
 # Local tool dumping grounds
 .superpowers/
 outputs/
+.worktrees/
 
