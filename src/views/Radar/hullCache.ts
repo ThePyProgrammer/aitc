@@ -22,13 +22,11 @@ import { polygonHull, polygonCentroid } from 'd3-polygon';
 import { line, curveCatmullRomClosed } from 'd3-shape';
 import type { GraphNode } from '../../stores/radarStore';
 
-// Phase 11.1 — duplicate of GraphRenderer.ts::shouldRenderHullAtZoom to avoid
-// a circular import (hullCache → GraphRenderer → hullCache). The three-tier
-// zoom gate is small and stable; if it changes, update both copies. The
-// filter MUST run inside the cache build — without it, we pay convex-hull +
-// Catmull-Rom + Path2D construction for every deep-nested directory even
-// though drawFolderHulls skips them at paint time, which dominated the
-// per-rebuild cost on user hardware.
+// Phase 13: hullCache remains a low-level geometry cache for legacy folder
+// label/hull consumers only. The semantic zoom source of truth now lives in
+// semanticZoom.ts, while packageBlobs.ts owns workspace/package aggregation.
+// Keep this build gate local so legacy hull callers avoid constructing deep
+// hull geometry they will not draw; do not treat it as the semantic contract.
 function shouldBuildHullAtZoom(dirDepth: number, zoom: number): boolean {
   if (zoom < 0.6) return dirDepth === 0;
   if (zoom < 2) return dirDepth <= 2;
