@@ -137,7 +137,9 @@ function drawConflictPulses(
  * from node center. Rendered regardless of zoom to keep conflicts visible
  * even at low zoom where the ring is tiny.
  */
-function interpolatePoint(
+export const PACKAGE_FANOUT_RING_PX = 8;
+
+export function interpolatePoint(
   from: { x: number; y: number },
   to: { x: number; y: number },
   t: number,
@@ -181,7 +183,7 @@ function applyAgentFanout(
   const out = dots.map(({ blobKey: _blobKey, ...dot }) => ({ ...dot }));
   for (const indexes of groups.values()) {
     if (indexes.length <= 1) continue;
-    const ring = 8 / Math.max(zoom, 0.1);
+    const ring = PACKAGE_FANOUT_RING_PX / Math.max(zoom, 0.1);
     indexes.forEach((dotIndex, i) => {
       const angle = (Math.PI * 2 * i) / indexes.length;
       out[dotIndex].x += Math.cos(angle) * ring;

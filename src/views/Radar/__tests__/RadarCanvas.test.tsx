@@ -292,7 +292,7 @@ vi.mock('lucide-react', () => ({
 }));
 
 // Import after mocks are in place.
-import { RadarCanvas } from '../RadarCanvas';
+import { PACKAGE_FANOUT_RING_PX, RadarCanvas, interpolatePoint } from '../RadarCanvas';
 
 describe('RadarCanvas (graph mode) — Plan 04', () => {
   let shim: ReturnType<typeof installCanvasShim>;
@@ -517,14 +517,20 @@ describe('RadarCanvas (graph mode) — Plan 04', () => {
     })).toBe(true);
   });
 
-  it('implements package fan-out and package-to-file interpolation helpers (D-14)', async () => {
-    const source = await import('node:fs/promises').then((fs) => fs.readFile(
-      '/home/prannayag/pragnition/htx/aitc/.claude/worktrees/agent-a0a83d2d8da1d7853/src/views/Radar/RadarCanvas.tsx',
-      'utf8',
-    ));
-
-    expect(source).toContain('const ring = 8 / Math.max(zoom, 0.1)');
-    expect(source).toContain('interpolatePoint(blob.centroid, exact, semantic.opacityByLevel.file)');
+  it('implements package fan-out and package-to-file interpolation helpers (D-14)', () => {
+    expect(PACKAGE_FANOUT_RING_PX).toBe(8);
+    expect(interpolatePoint({ x: 10, y: 20 }, { x: 30, y: 60 }, 0.25)).toEqual({
+      x: 15,
+      y: 30,
+    });
+    expect(interpolatePoint({ x: 10, y: 20 }, { x: 30, y: 60 }, -1)).toEqual({
+      x: 10,
+      y: 20,
+    });
+    expect(interpolatePoint({ x: 10, y: 20 }, { x: 30, y: 60 }, 2)).toEqual({
+      x: 30,
+      y: 60,
+    });
   });
 
   it('draws file edges during package-to-file crossfade while package remains hit-dominant (D-02/D-03)', async () => {
