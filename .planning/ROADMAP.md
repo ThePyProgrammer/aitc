@@ -271,11 +271,21 @@ Plans:
 **Plans:** 6 plans
 
 Plans:
+
+**Wave 0**
 - [ ] 13-01-PLAN.md — Wave 0 Nyquist test scaffold for semantic zoom, package blobs, code preview, and renderer regressions
+
+**Wave 1 *(blocked on Wave 0 completion)***
 - [ ] 13-02-PLAN.md — Pure semantic zoom helpers, package blob derivation/rendering, FILE-level labels, and semantic edge filtering
+
+**Wave 2 *(blocked on Wave 1 completion)***
 - [ ] 13-03-PLAN.md — RadarCanvas workspace/package/file representation orchestration, semantic HUD, and dominant hit-testing
 - [ ] 13-04-PLAN.md — Guarded best-effort source signature extraction, Tauri binding, and GraphNode metadata merge
+
+**Wave 3 *(blocked on Wave 2 completion)***
 - [ ] 13-05-PLAN.md — CODE-level capped signature cards with fallback copy and RadarCanvas overlay integration
+
+**Wave 4 *(blocked on Wave 3 completion)***
 - [ ] 13-06-PLAN.md — Final automated validation and blocking semantic zoom human UAT checkpoint
 
 ### Phase 14: Multi-layer offscreen canvas rendering — separate static graph (hulls, edges, nodes) from animated agent layer (trails, dots, pulses). Cache layers 1-5 to offscreen canvases, composite per frame. Only the agent layer (6) and DOM overlay (7) redraw at 60fps
