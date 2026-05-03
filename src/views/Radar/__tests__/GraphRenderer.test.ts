@@ -16,6 +16,8 @@ import {
   drawArrowHeads,
   drawNodes,
   drawSelectedNode,
+  drawFileLabels,
+  filterEdgesForSemanticLevel,
   heatColor,
   isInViewport,
   collapseSingleChildChain,
@@ -364,6 +366,40 @@ describe('GraphRenderer pure functions — Plan 04', () => {
       const ctx = createMockCtx();
       drawSelectedNode(ctx, undefined, '#8eff71', 1);
       expect((ctx as any)._calls.length).toBe(0);
+    });
+  });
+
+  describe('Phase 13 semantic file-level renderer contracts', () => {
+    beforeEach(() => vi.clearAllMocks());
+
+    it('drawFileLabels renders file labels at zoom 2 instead of waiting for code zoom 4', () => {
+      const ctx = createMockCtx();
+      const nodes: GraphNode[] = [
+        { id: 'src/views/Radar/RadarCanvas.tsx', dirKey: 'src/views/Radar', dirDepth: 3, x: 10, y: 10 },
+      ];
+      drawFileLabels(ctx, nodes, 2, { zoom: 2, panX: 0, panY: 0 }, CANVAS_W, CANVAS_H);
+      const texts = (ctx as any)._calls.filter((c: any) => c.fn === 'fillText');
+      expect(texts.map((c: any) => c.args[0])).toContain('RadarCanvas.tsx');
+    });
+
+    it('filterEdgesForSemanticLevel keeps only IPC invokes/handles at workspace and package levels', () => {
+      const edges: GraphEdge[] = [
+        { source: 'src/App.tsx', target: 'src/main.tsx', kind: 'import' },
+        { source: 'src/App.tsx', target: 'bridge:get_tree_index', kind: 'invokes' },
+        { source: 'bridge:get_tree_index', target: 'src-tauri/src/lib.rs', kind: 'handles' },
+      ];
+      expect(filterEdgesForSemanticLevel(edges, 'workspace')).toEqual([edges[1], edges[2]]);
+      expect(filterEdgesForSemanticLevel(edges, 'package')).toEqual([edges[1], edges[2]]);
+    });
+
+    it('filterEdgesForSemanticLevel preserves import edges at file and code levels', () => {
+      const edges: GraphEdge[] = [
+        { source: 'src/App.tsx', target: 'src/main.tsx', kind: 'import' },
+        { source: 'src/App.tsx', target: 'bridge:get_tree_index', kind: 'invokes' },
+        { source: 'bridge:get_tree_index', target: 'src-tauri/src/lib.rs', kind: 'handles' },
+      ];
+      expect(filterEdgesForSemanticLevel(edges, 'file')).toEqual(edges);
+      expect(filterEdgesForSemanticLevel(edges, 'code')).toEqual(edges);
     });
   });
 
