@@ -19,6 +19,19 @@ import type {
 } from '../../../stores/radarStore';
 import type { FileEvent } from '../../../bindings';
 
+const packageBlobSpies = vi.hoisted(() => ({
+  derivePackageBlobs: vi.fn(),
+}));
+
+vi.mock('../packageBlobs', async () => {
+  const actual = await vi.importActual<typeof import('../packageBlobs')>('../packageBlobs');
+  packageBlobSpies.derivePackageBlobs.mockImplementation(actual.derivePackageBlobs);
+  return {
+    ...actual,
+    derivePackageBlobs: packageBlobSpies.derivePackageBlobs,
+  };
+});
+
 // jsdom has no ResizeObserver — inject a no-op shim before any component
 // mounts. The RadarCanvas observes its container size to drive HiDPI
 // rescaling; the test harness does not exercise resize behavior.
@@ -426,6 +439,85 @@ describe('RadarCanvas (graph mode) — Plan 04', () => {
     mockRadarState.graphNodes = nodes;
     const { getByText } = render(<RadarCanvas />);
     expect(getByText('INFO_DEGRADED')).toBeTruthy();
+  });
+
+  it('derives semantic package blobs outside repeated dirty frames (T-13-04)', async () => {
+    mockRadarState.graphNodes = [
+      { id: 'src/a.ts', dirKey: 'src', dirDepth: 1, x: 0, y: 0 },
+      { id: 'src/b.ts', dirKey: 'src', dirDepth: 1, x: 20, y: 0 },
+    ];
+    mockRadarState.settledAt = Date.now();
+    packageBlobSpies.derivePackageBlobs.mockClear();
+
+    render(<RadarCanvas />);
+    await new Promise((r) => setTimeout(r, 60));
+
+    expect(packageBlobSpies.derivePackageBlobs).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the semantic zoom HUD label beside the numeric zoom (D-04)', () => {
+    const { getByText } = render(<RadarCanvas />);
+
+    expect(getByText('1.0x')).toBeTruthy();
+    expect(getByText('PACKAGE')).toBeTruthy();
+  });
+
+  it('attaches agent dots to package centroids at package zoom (D-14)', async () => {
+    mockRadarState.graphNodes = [
+      { id: 'src/a.ts', dirKey: 'src', dirDepth: 1, x: 0, y: 0 },
+      { id: 'src/b.ts', dirKey: 'src', dirDepth: 1, x: 100, y: 0 },
+    ];
+    mockRadarState.settledAt = Date.now();
+    mockAgentState.agents = [{ id: 'agent-001', pid: 1234 }];
+    mockPipelineState.events = [{
+      path: 'src/a.ts',
+      kind: { kind: 'modify' },
+      timestampMs: 1_000,
+      attribution: { kind: 'pid', value: 1234 },
+    } as FileEvent];
+
+    render(<RadarCanvas />);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const arcs = shim.lastCtx.current!._calls.filter((c) => c.fn === 'arc');
+    expect(arcs.some((c) => {
+      const [x, y] = c.args as [number, number, ...unknown[]];
+      return Math.abs(x - 50) < 0.01 && Math.abs(y) < 0.01;
+    })).toBe(true);
+  });
+
+  it('implements package fan-out and package-to-file interpolation helpers (D-14)', async () => {
+    const source = await import('node:fs/promises').then((fs) => fs.readFile(
+      '/home/prannayag/pragnition/htx/aitc/.claude/worktrees/agent-a0a83d2d8da1d7853/src/views/Radar/RadarCanvas.tsx',
+      'utf8',
+    ));
+
+    expect(source).toContain('const ring = 8 / Math.max(zoom, 0.1)');
+    expect(source).toContain('interpolatePoint(blob.centroid, exact, semantic.opacityByLevel.file)');
+  });
+
+  it('draws file edges during package-to-file crossfade while package remains hit-dominant (D-02/D-03)', async () => {
+    mockRadarState.graphNodes = [
+      { id: 'src/a.ts', dirKey: 'src', dirDepth: 1, x: 0, y: 0 },
+      { id: 'src/b.ts', dirKey: 'src', dirDepth: 1, x: 100, y: 0 },
+    ];
+    mockRadarState.graphEdges = [{ source: 'src/a.ts', target: 'src/b.ts', kind: 'import' }];
+    mockRadarState.settledAt = Date.now();
+    const original = HTMLCanvasElement.prototype.getBoundingClientRect;
+    HTMLCanvasElement.prototype.getBoundingClientRect = () => ({
+      left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect);
+
+    const { container } = render(<RadarCanvas />);
+    container.querySelector('canvas')!.dispatchEvent(new WheelEvent('wheel', { deltaY: -690, clientX: 400, clientY: 300, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    HTMLCanvasElement.prototype.getBoundingClientRect = original;
+
+    const lineCalls = shim.lastCtx.current!._calls.filter((c) => c.fn === 'lineTo');
+    expect(lineCalls.some((c) => {
+      const [x, y] = c.args as [number, number];
+      return Math.abs(x - 100) < 0.01 && Math.abs(y) < 0.01;
+    })).toBe(true);
   });
 
   it('renders conflict pulse ring on contended nodes (D-22)', async () => {
