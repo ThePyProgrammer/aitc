@@ -483,9 +483,10 @@ export function drawFileLabels(
 ): void {
   if (zoom < FILE_LABEL_ZOOM_THRESHOLD) return;
   const fontSize = 10 / zoom;
+  const passAlpha = ctx.globalAlpha;
   ctx.font = `${fontSize}px "JetBrains Mono", monospace`;
   ctx.fillStyle = theme.fileLabelColor;
-  ctx.globalAlpha = 0.8;
+  ctx.globalAlpha = passAlpha * 0.8;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   for (const n of nodes) {
@@ -495,7 +496,7 @@ export function drawFileLabels(
     const basename = n.id.includes('/') ? n.id.slice(n.id.lastIndexOf('/') + 1) : n.id;
     ctx.fillText(basename, n.x, n.y + (NODE_RADIUS_DEFAULT + 3) / zoom);
   }
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = passAlpha;
   ctx.textAlign = 'start';
   ctx.textBaseline = 'alphabetic';
 }

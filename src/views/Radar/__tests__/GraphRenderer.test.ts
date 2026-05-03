@@ -424,6 +424,17 @@ describe('GraphRenderer pure functions — Plan 04', () => {
       const texts = (ctx as any)._calls.filter((c: any) => c.fn === 'fillText');
       expect(texts[0].args[0]).toBe('GraphRenderer.ts');
     });
+
+    it('dims labels without overwriting caller semantic pass alpha', () => {
+      const ctx = createMockCtx();
+      ctx.globalAlpha = 0.25;
+      const nodes: GraphNode[] = [{ id: 'src/views/Radar/GraphRenderer.ts', dirKey: 'src/views/Radar', dirDepth: 3, x: 10, y: 10 }];
+
+      drawFileLabels(ctx, nodes, 2, { ...VIEWPORT, zoom: 2 }, CANVAS_W, CANVAS_H);
+
+      expect(ctx._assignments.globalAlpha).toContain(0.2);
+      expect(ctx.globalAlpha).toBe(0.25);
+    });
   });
 
   describe('drawSelectedNode (UI-SPEC §Color)', () => {
