@@ -447,52 +447,52 @@ pub async fn get_dependency_graph(
 ) -> Result<Vec<crate::pipeline::deps::DependencyEdgeDto>, String> {
     use crate::pipeline::deps::{build_dependency_graph, DependencyEdgeDto};
     let guard = state.inner.lock().await;
-    match guard.as_ref() {
-        Some(active) => {
-            let repo_root = active.repo_root.clone();
-            let files: Vec<std::path::PathBuf> = active
-                .tree_index
-                .iter()
-                .filter(|(_, node)| !node.is_dir)
-                .map(|(path, _)| path.clone())
-                .collect();
-            let repo_root_for_build = repo_root.clone();
-            let result = tauri::async_runtime::spawn_blocking(move || {
-                build_dependency_graph(&repo_root_for_build, &files)
-            })
-            .await
-            .map_err(|e| format!("spawn_blocking join: {e}"))?;
-            if result.degraded {
-                tracing::warn!(
-                    edges = result.edges.len(),
-                    unresolved = result.unresolved_count,
-                    "dep_graph: returning degraded result (edge cap hit)"
-                );
-            }
-            // Convert internal edges (PathBuf) to DTO (repo-relative String).
-            let dto: Vec<DependencyEdgeDto> = result
-                .edges
-                .into_iter()
-                .filter_map(|e| {
-                    let from = e
-                        .from
-                        .strip_prefix(&repo_root)
-                        .ok()?
-                        .to_string_lossy()
-                        .replace('\\', "/");
-                    let to = e
-                        .to
-                        .strip_prefix(&repo_root)
-                        .ok()?
-                        .to_string_lossy()
-                        .replace('\\', "/");
-                    Some(DependencyEdgeDto { from, to, kind: e.kind })
-                })
-                .collect();
-            Ok(dto)
-        }
-        None => Ok(Vec::new()),
+    let Some(active) = guard.as_ref() else {
+        return Ok(Vec::new());
+    };
+    let repo_root = active.repo_root.clone();
+    let files: Vec<std::path::PathBuf> = active
+        .tree_index
+        .iter()
+        .filter(|(_, node)| !node.is_dir)
+        .map(|(path, _)| path.clone())
+        .collect();
+    drop(guard);
+
+    let repo_root_for_build = repo_root.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        build_dependency_graph(&repo_root_for_build, &files)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking join: {e}"))?;
+    if result.degraded {
+        tracing::warn!(
+            edges = result.edges.len(),
+            unresolved = result.unresolved_count,
+            "dep_graph: returning degraded result (edge cap hit)"
+        );
     }
+    // Convert internal edges (PathBuf) to DTO (repo-relative String).
+    let dto: Vec<DependencyEdgeDto> = result
+        .edges
+        .into_iter()
+        .filter_map(|e| {
+            let from = e
+                .from
+                .strip_prefix(&repo_root)
+                .ok()?
+                .to_string_lossy()
+                .replace('\\', "/");
+            let to = e
+                .to
+                .strip_prefix(&repo_root)
+                .ok()?
+                .to_string_lossy()
+                .replace('\\', "/");
+            Some(DependencyEdgeDto { from, to, kind: e.kind })
+        })
+        .collect();
+    Ok(dto)
 }
 
 /// Get best-effort source signatures for active watched source files.
