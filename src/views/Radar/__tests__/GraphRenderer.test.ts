@@ -12,6 +12,7 @@ if (typeof globalThis.Path2D === 'undefined') {
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   drawFolderHulls,
+  drawFolderLabels,
   drawEdges,
   drawArrowHeads,
   drawNodes,
@@ -249,6 +250,24 @@ describe('GraphRenderer pure functions — Plan 04', () => {
       // No arc calls because depth-3 hulls are skipped at zoom < 0.6
       const arcs = (ctx as any)._calls.filter((c: any) => c.fn === 'arc');
       expect(arcs.length).toBe(0);
+    });
+  });
+
+  describe('drawFolderLabels (Phase 13 semantic pass alpha)', () => {
+    it('dims non-top labels without overwriting caller semantic pass alpha', () => {
+      const ctx = createMockCtx();
+      ctx.globalAlpha = 0.25;
+      const nodes: GraphNode[] = [
+        { id: 'src/views/Radar/RadarCanvas.tsx', dirKey: 'src/views/Radar', dirDepth: 3, x: 10, y: 10 },
+        { id: 'src/views/Radar/GraphRenderer.ts', dirKey: 'src/views/Radar', dirDepth: 3, x: 20, y: 20 },
+      ];
+      const parentChildMap = new Map<string, Set<string>>([['src/views/Radar', new Set(['src/views/Radar'])]]);
+      const dirsWithOwnFiles = new Set<string>(['src/views/Radar']);
+
+      drawFolderLabels(ctx, nodes, 2, null, parentChildMap, dirsWithOwnFiles);
+
+      expect(ctx._assignments.globalAlpha).toContain(0.1675);
+      expect(ctx.globalAlpha).toBe(0.25);
     });
   });
 

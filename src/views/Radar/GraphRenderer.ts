@@ -222,12 +222,13 @@ export function drawFolderLabels(
     const label = collapseSingleChildChain(dirKey, dirsWithOwnFiles, parentChildMap);
     const isTop = entry.dirDepth <= 1;
     const fontSize = (isTop ? 12 : 10) / zoom;
+    const passAlpha = ctx.globalAlpha;
     ctx.font = `${isTop ? 'bold ' : ''}${fontSize}px "Space Grotesk", sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillStyle = theme.folderLabelColor;
-    if (!isTop) ctx.globalAlpha = 0.67;
+    if (!isTop) ctx.globalAlpha = passAlpha * 0.67;
     ctx.fillText(label.toUpperCase(), entry.cx, entry.cy - 6 / zoom);
-    if (!isTop) ctx.globalAlpha = 1;
+    if (!isTop) ctx.globalAlpha = passAlpha;
   }
 }
 
